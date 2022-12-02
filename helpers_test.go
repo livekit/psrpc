@@ -12,7 +12,7 @@ import (
 func TestSerialization(t *testing.T) {
 	msg := &internal.Request{
 		RequestId: "reid",
-		SenderId:  "seid",
+		ClientId:  "clid",
 		SentAt:    time.Now().UnixNano(),
 		Multi:     true,
 	}
@@ -24,7 +24,7 @@ func TestSerialization(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, m.(*internal.Request).RequestId, msg.RequestId)
-	require.Equal(t, m.(*internal.Request).SenderId, msg.SenderId)
+	require.Equal(t, m.(*internal.Request).ClientId, msg.ClientId)
 	require.Equal(t, m.(*internal.Request).SentAt, msg.SentAt)
 	require.Equal(t, m.(*internal.Request).Multi, msg.Multi)
 }

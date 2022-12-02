@@ -57,6 +57,7 @@ func toNatsSubscription(sub *nats.Subscription, msgChan chan *nats.Msg) Subscrip
 
 			p, err := deserialize(msg.Data)
 			if err != nil {
+				// TODO: logger
 				fmt.Println(err)
 			}
 			dataChan <- p

@@ -86,7 +86,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 	requestID := newRequestID()
 	req := &internal.Request{
 		RequestId: requestID,
-		SenderId:  c.id,
+		ClientId:  c.id,
 		SentAt:    time.Now().UnixNano(),
 		Multi:     false,
 		Request:   v,
@@ -118,7 +118,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		if claim.Available {
 			if err = c.Publish(ctx, "claims", &internal.ClaimResponse{
 				RequestId: requestID,
-				HandlerId: claim.HandlerId,
+				ServerId:  claim.ServerId,
 			}); err != nil {
 				return nil, err
 			}
@@ -149,7 +149,7 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 	requestID := newRequestID()
 	req := &internal.Request{
 		RequestId: requestID,
-		SenderId:  c.id,
+		ClientId:  c.id,
 		SentAt:    time.Now().UnixNano(),
 		Multi:     true,
 		Request:   v,

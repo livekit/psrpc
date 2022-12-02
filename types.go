@@ -15,7 +15,8 @@ type RPCClient interface {
 }
 
 type RPCServer interface {
-	RegisterHandler(rpc string, handler HandlerFunc) error
+	RegisterHandler(rpc string, handlerFunc HandlerFunc) error
+	DeregisterHandler(rpc string) error
 	Publish(ctx context.Context, channel string, message proto.Message) error
 	Close()
 }

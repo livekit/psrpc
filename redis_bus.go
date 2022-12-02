@@ -45,6 +45,7 @@ func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscr
 
 			p, err := deserialize([]byte(msg.Payload))
 			if err != nil {
+				// TODO: logger
 				fmt.Println(err)
 				continue
 			}
@@ -76,6 +77,7 @@ func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (S
 			if acquired {
 				p, err := deserialize([]byte(msg.Payload))
 				if err != nil {
+					// TODO: logger
 					fmt.Println(err)
 					continue
 				}

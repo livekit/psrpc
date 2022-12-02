@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
@@ -19,9 +18,14 @@ type rpcServer struct {
 
 	id       string
 	mu       sync.RWMutex
-	handlers map[string]HandlerFunc
+	handlers map[string]*handler
 	claims   map[string]chan *internal.ClaimResponse
 	closed   chan struct{}
+}
+
+type handler struct {
+	fn  HandlerFunc
+	sub Subscription
 }
 
 func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
@@ -29,11 +33,12 @@ func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer
 		MessageBus: bus,
 		rpcOpts:    getOpts(opts...),
 		id:         serverID,
-		handlers:   make(map[string]HandlerFunc),
+		handlers:   make(map[string]*handler),
 		claims:     make(map[string]chan *internal.ClaimResponse),
 		closed:     make(chan struct{}),
 	}
 
+	// TODO: separate claims channel per rpc
 	claims, err := s.Subscribe(context.Background(), "claims")
 	if err != nil {
 		return nil, err
@@ -62,17 +67,25 @@ func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer
 	return s, nil
 }
 
-func (s *rpcServer) RegisterHandler(rpc string, handler HandlerFunc) error {
-	s.mu.Lock()
-	s.handlers[rpc] = handler
-	s.mu.Unlock()
-
+func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc) error {
 	sub, err := s.Subscribe(context.Background(), rpc)
 	if err != nil {
 		return err
 	}
-	reqChan := sub.Channel()
 
+	s.mu.Lock()
+	// close previous handler if exists
+	if err = s.closeHandlerLocked(rpc); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.handlers[rpc] = &handler{
+		fn:  handlerFunc,
+		sub: sub,
+	}
+	s.mu.Unlock()
+
+	reqChan := sub.Channel()
 	go func() {
 		for {
 			select {
@@ -84,6 +97,7 @@ func (s *rpcServer) RegisterHandler(rpc string, handler HandlerFunc) error {
 				go func(req *internal.Request) {
 					err := s.handleRequest(rpc, req)
 					if err != nil {
+						// TODO: logger
 						fmt.Println(err)
 					}
 				}(p.(*internal.Request))
@@ -94,11 +108,26 @@ func (s *rpcServer) RegisterHandler(rpc string, handler HandlerFunc) error {
 	return nil
 }
 
+func (s *rpcServer) DeregisterHandler(rpc string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.closeHandlerLocked(rpc)
+}
+
+func (s *rpcServer) closeHandlerLocked(rpc string) error {
+	h, ok := s.handlers[rpc]
+	if ok {
+		delete(s.handlers, rpc)
+		return h.sub.Close()
+	}
+	return nil
+}
+
 func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 	s.mu.RLock()
-	handler, ok := s.handlers[rpc]
+	h, ok := s.handlers[rpc]
 	s.mu.RUnlock()
-
 	if !ok {
 		return errors.New("handler not found")
 	}
@@ -113,18 +142,19 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 		}
 	}
 
-	request, err := anypb.UnmarshalNew(req.Request, proto.UnmarshalOptions{})
+	request, err := req.Request.UnmarshalNew()
 	if err != nil {
 		return err
 	}
 
 	res := &internal.Response{
 		RequestId: req.RequestId,
-		HandlerId: s.id,
+		ServerId:  s.id,
 		SentAt:    time.Now().UnixNano(),
 	}
 
-	response, err := handler(ctx, request)
+	// call handler function
+	response, err := h.fn(ctx, request)
 	if err != nil {
 		res.Error = err.Error()
 	} else {
@@ -135,7 +165,7 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 		res.Response = v
 	}
 
-	return s.Publish(ctx, req.SenderId, res)
+	return s.Publish(ctx, req.ClientId, res)
 }
 
 func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request) (bool, error) {
@@ -145,9 +175,10 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request)
 	s.claims[request.RequestId] = claimResponseChan
 	s.mu.Unlock()
 
-	err := s.Publish(ctx, "claims_"+request.SenderId, &internal.ClaimRequest{
+	// TODO: optional availability function with RegisterHandler
+	err := s.Publish(ctx, "claims_"+request.ClientId, &internal.ClaimRequest{
 		RequestId: request.RequestId,
-		HandlerId: s.id,
+		ServerId:  s.id,
 		Available: true,
 	})
 	if err != nil {
@@ -162,7 +193,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request)
 
 	select {
 	case claim := <-claimResponseChan:
-		if claim.HandlerId == s.id {
+		if claim.ServerId == s.id {
 			return true, nil
 		} else {
 			return false, nil
