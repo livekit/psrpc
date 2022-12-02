@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/proto"
@@ -57,8 +56,7 @@ func toNatsSubscription(sub *nats.Subscription, msgChan chan *nats.Msg) Subscrip
 
 			p, err := deserialize(msg.Data)
 			if err != nil {
-				// TODO: logger
-				fmt.Println(err)
+				logger.Error(err, "failed to deserialize message")
 			}
 			dataChan <- p
 		}

@@ -171,7 +171,9 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 			case res := <-resChan:
 				if res.Error == "" {
 					response, err := res.Response.UnmarshalNew()
-					if err == nil {
+					if err != nil {
+						logger.Error(err, "failed to unmarshal response")
+					} else {
 						responseChannel <- response
 					}
 				}

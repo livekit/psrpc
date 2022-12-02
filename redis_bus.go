@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"math/rand"
 	"time"
 
@@ -45,8 +44,7 @@ func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscr
 
 			p, err := deserialize([]byte(msg.Payload))
 			if err != nil {
-				// TODO: logger
-				fmt.Println(err)
+				logger.Error(err, "failed to deserialize message")
 				continue
 			}
 			dataChan <- p
@@ -73,12 +71,14 @@ func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (S
 
 			sha := sha256.Sum256([]byte(msg.Payload))
 			hash := base64.StdEncoding.EncodeToString(sha[:])
-			acquired, _ := r.rc.SetNX(ctx, hash, rand.Int(), lockExpiration).Result()
-			if acquired {
+			acquired, err := r.rc.SetNX(ctx, hash, rand.Int(), lockExpiration).Result()
+			if err != nil {
+				logger.Error(err, "failed to acquire redis lock")
+				continue
+			} else if acquired {
 				p, err := deserialize([]byte(msg.Payload))
 				if err != nil {
-					// TODO: logger
-					fmt.Println(err)
+					logger.Error(err, "failed to deserialize message")
 					continue
 				}
 				dataChan <- p

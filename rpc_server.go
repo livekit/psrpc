@@ -3,7 +3,6 @@ package psrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -103,8 +102,7 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ..
 				go func(req *internal.Request) {
 					err := s.handleRequest(rpc, req)
 					if err != nil {
-						// TODO: logger
-						fmt.Println(err)
+						logger.Error(err, "failed to handle request", "requestID", req.RequestId)
 					}
 				}(p.(*internal.Request))
 			}

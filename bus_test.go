@@ -31,7 +31,7 @@ func TestMessageBus(t *testing.T) {
 func testSubscribe(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
-	channel := "hello"
+	channel := newID()
 	subA, err := bus.Subscribe(ctx, channel)
 	require.NoError(t, err)
 	subB, err := bus.Subscribe(ctx, channel)
@@ -52,7 +52,7 @@ func testSubscribe(t *testing.T, bus MessageBus) {
 func testSubscribeQueue(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
-	channel := "world"
+	channel := newID()
 	subA, err := bus.SubscribeQueue(ctx, channel)
 	require.NoError(t, err)
 	subB, err := bus.SubscribeQueue(ctx, channel)
