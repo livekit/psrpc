@@ -7,15 +7,15 @@ import (
 )
 
 type RPCClient interface {
-	SendSingleRequest(ctx context.Context, rpc string, request proto.Message) (proto.Message, error)
-	SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan proto.Message, error)
+	SendSingleRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (proto.Message, error)
+	SendMultiRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (<-chan proto.Message, error)
 	Subscribe(ctx context.Context, channel string) (Subscription, error)
 	SubscribeQueue(ctx context.Context, channel string) (Subscription, error)
 	Close()
 }
 
 type RPCServer interface {
-	RegisterHandler(rpc string, handlerFunc HandlerFunc) error
+	RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ...HandlerOption) error
 	DeregisterHandler(rpc string) error
 	Publish(ctx context.Context, channel string, message proto.Message) error
 	Close()

@@ -24,7 +24,7 @@ message Response {
 message ClaimRequest {
   string request_id = 1;
   string server_id = 2;
-  bool available = 3;
+  float affinity = 3;
 }
 
 message ClaimResponse {

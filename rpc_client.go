@@ -26,7 +26,7 @@ type rpcClient struct {
 func NewRPCClient(clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
 	c := &rpcClient{
 		MessageBus:       bus,
-		rpcOpts:          getOpts(opts...),
+		rpcOpts:          getRPCOpts(opts...),
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
 		responseChannels: make(map[string]chan *internal.Response),
@@ -77,7 +77,9 @@ func NewRPCClient(clientID string, bus MessageBus, opts ...RPCOption) (RPCClient
 	return c, nil
 }
 
-func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request proto.Message) (proto.Message, error) {
+func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (proto.Message, error) {
+	o := getRequestOpts(c.rpcOpts, opts...)
+
 	v, err := anypb.New(request)
 	if err != nil {
 		return nil, err
@@ -92,7 +94,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		Request:   v,
 	}
 
-	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
+	claimChan := make(chan *internal.ClaimRequest, o.channelSize)
 	resChan := make(chan *internal.Response, 1)
 
 	c.mu.Lock()
@@ -111,20 +113,18 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		return nil, err
 	}
 
-	timer := time.NewTimer(c.requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
 
-	select {
-	case claim := <-claimChan:
-		if claim.Available {
-			if err = c.Publish(ctx, "claims", &internal.ClaimResponse{
-				RequestId: requestID,
-				ServerId:  claim.ServerId,
-			}); err != nil {
-				return nil, err
-			}
-		}
-	case <-timer.C:
-		return nil, errors.New("no servers available")
+	serverID, err := selectServer(ctx, claimChan, o.affinity)
+	if err != nil {
+		return nil, err
+	}
+	if err = c.Publish(ctx, "claims", &internal.ClaimResponse{
+		RequestId: requestID,
+		ServerId:  serverID,
+	}); err != nil {
+		return nil, err
 	}
 
 	select {
@@ -135,12 +135,14 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 			return resp.Response.UnmarshalNew()
 		}
 
-	case <-timer.C:
+	case <-ctx.Done():
 		return nil, errors.New("request timed out")
 	}
 }
 
-func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan proto.Message, error) {
+func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (<-chan proto.Message, error) {
+	o := getRequestOpts(c.rpcOpts, opts...)
+
 	v, err := anypb.New(request)
 	if err != nil {
 		return nil, err
@@ -155,15 +157,15 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 		Request:   v,
 	}
 
-	resChan := make(chan *internal.Response, c.channelSize)
+	resChan := make(chan *internal.Response, o.channelSize)
 
 	c.mu.Lock()
 	c.responseChannels[requestID] = resChan
 	c.mu.Unlock()
 
-	responseChannel := make(chan proto.Message, c.channelSize)
+	responseChannel := make(chan proto.Message, o.channelSize)
 	go func() {
-		timer := time.NewTimer(c.requestTimeout)
+		timer := time.NewTimer(o.timeout)
 		for {
 			select {
 			case res := <-resChan:

@@ -24,14 +24,15 @@ type rpcServer struct {
 }
 
 type handler struct {
-	fn  HandlerFunc
-	sub Subscription
+	handlerFunc  HandlerFunc
+	affinityFunc AffinityFunc
+	sub          Subscription
 }
 
 func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
 	s := &rpcServer{
 		MessageBus: bus,
-		rpcOpts:    getOpts(opts...),
+		rpcOpts:    getRPCOpts(opts...),
 		id:         serverID,
 		handlers:   make(map[string]*handler),
 		claims:     make(map[string]chan *internal.ClaimResponse),
@@ -67,10 +68,18 @@ func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer
 	return s, nil
 }
 
-func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc) error {
+func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ...HandlerOption) error {
 	sub, err := s.Subscribe(context.Background(), rpc)
 	if err != nil {
 		return err
+	}
+
+	h := &handler{
+		handlerFunc: handlerFunc,
+		sub:         sub,
+	}
+	for _, opt := range opts {
+		opt(h)
 	}
 
 	s.mu.Lock()
@@ -79,10 +88,7 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc) error {
 		s.mu.Unlock()
 		return err
 	}
-	s.handlers[rpc] = &handler{
-		fn:  handlerFunc,
-		sub: sub,
-	}
+	s.handlers[rpc] = h
 	s.mu.Unlock()
 
 	reqChan := sub.Channel()
@@ -154,7 +160,7 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 	}
 
 	// call handler function
-	response, err := h.fn(ctx, request)
+	response, err := h.handlerFunc(ctx, request)
 	if err != nil {
 		res.Error = err.Error()
 	} else {
@@ -175,11 +181,11 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request)
 	s.claims[request.RequestId] = claimResponseChan
 	s.mu.Unlock()
 
-	// TODO: optional availability function with RegisterHandler
+	// TODO: affinityFunc
 	err := s.Publish(ctx, "claims_"+request.ClientId, &internal.ClaimRequest{
 		RequestId: request.RequestId,
 		ServerId:  s.id,
-		Available: true,
+		Affinity:  1,
 	})
 	if err != nil {
 		return false, err
@@ -199,7 +205,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request)
 			return false, nil
 		}
 
-	case <-time.After(s.requestTimeout):
+	case <-time.After(s.timeout):
 		return false, errors.New("no response from server")
 	}
 }
