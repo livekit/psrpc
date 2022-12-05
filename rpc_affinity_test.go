@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/livekit/pubsub-rpc/internal"
+	"github.com/livekit/psrpc/internal"
 )
 
 func TestAffinity(t *testing.T) {

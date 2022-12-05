@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/livekit/pubsub-rpc/internal"
+	"github.com/livekit/psrpc/internal"
 )
 
 func TestSerialization(t *testing.T) {

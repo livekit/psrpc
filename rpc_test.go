@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/livekit/pubsub-rpc/internal"
+	"github.com/livekit/psrpc/internal"
 )
 
 func TestRPC(t *testing.T) {

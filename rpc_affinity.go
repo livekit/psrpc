@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/livekit/pubsub-rpc/internal"
+	"github.com/livekit/psrpc/internal"
 )
 
 type AffinityFunc func(proto.Message) float32

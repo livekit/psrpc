@@ -1,4 +1,4 @@
-module github.com/livekit/pubsub-rpc
+module github.com/livekit/psrpc
 
 go 1.18
 
