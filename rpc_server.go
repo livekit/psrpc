@@ -15,11 +15,12 @@ type rpcServer struct {
 	MessageBus
 	rpcOpts
 
-	id       string
-	mu       sync.RWMutex
-	handlers map[string]*handler
-	claims   map[string]chan *internal.ClaimResponse
-	closed   chan struct{}
+	serviceName string
+	id          string
+	mu          sync.RWMutex
+	handlers    map[string]*handler
+	claims      map[string]chan *internal.ClaimResponse
+	closed      chan struct{}
 }
 
 type handler struct {
@@ -28,18 +29,18 @@ type handler struct {
 	sub          Subscription
 }
 
-func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
+func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
 	s := &rpcServer{
-		MessageBus: bus,
-		rpcOpts:    getRPCOpts(opts...),
-		id:         serverID,
-		handlers:   make(map[string]*handler),
-		claims:     make(map[string]chan *internal.ClaimResponse),
-		closed:     make(chan struct{}),
+		MessageBus:  bus,
+		rpcOpts:     getRPCOpts(opts...),
+		serviceName: serviceName,
+		id:          serverID,
+		handlers:    make(map[string]*handler),
+		claims:      make(map[string]chan *internal.ClaimResponse),
+		closed:      make(chan struct{}),
 	}
 
-	// TODO: separate claims channel per rpc
-	claims, err := s.Subscribe(context.Background(), "claims")
+	claims, err := s.Subscribe(context.Background(), getClaimResponseChannel(serviceName))
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func NewRPCServer(serverID string, bus MessageBus, opts ...RPCOption) (RPCServer
 }
 
 func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ...HandlerOption) error {
-	sub, err := s.Subscribe(context.Background(), rpc)
+	sub, err := s.Subscribe(context.Background(), getRequestChannel(s.serviceName, rpc))
 	if err != nil {
 		return err
 	}
@@ -137,18 +138,23 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 	}
 
 	ctx := context.Background()
+	request, err := req.Request.UnmarshalNew()
+	if err != nil {
+		return err
+	}
+
 	if !req.Multi {
-		claimed, err := s.claimRequest(ctx, req)
+		affinity := float32(1)
+		if h.affinityFunc != nil {
+			affinity = h.affinityFunc(request)
+		}
+
+		claimed, err := s.claimRequest(ctx, req, affinity)
 		if err != nil {
 			return err
 		} else if !claimed {
 			return nil
 		}
-	}
-
-	request, err := req.Request.UnmarshalNew()
-	if err != nil {
-		return err
 	}
 
 	res := &internal.Response{
@@ -169,21 +175,20 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 		res.Response = v
 	}
 
-	return s.Publish(ctx, req.ClientId, res)
+	return s.Publish(ctx, getResponseChannel(s.serviceName, req.ClientId), res)
 }
 
-func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request) (bool, error) {
+func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request, affinity float32) (bool, error) {
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
 
 	s.mu.Lock()
 	s.claims[request.RequestId] = claimResponseChan
 	s.mu.Unlock()
 
-	// TODO: affinityFunc
-	err := s.Publish(ctx, "claims_"+request.ClientId, &internal.ClaimRequest{
+	err := s.Publish(ctx, getClaimRequestChannel(s.serviceName, request.ClientId), &internal.ClaimRequest{
 		RequestId: request.RequestId,
 		ServerId:  s.id,
-		Affinity:  1,
+		Affinity:  affinity,
 	})
 	if err != nil {
 		return false, err

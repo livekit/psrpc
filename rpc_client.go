@@ -16,6 +16,7 @@ type rpcClient struct {
 	MessageBus
 	rpcOpts
 
+	serviceName      string
 	id               string
 	mu               sync.RWMutex
 	claimRequests    map[string]chan *internal.ClaimRequest
@@ -23,10 +24,11 @@ type rpcClient struct {
 	closed           chan struct{}
 }
 
-func NewRPCClient(clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
+func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
 	c := &rpcClient{
 		MessageBus:       bus,
 		rpcOpts:          getRPCOpts(opts...),
+		serviceName:      serviceName,
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
 		responseChannels: make(map[string]chan *internal.Response),
@@ -34,12 +36,12 @@ func NewRPCClient(clientID string, bus MessageBus, opts ...RPCOption) (RPCClient
 	}
 
 	ctx := context.Background()
-	responses, err := c.Subscribe(ctx, clientID)
+	responses, err := c.Subscribe(ctx, getResponseChannel(serviceName, clientID))
 	if err != nil {
 		return nil, err
 	}
 
-	claims, err := c.Subscribe(ctx, "claims_"+clientID)
+	claims, err := c.Subscribe(ctx, getClaimRequestChannel(serviceName, clientID))
 	if err != nil {
 		_ = responses.Close()
 		return nil, err
@@ -109,7 +111,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		c.mu.Unlock()
 	}()
 
-	if err = c.Publish(ctx, rpc, req); err != nil {
+	if err = c.Publish(ctx, getRequestChannel(c.serviceName, rpc), req); err != nil {
 		return nil, err
 	}
 
@@ -120,7 +122,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 	if err != nil {
 		return nil, err
 	}
-	if err = c.Publish(ctx, "claims", &internal.ClaimResponse{
+	if err = c.Publish(ctx, getClaimResponseChannel(c.serviceName), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -188,7 +190,7 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 		}
 	}()
 
-	if err = c.Publish(ctx, rpc, req); err != nil {
+	if err = c.Publish(ctx, getRequestChannel(c.serviceName, rpc), req); err != nil {
 		return nil, err
 	}
 
