@@ -3,6 +3,7 @@ package psrpc
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/lithammer/shortuuid/v3"
@@ -57,7 +58,7 @@ func testRPCs(t *testing.T, bus MessageBus) {
 	resChan, err := client.SendMultiRequest(context.Background(), rpc, &internal.Request{RequestId: requestID})
 	require.NoError(t, err)
 
-	for {
+	for i := 0; i < 2; i++ {
 		select {
 		case res := <-resChan:
 			if res == nil {
@@ -65,6 +66,8 @@ func testRPCs(t *testing.T, bus MessageBus) {
 				return
 			}
 			require.Equal(t, res.(*internal.Response).RequestId, requestID)
+		case <-time.After(time.Second * 3):
+			t.Fatal("response missing")
 		}
 	}
 }

@@ -33,6 +33,12 @@ jobs:
         with:
           version: "2021.1.1"
 
+      - name: Start Redis
+        uses: supercharge/redis-github-action@1.4.0
+
+      - name: Start NATS server
+        run: docker run --rm --name psrpc-nats --network host -d nats:alpine
+
       - name: Mage Test
         uses: magefile/mage-action@v2
         with:
