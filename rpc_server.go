@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/pubsub-rpc/internal"
 )
 
 type rpcServer struct {

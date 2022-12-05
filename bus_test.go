@@ -9,7 +9,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/pubsub-rpc/internal"
 )
 
 func TestMessageBus(t *testing.T) {
