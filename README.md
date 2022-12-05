@@ -30,7 +30,7 @@ type RPCClient interface {
     SendSingleRequest(ctx context.Context, rpc string, request proto.Message) (proto.Message, error)
     
     // send a request to all servers, and receive one response per server
-    SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan proto.Message, error)
+    SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan *Response, error)
     
     // subscribe to a streaming rpc (all subscribed clients will receive every message)
     JoinStream(ctx context.Context, rpc string) (Subscription, error)
@@ -40,6 +40,11 @@ type RPCClient interface {
     
     // close all subscriptions and stop
     Close()
+}
+
+type Response struct {
+    Result proto.Message
+    Err    error
 }
 
 type Subscription interface {
