@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
@@ -69,7 +70,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 }
 
 func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ...HandlerOption) error {
-	sub, err := s.Subscribe(context.Background(), getRequestChannel(s.serviceName, rpc))
+	sub, err := s.Subscribe(context.Background(), getRPCChannel(s.serviceName, rpc))
 	if err != nil {
 		return err
 	}
@@ -114,6 +115,10 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ..
 	}()
 
 	return nil
+}
+
+func (s *rpcServer) PublishToStream(ctx context.Context, rpc string, msg proto.Message) error {
+	return s.Publish(ctx, getRPCChannel(s.serviceName, rpc), msg)
 }
 
 func (s *rpcServer) DeregisterHandler(rpc string) error {

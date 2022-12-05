@@ -65,7 +65,7 @@ func testRPCs(t *testing.T, bus MessageBus) {
 				require.Equal(t, 3, counter)
 				return
 			}
-			require.Equal(t, res.(*internal.Response).RequestId, requestID)
+			require.Equal(t, res.Result.(*internal.Response).RequestId, requestID)
 		case <-time.After(time.Second * 3):
 			t.Fatal("response missing")
 		}

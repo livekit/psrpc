@@ -113,7 +113,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		c.mu.Unlock()
 	}()
 
-	if err = c.Publish(ctx, getRequestChannel(c.serviceName, rpc), req); err != nil {
+	if err = c.Publish(ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
 		return nil, err
 	}
 
@@ -144,7 +144,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 	}
 }
 
-func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (<-chan proto.Message, error) {
+func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request proto.Message, opts ...RequestOption) (<-chan *Response, error) {
 	o := getRequestOpts(c.rpcOpts, opts...)
 
 	v, err := anypb.New(request)
@@ -169,20 +169,24 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 	c.responseChannels[requestID] = resChan
 	c.mu.Unlock()
 
-	responseChannel := make(chan proto.Message, o.channelSize)
+	responseChannel := make(chan *Response, o.channelSize)
 	go func() {
 		timer := time.NewTimer(o.timeout)
 		for {
 			select {
 			case res := <-resChan:
-				if res.Error == "" {
-					response, err := res.Response.UnmarshalNew()
+				response := &Response{}
+				if res.Error != "" {
+					response.Err = errors.New(res.Error)
+				} else {
+					v, err := res.Response.UnmarshalNew()
 					if err != nil {
-						logger.Error(err, "failed to unmarshal response")
+						response.Err = err
 					} else {
-						responseChannel <- response
+						response.Result = v
 					}
 				}
+				responseChannel <- response
 
 			case <-timer.C:
 				c.mu.Lock()
@@ -194,11 +198,19 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 		}
 	}()
 
-	if err = c.Publish(ctx, getRequestChannel(c.serviceName, rpc), req); err != nil {
+	if err = c.Publish(ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
 		return nil, err
 	}
 
 	return responseChannel, nil
+}
+
+func (c *rpcClient) JoinStream(ctx context.Context, rpc string) (Subscription, error) {
+	return c.Subscribe(ctx, getRPCChannel(c.serviceName, rpc))
+}
+
+func (c *rpcClient) JoinStreamQueue(ctx context.Context, rpc string) (Subscription, error) {
+	return c.SubscribeQueue(ctx, getRPCChannel(c.serviceName, rpc))
 }
 
 func (c *rpcClient) Close() {

@@ -13,7 +13,7 @@ func newRequestID() string {
 	return "req_" + shortuuid.New()[:12]
 }
 
-func getRequestChannel(serviceName, rpc string) string {
+func getRPCChannel(serviceName, rpc string) string {
 	return strings.ToUpper(fmt.Sprintf("%s_%s", serviceName, rpc))
 }
 

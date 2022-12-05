@@ -9,9 +9,12 @@ type RPCServer interface {
     // register a rpc handler function
     RegisterHandler(rpc string, handler HandlerFunc) error
     
-    // publish updates to a channel (similar to grpc stream)
-    Publish(ctx context.Context, channel string, message proto.Message) error
-    
+    // publish updates to a streaming rpc
+    PublishToStream(ctx context.Context, rpc string, message proto.Message) error
+
+    // stop listening for requests for a rpc
+    DeregisterHandler(rpc string) error
+
     // close all subscriptions and stop
     Close()
 }
@@ -29,11 +32,11 @@ type RPCClient interface {
     // send a request to all servers, and receive one response per server
     SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan proto.Message, error)
     
-    // subscribe to a channel (all subscribed clients will receive every message)
-    Subscribe(ctx context.Context, channel string) (Subscription, error)
+    // subscribe to a streaming rpc (all subscribed clients will receive every message)
+    JoinStream(ctx context.Context, rpc string) (Subscription, error)
     
-    // subscribe to a channel queue (each message is only received by a single client)
-    SubscribeQueue(ctx context.Context, channel string) (Subscription, error)
+    // join a queue for a streaming rpc (each message is only received by a single client)
+    JoinStreamQueue(ctx context.Context, rpc string) (Subscription, error)
     
     // close all subscriptions and stop
     Close()
