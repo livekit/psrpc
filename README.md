@@ -64,7 +64,7 @@ For example, the following would return an affinity based on cpu load:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcServer := psrpc.NewRPCServer(psrpc.NewMessageBus(rc))
+    rpcServer := psrpc.NewRPCServer("ProcessingService", psrpc.NewMessageBus(rc))
     _ = rpcServer.RegisterHandler("RunBatchJob", runBatchJob, psrpc.WithAffinityFunc(getAffinity))
     ...
 }
@@ -95,7 +95,7 @@ If no options are supplied, the client will choose the first server to respond w
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcClient := psrpc.NewRPCClient(psrpc.NewMessageBus(rc))
+    rpcClient := psrpc.NewRPCClient("ProcessingService", psrpc.NewMessageBus(rc))
 	
     req := &proto.BatchJobRequest{
         Job: "CalculateDAUs",	
@@ -137,7 +137,7 @@ Server:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcServer := psrpc.NewRPCServer(psrpc.NewMessageBus(rc))
+    rpcServer := psrpc.NewRPCServer("CountingService", psrpc.NewMessageBus(rc))
     
     service := &Service{}
     _ = rpcServer.RegisterHandler("AddValue", service.AddValue)
@@ -160,7 +160,7 @@ Client:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcClient := psrpc.NewRPCClient(psrpc.NewMessageBus(rc))
+    rpcClient := psrpc.NewRPCClient("CountingService", psrpc.NewMessageBus(rc))
     res, err := rpcClient.SendSingleRequest(context.Background(), "AddValue", &proto.AddRequest{Increment: 3})
     if err != nil {
         return	
