@@ -100,12 +100,15 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ..
 				return
 
 			case p := <-reqChan:
-				go func(req *internal.Request) {
-					err := s.handleRequest(rpc, req)
-					if err != nil {
-						logger.Error(err, "failed to handle request", "requestID", req.RequestId)
-					}
-				}(p.(*internal.Request))
+				req := p.(*internal.Request)
+				if time.Now().UnixNano() < req.Expiry {
+					go func() {
+						err := s.handleRequest(rpc, req)
+						if err != nil {
+							logger.Error(err, "failed to handle request", "requestID", req.RequestId)
+						}
+					}()
+				}
 			}
 		}
 	}()
@@ -200,6 +203,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 		s.mu.Unlock()
 	}()
 
+	timeout := time.Duration(request.Expiry - time.Now().UnixNano())
 	select {
 	case claim := <-claimResponseChan:
 		if claim.ServerId == s.id {
@@ -208,8 +212,8 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 			return false, nil
 		}
 
-	case <-time.After(s.timeout):
-		return false, errors.New("no response from server")
+	case <-time.After(timeout):
+		return false, errors.New("no response from client")
 	}
 }
 

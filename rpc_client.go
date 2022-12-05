@@ -88,10 +88,12 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 	}
 
 	requestID := newRequestID()
+	now := time.Now()
 	req := &internal.Request{
 		RequestId: requestID,
 		ClientId:  c.id,
-		SentAt:    time.Now().UnixNano(),
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(o.timeout).UnixNano(),
 		Multi:     false,
 		Request:   v,
 	}
@@ -151,10 +153,12 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 	}
 
 	requestID := newRequestID()
+	now := time.Now()
 	req := &internal.Request{
 		RequestId: requestID,
 		ClientId:  c.id,
-		SentAt:    time.Now().UnixNano(),
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(o.timeout).UnixNano(),
 		Multi:     true,
 		Request:   v,
 	}

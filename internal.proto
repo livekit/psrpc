@@ -9,8 +9,9 @@ message Request {
   string request_id = 1;
   string client_id = 2;
   int64 sent_at = 3;
-  bool multi = 4;
-  google.protobuf.Any request = 5;
+  int64 expiry = 4;
+  bool multi = 5;
+  google.protobuf.Any request = 6;
 }
 
 message Response {
