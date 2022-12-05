@@ -66,7 +66,7 @@ func testRPCs(t *testing.T, bus MessageBus) {
 				return
 			}
 			require.Equal(t, res.Result.(*internal.Response).RequestId, requestID)
-		case <-time.After(time.Second * 3):
+		case <-time.After(DefaultTimeout):
 			t.Fatal("response missing")
 		}
 	}

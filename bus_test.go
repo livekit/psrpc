@@ -68,7 +68,7 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 		if m != nil {
 			received++
 		}
-	case <-time.After(time.Second * 3):
+	case <-time.After(DefaultTimeout):
 		// continue
 	}
 
@@ -77,7 +77,7 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 		if m != nil {
 			received++
 		}
-	case <-time.After(time.Second * 3):
+	case <-time.After(DefaultTimeout):
 		// continue
 	}
 

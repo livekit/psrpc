@@ -148,7 +148,7 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 	ctx := context.Background()
 	request, err := req.Request.UnmarshalNew()
 	if err != nil {
-		return err
+		return s.sendResponse(ctx, req, nil, err)
 	}
 
 	if !req.Multi {
@@ -165,25 +165,9 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 		}
 	}
 
-	res := &internal.Response{
-		RequestId: req.RequestId,
-		ServerId:  s.id,
-		SentAt:    time.Now().UnixNano(),
-	}
-
-	// call handler function
+	// call handler function and return response
 	response, err := h.handlerFunc(ctx, request)
-	if err != nil {
-		res.Error = err.Error()
-	} else {
-		v, err := anypb.New(response)
-		if err != nil {
-			return err
-		}
-		res.Response = v
-	}
-
-	return s.Publish(ctx, getResponseChannel(s.serviceName, req.ClientId), res)
+	return s.sendResponse(ctx, req, response, err)
 }
 
 func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request, affinity float32) (bool, error) {
@@ -220,6 +204,26 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 	case <-time.After(timeout):
 		return false, errors.New("no response from client")
 	}
+}
+
+func (s *rpcServer) sendResponse(ctx context.Context, req *internal.Request, response proto.Message, err error) error {
+	res := &internal.Response{
+		RequestId: req.RequestId,
+		ServerId:  s.id,
+		SentAt:    time.Now().UnixNano(),
+	}
+
+	if err != nil {
+		res.Error = err.Error()
+	} else if response != nil {
+		v, err := anypb.New(response)
+		if err != nil {
+			return err
+		}
+		res.Response = v
+	}
+
+	return s.Publish(ctx, getResponseChannel(s.serviceName, req.ClientId), res)
 }
 
 func (s *rpcServer) Close() {

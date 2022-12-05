@@ -4,6 +4,11 @@ import (
 	"time"
 )
 
+const (
+	DefaultTimeout     = time.Second * 3
+	DefaultChannelSize = 100
+)
+
 // RPC Client and Server options
 
 type RPCOption func(rpcOpts) rpcOpts
@@ -29,8 +34,8 @@ type rpcOpts struct {
 
 func getRPCOpts(opts ...RPCOption) rpcOpts {
 	options := rpcOpts{
-		channelSize: 100,
-		timeout:     time.Second * 3,
+		channelSize: DefaultChannelSize,
+		timeout:     DefaultTimeout,
 	}
 	for _, opt := range opts {
 		options = opt(options)
