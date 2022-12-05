@@ -98,7 +98,7 @@ func (c *rpcClient) SendSingleRequest(ctx context.Context, rpc string, request p
 		Request:   v,
 	}
 
-	claimChan := make(chan *internal.ClaimRequest, o.channelSize)
+	claimChan := make(chan *internal.ClaimRequest, ChannelSize)
 	resChan := make(chan *internal.Response, 1)
 
 	c.mu.Lock()
@@ -163,13 +163,13 @@ func (c *rpcClient) SendMultiRequest(ctx context.Context, rpc string, request pr
 		Request:   v,
 	}
 
-	resChan := make(chan *internal.Response, o.channelSize)
+	resChan := make(chan *internal.Response, ChannelSize)
 
 	c.mu.Lock()
 	c.responseChannels[requestID] = resChan
 	c.mu.Unlock()
 
-	responseChannel := make(chan *Response, o.channelSize)
+	responseChannel := make(chan *Response, ChannelSize)
 	go func() {
 		timer := time.NewTimer(o.timeout)
 		for {

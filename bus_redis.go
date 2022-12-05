@@ -33,7 +33,7 @@ func (r *redisMessageBus) Publish(ctx context.Context, channel string, msg proto
 func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscription, error) {
 	sub := r.rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan proto.Message, 100)
+	dataChan := make(chan proto.Message, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
@@ -60,7 +60,7 @@ func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscr
 func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (Subscription, error) {
 	sub := r.rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan proto.Message, 100)
+	dataChan := make(chan proto.Message, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan

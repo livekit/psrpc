@@ -5,20 +5,13 @@ import (
 )
 
 const (
-	DefaultTimeout     = time.Second * 3
-	DefaultChannelSize = 100
+	DefaultTimeout = time.Second * 3
+	ChannelSize    = 100
 )
 
 // RPC Client and Server options
 
 type RPCOption func(rpcOpts) rpcOpts
-
-func WithChannelSize(size int) RPCOption {
-	return func(o rpcOpts) rpcOpts {
-		o.channelSize = size
-		return o
-	}
-}
 
 func WithTimeout(timeout time.Duration) RPCOption {
 	return func(o rpcOpts) rpcOpts {
@@ -28,14 +21,12 @@ func WithTimeout(timeout time.Duration) RPCOption {
 }
 
 type rpcOpts struct {
-	channelSize int
-	timeout     time.Duration
+	timeout time.Duration
 }
 
 func getRPCOpts(opts ...RPCOption) rpcOpts {
 	options := rpcOpts{
-		channelSize: DefaultChannelSize,
-		timeout:     DefaultTimeout,
+		timeout: DefaultTimeout,
 	}
 	for _, opt := range opts {
 		options = opt(options)
@@ -64,13 +55,6 @@ func WithAffinityOpts(opts AffinityOpts) RequestOption {
 	}
 }
 
-func WithRequestChannelSize(size int) RequestOption {
-	return func(o reqOpts) reqOpts {
-		o.channelSize = size
-		return o
-	}
-}
-
 func WithRequestTimeout(timeout time.Duration) RequestOption {
 	return func(o reqOpts) reqOpts {
 		o.timeout = timeout
@@ -79,15 +63,13 @@ func WithRequestTimeout(timeout time.Duration) RequestOption {
 }
 
 type reqOpts struct {
-	channelSize int
-	timeout     time.Duration
-	affinity    AffinityOpts
+	timeout  time.Duration
+	affinity AffinityOpts
 }
 
 func getRequestOpts(o rpcOpts, opts ...RequestOption) reqOpts {
 	options := reqOpts{
-		channelSize: o.channelSize,
-		timeout:     o.timeout,
+		timeout: o.timeout,
 		affinity: AffinityOpts{
 			AcceptFirstAvailable: true,
 		},

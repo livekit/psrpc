@@ -25,7 +25,7 @@ func (n *natsMessageBus) Publish(_ context.Context, channel string, msg proto.Me
 }
 
 func (n *natsMessageBus) Subscribe(_ context.Context, channel string) (Subscription, error) {
-	msgChan := make(chan *nats.Msg, 100)
+	msgChan := make(chan *nats.Msg, ChannelSize)
 	sub, err := n.nc.ChanSubscribe(channel, msgChan)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (n *natsMessageBus) Subscribe(_ context.Context, channel string) (Subscript
 }
 
 func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel string) (Subscription, error) {
-	msgChan := make(chan *nats.Msg, 100)
+	msgChan := make(chan *nats.Msg, ChannelSize)
 	sub, err := n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel string) (Subs
 }
 
 func toNatsSubscription(sub *nats.Subscription, msgChan chan *nats.Msg) Subscription {
-	dataChan := make(chan proto.Message, 100)
+	dataChan := make(chan proto.Message, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
