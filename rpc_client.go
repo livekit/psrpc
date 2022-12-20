@@ -29,11 +29,6 @@ type rpcClientInternal interface {
 	isRPCClient(*rpcClient)
 }
 
-type clientRPC[RequestType proto.Message, ResponseType proto.Message] struct {
-	*rpcClient
-	rpc string
-}
-
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
 	c := &rpcClient{
 		MessageBus:       bus,
@@ -87,15 +82,12 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 	return c, nil
 }
 
-func NewRPC[RequestType proto.Message, ResponseType proto.Message](c RPCClient, rpc string) RPC[RequestType, ResponseType] {
-	return &clientRPC[RequestType, ResponseType]{
-		rpcClient: c.(*rpcClient),
-		rpc:       rpc,
-	}
-}
+func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
+	ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+) (ResponseType, error) {
 
-func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error) {
-	o := getRequestOpts(r.rpcOpts, opts...)
+	c := client.(*rpcClient)
+	o := getRequestOpts(c.rpcOpts, opts...)
 	var empty ResponseType
 
 	v, err := anypb.New(request)
@@ -107,7 +99,7 @@ func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context
 	now := time.Now()
 	req := &internal.Request{
 		RequestId: requestID,
-		ClientId:  r.id,
+		ClientId:  c.id,
 		SentAt:    now.UnixNano(),
 		Expiry:    now.Add(o.timeout).UnixNano(),
 		Multi:     false,
@@ -117,19 +109,19 @@ func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context
 	claimChan := make(chan *internal.ClaimRequest, ChannelSize)
 	resChan := make(chan *internal.Response, 1)
 
-	r.mu.Lock()
-	r.claimRequests[requestID] = claimChan
-	r.responseChannels[requestID] = resChan
-	r.mu.Unlock()
+	c.mu.Lock()
+	c.claimRequests[requestID] = claimChan
+	c.responseChannels[requestID] = resChan
+	c.mu.Unlock()
 
 	defer func() {
-		r.mu.Lock()
-		delete(r.claimRequests, requestID)
-		delete(r.responseChannels, requestID)
-		r.mu.Unlock()
+		c.mu.Lock()
+		delete(c.claimRequests, requestID)
+		delete(c.responseChannels, requestID)
+		c.mu.Unlock()
 	}()
 
-	if err = Publish(r, ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
+	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
 		return empty, err
 	}
 
@@ -140,7 +132,7 @@ func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context
 	if err != nil {
 		return empty, err
 	}
-	if err = Publish(r, ctx, getClaimResponseChannel(r.serviceName), &internal.ClaimResponse{
+	if err = Publish(c, ctx, getClaimResponseChannel(c.serviceName), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -164,8 +156,12 @@ func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context
 	}
 }
 
-func (r *clientRPC[RequestType, ResponseType]) RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error) {
-	o := getRequestOpts(r.rpcOpts, opts...)
+func RequestAll[RequestType proto.Message, ResponseType proto.Message](
+	ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+) (<-chan *Response[ResponseType], error) {
+
+	c := client.(*rpcClient)
+	o := getRequestOpts(c.rpcOpts, opts...)
 
 	v, err := anypb.New(request)
 	if err != nil {
@@ -176,7 +172,7 @@ func (r *clientRPC[RequestType, ResponseType]) RequestAll(ctx context.Context, r
 	now := time.Now()
 	req := &internal.Request{
 		RequestId: requestID,
-		ClientId:  r.id,
+		ClientId:  c.id,
 		SentAt:    now.UnixNano(),
 		Expiry:    now.Add(o.timeout).UnixNano(),
 		Multi:     true,
@@ -185,9 +181,9 @@ func (r *clientRPC[RequestType, ResponseType]) RequestAll(ctx context.Context, r
 
 	resChan := make(chan *internal.Response, ChannelSize)
 
-	r.mu.Lock()
-	r.responseChannels[requestID] = resChan
-	r.mu.Unlock()
+	c.mu.Lock()
+	c.responseChannels[requestID] = resChan
+	c.mu.Unlock()
 
 	responseChannel := make(chan *Response[ResponseType], ChannelSize)
 	go func() {
@@ -209,28 +205,36 @@ func (r *clientRPC[RequestType, ResponseType]) RequestAll(ctx context.Context, r
 				responseChannel <- response
 
 			case <-timer.C:
-				r.mu.Lock()
-				delete(r.responseChannels, requestID)
-				r.mu.Unlock()
+				c.mu.Lock()
+				delete(c.responseChannels, requestID)
+				c.mu.Unlock()
 				close(responseChannel)
 				return
 			}
 		}
 	}()
 
-	if err = Publish(r, ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
+	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
 		return nil, err
 	}
 
 	return responseChannel, nil
 }
 
-func (r *clientRPC[RequestType, ResponseType]) JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error) {
-	return Subscribe[ResponseType](r, ctx, getRPCChannel(r.serviceName, rpc))
+func JoinStream[ResponseType proto.Message](
+	ctx context.Context, client RPCClient, rpc string,
+) (Subscription[ResponseType], error) {
+
+	c := client.(*rpcClient)
+	return Subscribe[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc))
 }
 
-func (r *clientRPC[RequestType, ResponseType]) JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error) {
-	return SubscribeQueue[ResponseType](r, ctx, getRPCChannel(r.serviceName, rpc))
+func JoinStreamQueue[ResponseType proto.Message](
+	ctx context.Context, client RPCClient, rpc string,
+) (Subscription[ResponseType], error) {
+
+	c := client.(*rpcClient)
+	return SubscribeQueue[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc))
 }
 
 func (c *rpcClient) Close() {

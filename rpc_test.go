@@ -46,16 +46,16 @@ func testRPCs(t *testing.T, bus MessageBus) {
 	err = serverB.RegisterHandler(addOneHandler)
 	require.NoError(t, err)
 
-	addOneRPC := NewRPC[*internal.Request, *internal.Response](client, rpc)
-
 	requestID := newRequestID()
-	res, err := addOneRPC.RequestSingle(context.Background(), &internal.Request{RequestId: requestID})
+	res, err := RequestSingle[*internal.Request, *internal.Response](
+		context.Background(), client, rpc, &internal.Request{RequestId: requestID})
 	require.NoError(t, err)
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
 	requestID = newRequestID()
-	resChan, err := addOneRPC.RequestAll(context.Background(), &internal.Request{RequestId: requestID})
+	resChan, err := RequestAll[*internal.Request, *internal.Response](
+		context.Background(), client, rpc, &internal.Request{RequestId: requestID})
 	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {

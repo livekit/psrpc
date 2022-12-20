@@ -30,21 +30,25 @@ type RPCServer interface {
 ### RPCClient
 
 ```go
-type RPC[RequestType proto.Message, ResponseType proto.Message] interface {
-    // send a request to a single server, and receive one response
-    RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error)
-    // send a request to all servers, and receive one response per server
-    RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error)
-    // subscribe to a streaming rpc (all subscribed clients will receive every message)
-    JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error)
-    // join a queue for a streaming rpc (each message is only received by a single client)
-    JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error)
-}
+// send a request to a single server, and receive one response
+func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
+    ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+) (ResponseType, error)
 
-type RPCClient interface {
-    // close all subscriptions and stop
-    Close()
-}
+// send a request to all servers, and receive one response per server
+func RequestAll[RequestType proto.Message, ResponseType proto.Message](
+    ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+) (<-chan *Response[ResponseType], error)
+
+// subscribe to a streaming rpc (all subscribed clients will receive every message)
+func JoinStream[ResponseType proto.Message](
+    ctx context.Context, client RPCClient, rpc string,
+) (Subscription[ResponseType], error)
+
+// join a queue for a streaming rpc (each message is only received by a single client)
+func JoinStreamQueue[ResponseType proto.Message](
+    ctx context.Context, client RPCClient, rpc string,
+) (Subscription[ResponseType], error)
 
 type Response[ResponseType proto.Message] struct {
     Result ResponseType
@@ -151,8 +155,8 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    addValue := psrpc.NewRPC[*api.AddRequest, *api.AddResult](rpcClient, "AddValue") 
-    res, err := addValue.RequestSingle(context.Background(), &proto.AddRequest{Increment: 3})
+    res, err := psrpc.RequestSingle[*api.AddRequest, *api.AddResult](
+		context.Background(), rpcClient, "AddValue", &proto.AddRequest{Increment: 3})
     if err != nil {
         return	
     }
@@ -202,8 +206,8 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    getValues := psrpc.NewRPC[*api.GetValueRequest, *api.ValueResult](rpcClient, "GetValue")
-    sub, err := getValues.RequestAll(context.Background(), &proto.GetValueRequest{})
+    sub, err := psrpc.RequestAll[*api.GetValueRequest, *api.ValueResult](
+		context.Background(), rpcClient, "GetValue", &proto.GetValueRequest{})
     if err != nil {
         return	
     }
@@ -289,8 +293,6 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("ProcessingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    calculateStats := psrpc.NewRPC[*api.CalculateUserStatsRequest, *api.CalculateUserStatsResponse](rpcClient, "CalculateUserStats")
-    
     req := &proto.CalculateUserStatsRequest{
         FromUnixTime: time.Now().Add(-time.Day * 30).UnixNano(),
         ToUnixTime: time.Now().UnixNano()
@@ -304,8 +306,10 @@ func main() {
         ShortCircuitTimeout:  time.Millisecond * 250,
     }
 	
-    res, err := calculateStats.RequestSingle(
+    res, err := psrpc.RequestSingle[*api.CalculateUserStatsRequest, *api.CalculateUserStatsResponse](
         context.Background(),
+        rpcClient,
+        "CalculateUserStats",
         req,
         psrpc.WithAffinityOpts(affinityOpts),
         psrpc.WithTimeout(time.Second * 30), // this query takes a while for larger ranges, use a longer timeout
