@@ -18,10 +18,13 @@ Supports:
 type RPCServer interface {
     // register a handler
     RegisterHandler(h Handler) error
+
     // publish updates to a streaming rpc
     PublishToStream(ctx context.Context, rpc string, message proto.Message) error
+
     // stop listening for requests for a rpc
     DeregisterHandler(rpc string) error
+
     // close all subscriptions and stop
     Close()
 }
@@ -32,24 +35,37 @@ type RPCServer interface {
 ```go
 // send a request to a single server, and receive one response
 func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
-    ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+    ctx context.Context, 
+    client RPCClient, 
+    rpc string, 
+    request RequestType, 
+    opts ...RequestOption,
 ) (ResponseType, error)
 
 // send a request to all servers, and receive one response per server
 func RequestAll[RequestType proto.Message, ResponseType proto.Message](
-    ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+    ctx context.Context, 
+    client RPCClient, 
+    rpc string, 
+    request RequestType,
+    opts ...RequestOption,
 ) (<-chan *Response[ResponseType], error)
 
 // subscribe to a streaming rpc (all subscribed clients will receive every message)
 func JoinStream[ResponseType proto.Message](
-    ctx context.Context, client RPCClient, rpc string,
+    ctx context.Context,
+    client RPCClient,
+    rpc string,
 ) (Subscription[ResponseType], error)
 
 // join a queue for a streaming rpc (each message is only received by a single client)
 func JoinStreamQueue[ResponseType proto.Message](
-    ctx context.Context, client RPCClient, rpc string,
+    ctx context.Context, 
+    client RPCClient,
+    rpc string,
 ) (Subscription[ResponseType], error)
 
+// types
 type Response[ResponseType proto.Message] struct {
     Result ResponseType
     Err    error
@@ -99,11 +115,12 @@ affinityOpts := psrpc.AffinityOpts{
     AffinityTimeout:      time.Second,
     ShortCircuitTimeout:  time.Millisecond * 250,
 }
-res, err := myRPC.RequestSingle(
+res, err := psrpc.RequestSingle[*api.Request, *api.Response](
     context.Background(), 
+    rpcClient,
+    "MyRPC",
     req,
-    psrpc.WithAffinityOpts(affinityOpts),
-)
+    psrpc.WithAffinityOpts(affinityOpts))
 ```
 
 For a full example, see the [Advanced example](#Advanced) below.
@@ -156,7 +173,10 @@ func main() {
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
     res, err := psrpc.RequestSingle[*api.AddRequest, *api.AddResult](
-		context.Background(), rpcClient, "AddValue", &proto.AddRequest{Increment: 3})
+        context.Background(), 
+        rpcClient, 
+        "AddValue", 
+        &proto.AddRequest{Increment: 3})
     if err != nil {
         return	
     }
@@ -207,7 +227,10 @@ func main() {
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
     sub, err := psrpc.RequestAll[*api.GetValueRequest, *api.ValueResult](
-		context.Background(), rpcClient, "GetValue", &proto.GetValueRequest{})
+        context.Background(), 
+        rpcClient, 
+        "GetValue", 
+        &proto.GetValueRequest{})
     if err != nil {
         return	
     }
@@ -312,8 +335,7 @@ func main() {
         "CalculateUserStats",
         req,
         psrpc.WithAffinityOpts(affinityOpts),
-        psrpc.WithTimeout(time.Second * 30), // this query takes a while for larger ranges, use a longer timeout
-    )
+        psrpc.WithTimeout(time.Second * 30)) // this query takes a while for larger ranges, use a longer timeout
     fmt.Printf("%+v", res)
 }
 ```
