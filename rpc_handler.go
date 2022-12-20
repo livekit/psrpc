@@ -4,15 +4,17 @@ import (
 	"context"
 
 	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc/internal"
 )
 
 type handler[RequestType proto.Message, ResponseType proto.Message] struct {
 	rpcHandlerInternal
 
 	rpc          string
+	sub          Subscription[*internal.Request]
 	handlerFunc  func(context.Context, RequestType) (ResponseType, error)
 	affinityFunc AffinityFunc
-	closed       chan struct{}
 }
 
 type rpcHandlerInternal interface {
@@ -20,9 +22,9 @@ type rpcHandlerInternal interface {
 
 	getRPC() string
 	getAffinityFunc() AffinityFunc
+	setSub(sub Subscription[*internal.Request])
 	handle(context.Context, proto.Message) (proto.Message, error)
-	getClosed() chan struct{}
-	close()
+	close() error
 }
 
 func NewHandler[RequestType proto.Message, ResponseType proto.Message](
@@ -33,7 +35,6 @@ func NewHandler[RequestType proto.Message, ResponseType proto.Message](
 	return &handler[RequestType, ResponseType]{
 		rpc:         rpc,
 		handlerFunc: handlerFunc,
-		closed:      make(chan struct{}),
 	}
 }
 
@@ -50,18 +51,14 @@ func (h *handler[RequestType, ResponseType]) getAffinityFunc() AffinityFunc {
 	return h.affinityFunc
 }
 
+func (h *handler[RequestType, ResponseType]) setSub(sub Subscription[*internal.Request]) {
+	h.sub = sub
+}
+
 func (h *handler[RequestType, ResponseType]) handle(ctx context.Context, req proto.Message) (proto.Message, error) {
 	return h.handlerFunc(ctx, req.(RequestType))
 }
 
-func (h *handler[RequestType, ResponseType]) getClosed() chan struct{} {
-	return h.closed
-}
-
-func (h *handler[RequestType, ResponseType]) close() {
-	select {
-	case <-h.closed:
-	default:
-		close(h.closed)
-	}
+func (h *handler[RequestType, ResponseType]) close() error {
+	return h.sub.Close()
 }

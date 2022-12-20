@@ -176,7 +176,7 @@ func main() {
         context.Background(), 
         rpcClient, 
         "AddValue", 
-        &proto.AddRequest{Increment: 3})
+        &api.AddRequest{Increment: 3})
     if err != nil {
         return	
     }
@@ -214,7 +214,7 @@ type Service struct {
 }
 
 func (s *Service) GetValue(ctx context.Context, req *api.GetValueRequest) (*api.ValueResult, error) {
-    return &proto.ValueResult{Value: s.counter.Load()}, nil
+    return &api.ValueResult{Value: s.counter.Load()}, nil
 }
 
 ```
@@ -230,7 +230,7 @@ func main() {
         context.Background(), 
         rpcClient, 
         "GetValue", 
-        &proto.GetValueRequest{})
+        &api.GetValueRequest{})
     if err != nil {
         return	
     }
@@ -299,7 +299,7 @@ func (s *ProcessingService) CalculateUserStats(ctx context.Context, req *api.Cal
         return nil, err
     }
 	
-    return &proto.CalculateUserStatsResponse{
+    return &api.CalculateUserStatsResponse{
         UniqueUsers: userStats.uniqueUsers,
         NewUsers: userStats.newUsers,
         InactiveUsers: userStats.inactiveUsers,
@@ -316,7 +316,7 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("ProcessingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    req := &proto.CalculateUserStatsRequest{
+    req := &api.CalculateUserStatsRequest{
         FromUnixTime: time.Now().Add(-time.Day * 30).UnixNano(),
         ToUnixTime: time.Now().UnixNano()
     }

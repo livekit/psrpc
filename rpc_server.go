@@ -67,6 +67,7 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 	if err != nil {
 		return err
 	}
+	h.setSub(sub)
 
 	s.mu.Lock()
 	// close previous handler if exists
@@ -77,7 +78,6 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 	s.handlers[rpc] = h
 	s.mu.Unlock()
 
-	handlerClosed := h.getClosed()
 	reqChan := sub.Channel()
 	go func() {
 		for {
@@ -86,11 +86,11 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 				_ = sub.Close()
 				return
 
-			case <-handlerClosed:
-				_ = sub.Close()
-				return
-
 			case req := <-reqChan:
+				if req == nil {
+					return
+				}
+
 				if time.Now().UnixNano() < req.Expiry {
 					go func() {
 						if err := s.handleRequest(h, req); err != nil {
@@ -211,7 +211,7 @@ func (s *rpcServer) closeHandlerLocked(rpc string) error {
 	h, ok := s.handlers[rpc]
 	if ok {
 		delete(s.handlers, rpc)
-		h.close()
+		return h.close()
 	}
 	return nil
 }

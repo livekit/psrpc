@@ -15,17 +15,6 @@ type RPCClient interface {
 	rpcClientInternal
 }
 
-type RPC[RequestType proto.Message, ResponseType proto.Message] interface {
-	// send a request to a single server, and receive one response
-	RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error)
-	// send a request to all servers, and receive one response per server
-	RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error)
-	// subscribe to a streaming rpc (all subscribed clients will receive every message)
-	JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error)
-	// join a queue for a streaming rpc (each message is only received by a single client)
-	JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error)
-}
-
 type Response[ResponseType proto.Message] struct {
 	Result ResponseType
 	Err    error
