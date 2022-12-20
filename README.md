@@ -158,7 +158,7 @@ type CountingService struct {
     counter atomic.Int32
 }
 
-func (s *CountingService) AddValue(ctx context.Context, req api.AddReqest) (api.AddResult, error) {
+func (s *CountingService) AddValue(ctx context.Context, req *api.AddReqest) (*api.AddResult, error) {
     value := counter.Add(req.Increment)
     return &proto.AddResult{Value: value}, nil
 }
