@@ -35,7 +35,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 		closed:      make(chan struct{}),
 	}
 
-	claims, err := s.Subscribe(context.Background(), getClaimResponseChannel(serviceName))
+	claims, err := Subscribe[*internal.ClaimResponse](s, context.Background(), getClaimResponseChannel(serviceName))
 	if err != nil {
 		return nil, err
 	}
@@ -47,9 +47,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 				_ = claims.Close()
 				return
 
-			case p := <-claims.Channel():
-				claim := p.(*internal.ClaimResponse)
-
+			case claim := <-claims.Channel():
 				s.mu.RLock()
 				claimChan, ok := s.claims[claim.RequestId]
 				s.mu.RUnlock()
@@ -65,7 +63,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 
 func (s *rpcServer) RegisterHandler(h Handler) error {
 	rpc := h.getRPC()
-	sub, err := s.Subscribe(context.Background(), getRPCChannel(s.serviceName, rpc))
+	sub, err := Subscribe[*internal.Request](s, context.Background(), getRPCChannel(s.serviceName, rpc))
 	if err != nil {
 		return err
 	}
@@ -76,10 +74,10 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 		s.mu.Unlock()
 		return err
 	}
-	h.setSub(sub)
 	s.handlers[rpc] = h
 	s.mu.Unlock()
 
+	handlerClosed := h.getClosed()
 	reqChan := sub.Channel()
 	go func() {
 		for {
@@ -88,8 +86,11 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 				_ = sub.Close()
 				return
 
-			case p := <-reqChan:
-				req := p.(*internal.Request)
+			case <-handlerClosed:
+				_ = sub.Close()
+				return
+
+			case req := <-reqChan:
 				if time.Now().UnixNano() < req.Expiry {
 					go func() {
 						if err := s.handleRequest(h, req); err != nil {
@@ -105,7 +106,7 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 }
 
 func (s *rpcServer) PublishToStream(ctx context.Context, rpc string, msg proto.Message) error {
-	return s.Publish(ctx, getRPCChannel(s.serviceName, rpc), msg)
+	return Publish(s, ctx, getRPCChannel(s.serviceName, rpc), msg)
 }
 
 func (s *rpcServer) DeregisterHandler(rpc string) error {
@@ -157,7 +158,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 	s.claims[request.RequestId] = claimResponseChan
 	s.mu.Unlock()
 
-	err := s.Publish(ctx, getClaimRequestChannel(s.serviceName, request.ClientId), &internal.ClaimRequest{
+	err := Publish(s, ctx, getClaimRequestChannel(s.serviceName, request.ClientId), &internal.ClaimRequest{
 		RequestId: request.RequestId,
 		ServerId:  s.id,
 		Affinity:  affinity,
@@ -203,14 +204,14 @@ func (s *rpcServer) sendResponse(ctx context.Context, req *internal.Request, res
 		res.Response = v
 	}
 
-	return s.Publish(ctx, getResponseChannel(s.serviceName, req.ClientId), res)
+	return Publish(s, ctx, getResponseChannel(s.serviceName, req.ClientId), res)
 }
 
 func (s *rpcServer) closeHandlerLocked(rpc string) error {
 	h, ok := s.handlers[rpc]
 	if ok {
 		delete(s.handlers, rpc)
-		return h.close()
+		h.close()
 	}
 	return nil
 }

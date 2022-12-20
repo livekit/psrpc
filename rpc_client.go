@@ -29,6 +29,11 @@ type rpcClientInternal interface {
 	isRPCClient(*rpcClient)
 }
 
+type clientRPC[RequestType proto.Message, ResponseType proto.Message] struct {
+	*rpcClient
+	rpc string
+}
+
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
 	c := &rpcClient{
 		MessageBus:       bus,
@@ -41,12 +46,12 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 	}
 
 	ctx := context.Background()
-	responses, err := c.Subscribe(ctx, getResponseChannel(serviceName, clientID))
+	responses, err := Subscribe[*internal.Response](c, ctx, getResponseChannel(serviceName, clientID))
 	if err != nil {
 		return nil, err
 	}
 
-	claims, err := c.Subscribe(ctx, getClaimRequestChannel(serviceName, clientID))
+	claims, err := Subscribe[*internal.ClaimRequest](c, ctx, getClaimRequestChannel(serviceName, clientID))
 	if err != nil {
 		_ = responses.Close()
 		return nil, err
@@ -60,8 +65,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 				_ = responses.Close()
 				return
 
-			case p := <-claims.Channel():
-				claim := p.(*internal.ClaimRequest)
+			case claim := <-claims.Channel():
 				c.mu.RLock()
 				claimChan, ok := c.claimRequests[claim.RequestId]
 				c.mu.RUnlock()
@@ -69,8 +73,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 					claimChan <- claim
 				}
 
-			case p := <-responses.Channel():
-				res := p.(*internal.Response)
+			case res := <-responses.Channel():
 				c.mu.RLock()
 				resChan, ok := c.responseChannels[res.RequestId]
 				c.mu.RUnlock()
@@ -84,19 +87,14 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 	return c, nil
 }
 
-type rpcImpl[RequestType proto.Message, ResponseType proto.Message] struct {
-	*rpcClient
-	rpc string
-}
-
 func NewRPC[RequestType proto.Message, ResponseType proto.Message](c RPCClient, rpc string) RPC[RequestType, ResponseType] {
-	return &rpcImpl[RequestType, ResponseType]{
+	return &clientRPC[RequestType, ResponseType]{
 		rpcClient: c.(*rpcClient),
 		rpc:       rpc,
 	}
 }
 
-func (r *rpcImpl[RequestType, ResponseType]) SendSingleRequest(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error) {
+func (r *clientRPC[RequestType, ResponseType]) RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error) {
 	o := getRequestOpts(r.rpcOpts, opts...)
 	var empty ResponseType
 
@@ -131,7 +129,7 @@ func (r *rpcImpl[RequestType, ResponseType]) SendSingleRequest(ctx context.Conte
 		r.mu.Unlock()
 	}()
 
-	if err = r.Publish(ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
+	if err = Publish(r, ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
 		return empty, err
 	}
 
@@ -142,7 +140,7 @@ func (r *rpcImpl[RequestType, ResponseType]) SendSingleRequest(ctx context.Conte
 	if err != nil {
 		return empty, err
 	}
-	if err = r.Publish(ctx, getClaimResponseChannel(r.serviceName), &internal.ClaimResponse{
+	if err = Publish(r, ctx, getClaimResponseChannel(r.serviceName), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -166,7 +164,7 @@ func (r *rpcImpl[RequestType, ResponseType]) SendSingleRequest(ctx context.Conte
 	}
 }
 
-func (r *rpcImpl[RequestType, ResponseType]) SendMultiRequest(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error) {
+func (r *clientRPC[RequestType, ResponseType]) RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error) {
 	o := getRequestOpts(r.rpcOpts, opts...)
 
 	v, err := anypb.New(request)
@@ -220,19 +218,19 @@ func (r *rpcImpl[RequestType, ResponseType]) SendMultiRequest(ctx context.Contex
 		}
 	}()
 
-	if err = r.Publish(ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
+	if err = Publish(r, ctx, getRPCChannel(r.serviceName, r.rpc), req); err != nil {
 		return nil, err
 	}
 
 	return responseChannel, nil
 }
 
-func (r *rpcImpl[RequestType, ResponseType]) JoinStream(ctx context.Context, rpc string) (Subscription, error) {
-	return r.Subscribe(ctx, getRPCChannel(r.serviceName, rpc))
+func (r *clientRPC[RequestType, ResponseType]) JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error) {
+	return Subscribe[ResponseType](r, ctx, getRPCChannel(r.serviceName, rpc))
 }
 
-func (r *rpcImpl[RequestType, ResponseType]) JoinStreamQueue(ctx context.Context, rpc string) (Subscription, error) {
-	return r.SubscribeQueue(ctx, getRPCChannel(r.serviceName, rpc))
+func (r *clientRPC[RequestType, ResponseType]) JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error) {
+	return SubscribeQueue[ResponseType](r, ctx, getRPCChannel(r.serviceName, rpc))
 }
 
 func (c *rpcClient) Close() {

@@ -7,45 +7,53 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type natsMessageBus struct {
-	nc *nats.Conn
-}
-
 func NewNatsMessageBus(nc *nats.Conn) MessageBus {
-	return &natsMessageBus{nc: nc}
+	return &bus{
+		busType: natsBus,
+		nc:      nc,
+	}
 }
 
-func (n *natsMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
+func natsPublish(nc *nats.Conn, _ context.Context, channel string, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	return n.nc.Publish(channel, b)
+	return nc.Publish(channel, b)
 }
 
-func (n *natsMessageBus) Subscribe(_ context.Context, channel string) (Subscription, error) {
+func natsSubscribe[MessageType proto.Message](
+	nc *nats.Conn, _ context.Context, channel string,
+) (Subscription[MessageType], error) {
+
 	msgChan := make(chan *nats.Msg, ChannelSize)
-	sub, err := n.nc.ChanSubscribe(channel, msgChan)
+	sub, err := nc.ChanSubscribe(channel, msgChan)
 	if err != nil {
 		return nil, err
 	}
 
-	return toNatsSubscription(sub, msgChan), nil
+	return toNatsSubscription[MessageType](sub, msgChan), nil
 }
 
-func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel string) (Subscription, error) {
+func natsSubscribeQueue[MessageType proto.Message](
+	nc *nats.Conn, _ context.Context, channel string,
+) (Subscription[MessageType], error) {
+
 	msgChan := make(chan *nats.Msg, ChannelSize)
-	sub, err := n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
+	sub, err := nc.ChanQueueSubscribe(channel, "bus", msgChan)
 	if err != nil {
 		return nil, err
 	}
 
-	return toNatsSubscription(sub, msgChan), nil
+	return toNatsSubscription[MessageType](sub, msgChan), nil
 }
 
-func toNatsSubscription(sub *nats.Subscription, msgChan chan *nats.Msg) Subscription {
-	dataChan := make(chan proto.Message, ChannelSize)
+func toNatsSubscription[MessageType proto.Message](
+	sub *nats.Subscription, msgChan chan *nats.Msg,
+) Subscription[MessageType] {
+
+	dataChan := make(chan MessageType, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
@@ -58,25 +66,25 @@ func toNatsSubscription(sub *nats.Subscription, msgChan chan *nats.Msg) Subscrip
 			if err != nil {
 				logger.Error(err, "failed to deserialize message")
 			}
-			dataChan <- p
+			dataChan <- p.(MessageType)
 		}
 	}()
 
-	return &natsSubscription{
+	return &natsSubscription[MessageType]{
 		sub: sub,
 		c:   dataChan,
 	}
 }
 
-type natsSubscription struct {
+type natsSubscription[MessageType proto.Message] struct {
 	sub *nats.Subscription
-	c   <-chan proto.Message
+	c   <-chan MessageType
 }
 
-func (n *natsSubscription) Channel() <-chan proto.Message {
+func (n *natsSubscription[MessageType]) Channel() <-chan MessageType {
 	return n.c
 }
 
-func (n *natsSubscription) Close() error {
+func (n *natsSubscription[MessageType]) Close() error {
 	return n.sub.Unsubscribe()
 }

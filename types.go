@@ -17,18 +17,23 @@ type RPCClient interface {
 
 type RPC[RequestType proto.Message, ResponseType proto.Message] interface {
 	// send a request to a single server, and receive one response
-	SendSingleRequest(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error)
+	RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error)
 	// send a request to all servers, and receive one response per server
-	SendMultiRequest(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error)
+	RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error)
 	// subscribe to a streaming rpc (all subscribed clients will receive every message)
-	JoinStream(ctx context.Context, rpc string) (Subscription, error)
+	JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error)
 	// join a queue for a streaming rpc (each message is only received by a single client)
-	JoinStreamQueue(ctx context.Context, rpc string) (Subscription, error)
+	JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error)
 }
 
 type Response[ResponseType proto.Message] struct {
 	Result ResponseType
 	Err    error
+}
+
+type Subscription[MessageType proto.Message] interface {
+	Channel() <-chan MessageType
+	Close() error
 }
 
 // --- Server ---
@@ -43,23 +48,10 @@ type Handler interface {
 type RPCServer interface {
 	// register a handler
 	RegisterHandler(h Handler) error
-	// publish updates to a streaming rpcImpl
+	// publish updates to a streaming rpc
 	PublishToStream(ctx context.Context, rpc string, message proto.Message) error
-	// stop listening for requests for a rpcImpl
+	// stop listening for requests for a rpc
 	DeregisterHandler(rpc string) error
 	// close all subscriptions and stop
 	Close()
-}
-
-// --- Bus ---
-
-type MessageBus interface {
-	Publish(ctx context.Context, channel string, msg proto.Message) error
-	Subscribe(ctx context.Context, channel string) (Subscription, error)
-	SubscribeQueue(ctx context.Context, channel string) (Subscription, error)
-}
-
-type Subscription interface {
-	Channel() <-chan proto.Message
-	Close() error
 }

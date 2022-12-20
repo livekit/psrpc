@@ -13,27 +13,29 @@ import (
 
 const lockExpiration = time.Second * 5
 
-type redisMessageBus struct {
-	rc redis.UniversalClient
-}
-
 func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
-	return &redisMessageBus{rc: rc}
+	return &bus{
+		busType: redisBus,
+		rc:      rc,
+	}
 }
 
-func (r *redisMessageBus) Publish(ctx context.Context, channel string, msg proto.Message) error {
+func redisPublish(rc redis.UniversalClient, ctx context.Context, channel string, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	return r.rc.Publish(ctx, channel, b).Err()
+	return rc.Publish(ctx, channel, b).Err()
 }
 
-func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscription, error) {
-	sub := r.rc.Subscribe(ctx, channel)
+func redisSubscribe[MessageType proto.Message](
+	rc redis.UniversalClient, ctx context.Context, channel string,
+) (Subscription[MessageType], error) {
+
+	sub := rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan proto.Message, ChannelSize)
+	dataChan := make(chan MessageType, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
@@ -47,20 +49,23 @@ func (r *redisMessageBus) Subscribe(ctx context.Context, channel string) (Subscr
 				logger.Error(err, "failed to deserialize message")
 				continue
 			}
-			dataChan <- p
+			dataChan <- p.(MessageType)
 		}
 	}()
 
-	return &redisSubscription{
+	return &redisSubscription[MessageType]{
 		sub: sub,
 		c:   dataChan,
 	}, nil
 }
 
-func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (Subscription, error) {
-	sub := r.rc.Subscribe(ctx, channel)
+func redisSubscribeQueue[MessageType proto.Message](
+	rc redis.UniversalClient, ctx context.Context, channel string,
+) (Subscription[MessageType], error) {
+
+	sub := rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan proto.Message, ChannelSize)
+	dataChan := make(chan MessageType, ChannelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
@@ -71,7 +76,7 @@ func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (S
 
 			sha := sha256.Sum256([]byte(msg.Payload))
 			hash := base64.StdEncoding.EncodeToString(sha[:])
-			acquired, err := r.rc.SetNX(ctx, hash, rand.Int(), lockExpiration).Result()
+			acquired, err := rc.SetNX(ctx, hash, rand.Int(), lockExpiration).Result()
 			if err != nil {
 				logger.Error(err, "failed to acquire redis lock")
 				continue
@@ -81,26 +86,26 @@ func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string) (S
 					logger.Error(err, "failed to deserialize message")
 					continue
 				}
-				dataChan <- p
+				dataChan <- p.(MessageType)
 			}
 		}
 	}()
 
-	return &redisSubscription{
+	return &redisSubscription[MessageType]{
 		sub: sub,
 		c:   dataChan,
 	}, nil
 }
 
-type redisSubscription struct {
+type redisSubscription[MessageType proto.Message] struct {
 	sub *redis.PubSub
-	c   <-chan proto.Message
+	c   <-chan MessageType
 }
 
-func (r *redisSubscription) Channel() <-chan proto.Message {
+func (r *redisSubscription[MessageType]) Channel() <-chan MessageType {
 	return r.c
 }
 
-func (r *redisSubscription) Close() error {
+func (r *redisSubscription[MessageType]) Close() error {
 	return r.sub.Close()
 }

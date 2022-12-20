@@ -7,27 +7,33 @@ import (
 )
 
 type handler[RequestType proto.Message, ResponseType proto.Message] struct {
+	rpcHandlerInternal
+
 	rpc          string
 	handlerFunc  func(context.Context, RequestType) (ResponseType, error)
 	affinityFunc AffinityFunc
-	sub          Subscription
+	closed       chan struct{}
 }
 
 type rpcHandlerInternal interface {
+	isHandler(*handler[proto.Message, proto.Message])
+
 	getRPC() string
-	setSub(Subscription)
 	getAffinityFunc() AffinityFunc
 	handle(context.Context, proto.Message) (proto.Message, error)
-	close() error
+	getClosed() chan struct{}
+	close()
 }
 
 func NewHandler[RequestType proto.Message, ResponseType proto.Message](
 	rpc string,
 	handlerFunc func(context.Context, RequestType) (ResponseType, error),
 ) Handler {
+
 	return &handler[RequestType, ResponseType]{
 		rpc:         rpc,
 		handlerFunc: handlerFunc,
+		closed:      make(chan struct{}),
 	}
 }
 
@@ -36,14 +42,8 @@ func (h *handler[RequestType, ResponseType]) WithAffinityFunc(affinityFunc Affin
 	return h
 }
 
-func (h *handler[RequestType, ResponseType]) isHandler() {}
-
 func (h *handler[RequestType, ResponseType]) getRPC() string {
 	return h.rpc
-}
-
-func (h *handler[RequestType, ResponseType]) setSub(sub Subscription) {
-	h.sub = sub
 }
 
 func (h *handler[RequestType, ResponseType]) getAffinityFunc() AffinityFunc {
@@ -54,6 +54,14 @@ func (h *handler[RequestType, ResponseType]) handle(ctx context.Context, req pro
 	return h.handlerFunc(ctx, req.(RequestType))
 }
 
-func (h *handler[RequestType, ResponseType]) close() error {
-	return h.sub.Close()
+func (h *handler[RequestType, ResponseType]) getClosed() chan struct{} {
+	return h.closed
+}
+
+func (h *handler[RequestType, ResponseType]) close() {
+	select {
+	case <-h.closed:
+	default:
+		close(h.closed)
+	}
 }
