@@ -10,7 +10,7 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
-type AffinityFunc func(proto.Message) float32
+type AffinityFunc[RequestType proto.Message] func(RequestType) float32
 
 type AffinityOpts struct {
 	AcceptFirstAvailable bool
