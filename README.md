@@ -125,7 +125,7 @@ Server:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-	serverID := "test_server"
+    serverID := "test_server"
     rpcServer := psrpc.NewRPCServer("CountingService", serverID, psrpc.NewRedisMessageBus(rc))
     
     svc := &CountingService{}
@@ -148,10 +148,10 @@ Client:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-	clientID := "test_client"
+    clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-	addValue := psrpc.NewRPC[*api.AddRequest, *api.AddResult](rpcClient, "AddValue") 
+    addValue := psrpc.NewRPC[*api.AddRequest, *api.AddResult](rpcClient, "AddValue") 
     res, err := addValue.RequestSingle(context.Background(), &proto.AddRequest{Increment: 3})
     if err != nil {
         return	
@@ -202,7 +202,7 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-	getValues := psrpc.NewRPC[*api.GetValueRequest, *api.ValueResult](rpcClient, "GetValue")
+    getValues := psrpc.NewRPC[*api.GetValueRequest, *api.ValueResult](rpcClient, "GetValue")
     sub, err := getValues.RequestAll(context.Background(), &proto.GetValueRequest{})
     if err != nil {
         return	
