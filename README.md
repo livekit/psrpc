@@ -3,12 +3,12 @@
 Create custom protobuf-based golang RPCs built on pub/sub.
 
 Supports:
-* Redis or Nats as a backend (or easily [implement your own](#Using-your-own-message-bus))
+* Redis or Nats as a backend
 * Custom server selection for RPC handling based on user-defined [affinity](#Affinity)
-* Single RPCs (SendSingleRequest) - one request is handled by one server, used for normal RPCs
-* Multi RPCs (SendMultiRequest) - one request is handled by every server, used for distributed updates or result aggregation
-* Single RPC streams (JoinStream) - a server can send updates which should only be processed by a single client
-* Multi RPC streams (JoinStreamQueue) - a server can send updates which should be processed by every client
+* Single RPCs (RequestSingle) - one request is handled by one server, used for normal RPCs
+* Multi RPCs (RequestAll) - one request is handled by every server, used for distributed updates or result aggregation
+* Single RPC streams (JoinStreamQueue) - updates sent from the server will only be processed by a single client
+* Multi RPC streams (JoinStream) - updates sent be the server will be processed by every client
 
 ## Interfaces
 
@@ -16,49 +16,43 @@ Supports:
 
 ```go
 type RPCServer interface {
-    // register a rpc handler function
-    RegisterHandler(rpc string, handler HandlerFunc) error
-    
+    // register a handler
+    RegisterHandler(h Handler) error
     // publish updates to a streaming rpc
     PublishToStream(ctx context.Context, rpc string, message proto.Message) error
-
     // stop listening for requests for a rpc
     DeregisterHandler(rpc string) error
-
     // close all subscriptions and stop
     Close()
 }
-
-type HandlerFunc func(ctx context.Context, request proto.Message) (proto.Message, error)
 ```
 
 ### RPCClient
 
 ```go
-type RPCClient interface {
+type RPC[RequestType proto.Message, ResponseType proto.Message] interface {
     // send a request to a single server, and receive one response
-    SendSingleRequest(ctx context.Context, rpc string, request proto.Message) (proto.Message, error)
-    
+    RequestSingle(ctx context.Context, request RequestType, opts ...RequestOption) (ResponseType, error)
     // send a request to all servers, and receive one response per server
-    SendMultiRequest(ctx context.Context, rpc string, request proto.Message) (<-chan *Response, error)
-    
+    RequestAll(ctx context.Context, request RequestType, opts ...RequestOption) (<-chan *Response[ResponseType], error)
     // subscribe to a streaming rpc (all subscribed clients will receive every message)
-    JoinStream(ctx context.Context, rpc string) (Subscription, error)
-    
+    JoinStream(ctx context.Context, rpc string) (Subscription[ResponseType], error)
     // join a queue for a streaming rpc (each message is only received by a single client)
-    JoinStreamQueue(ctx context.Context, rpc string) (Subscription, error)
-    
+    JoinStreamQueue(ctx context.Context, rpc string) (Subscription[ResponseType], error)
+}
+
+type RPCClient interface {
     // close all subscriptions and stop
     Close()
 }
 
-type Response struct {
-    Result proto.Message
+type Response[ResponseType proto.Message] struct {
+    Result ResponseType
     Err    error
 }
 
-type Subscription interface {
-    Channel() <-chan proto.Message
+type Subscription[MessageType proto.Message] interface {
+    Channel() <-chan MessageType
     Close() error
 }
 ```
@@ -74,7 +68,7 @@ For example, the following could be used to return an affinity based on cpu load
 ```go
 func main() {
     ...
-    rpcServer.RegisterHandler("MyRPC", rpcHandler, psrpc.WithAffinityFunc(getAffinity))
+    rpcServer.RegisterHandler(psrpc.NewHandler("MyRPC", handlerFunc).WithAffinityFunc(getAffinity))
     ...
 }
 
@@ -96,17 +90,16 @@ Affinity options:
 If no options are supplied, the client will choose the first server to respond with an affinity score > 0.
 
 ```go
-    affinityOpts := psrpc.AffinityOpts{
-        MinimumAffinity:      0.5,
-        AffinityTimeout:      time.Second,
-        ShortCircuitTimeout:  time.Millisecond * 250,
-    }
-    res, err := rpcClient.SendSingleRequest(
-        context.Background(), 
-        "MyRPC", 
-        req,
-        psrpc.WithAffinityOpts(affinityOpts),
-    )
+affinityOpts := psrpc.AffinityOpts{
+    MinimumAffinity:      0.5,
+    AffinityTimeout:      time.Second,
+    ShortCircuitTimeout:  time.Millisecond * 250,
+}
+res, err := myRPC.RequestSingle(
+    context.Background(), 
+    req,
+    psrpc.WithAffinityOpts(affinityOpts),
+)
 ```
 
 For a full example, see the [Advanced example](#Advanced) below.
@@ -117,7 +110,7 @@ For a full example, see the [Advanced example](#Advanced) below.
 
 Proto:
 ```protobuf
-package proto;
+package api;
 
 message AddRequest {
   int32 increment = 1;
@@ -132,10 +125,11 @@ Server:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcServer := psrpc.NewRPCServer("CountingService", psrpc.NewRedisMessageBus(rc))
+	serverID := "test_server"
+    rpcServer := psrpc.NewRPCServer("CountingService", serverID, psrpc.NewRedisMessageBus(rc))
     
     svc := &CountingService{}
-    rpcServer.RegisterHandler("AddValue", svc.AddValue)
+    rpcServer.RegisterHandler(psrpc.NewHandler("AddValue", svc.AddValue))
     ...
 }
 
@@ -143,9 +137,8 @@ type CountingService struct {
     counter atomic.Int32
 }
 
-func (s *CountingService) AddValue(ctx context.Context, req proto.Message) (proto.Message, error) {
-    addRequest := req.(*proto.AddRequest)
-    value := counter.Add(addRequest.Increment)
+func (s *CountingService) AddValue(ctx context.Context, req api.AddReqest) (api.AddResult, error) {
+    value := counter.Add(req.Increment)
     return &proto.AddResult{Value: value}, nil
 }
 
@@ -155,13 +148,15 @@ Client:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcClient := psrpc.NewRPCClient("CountingService", psrpc.NewRedisMessageBus(rc))
-    res, err := rpcClient.SendSingleRequest(context.Background(), "AddValue", &proto.AddRequest{Increment: 3})
+	clientID := "test_client"
+    rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
+	
+	addValue := psrpc.NewRPC[*api.AddRequest, *api.AddResult](rpcClient, "AddValue") 
+    res, err := addValue.RequestSingle(context.Background(), &proto.AddRequest{Increment: 3})
     if err != nil {
         return	
     }
-    addResult := res.(*proto.AddResult)
-    fmt.Println(addResult.Value)
+    fmt.Println(res.Value)
 }
 ```
 
@@ -169,7 +164,7 @@ func main() {
 
 Proto:
 ```protobuf
-package proto;
+package api;
 
 message GetValueRequest {}
 
@@ -182,10 +177,11 @@ Server:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcServer := psrpc.NewRPCServer("CountingService", psrpc.NewRedisMessageBus(rc))
+    serverID := "test_server"
+    rpcServer := psrpc.NewRPCServer("CountingService", serverID, psrpc.NewRedisMessageBus(rc))
     
     svc := &Service{}
-    rpcServer.RegisterHandler("GetAllValues", svc.GetValue)
+    rpcServer.RegisterHandler(psrpc.NewHandler("GetValue", svc.GetValue))
     ...
 }
 
@@ -193,8 +189,7 @@ type Service struct {
     counter atomic.Int32
 }
 
-func (s *Service) GetValue(ctx context.Context, req proto.Message) (proto.Message, error) {
-    addRequest := req.(*proto.GetValueRequest)
+func (s *Service) GetValue(ctx context.Context, req *api.GetValueRequest) (*api.ValueResult, error) {
     return &proto.ValueResult{Value: s.counter.Load()}, nil
 }
 
@@ -204,8 +199,11 @@ Client:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcClient := psrpc.NewRPCClient("CountingService", psrpc.NewRedisMessageBus(rc))
-    sub, err := rpcClient.SendSingleRequest(context.Background(), "GetAllValues", &proto.GetValueRequest{})
+    clientID := "test_client"
+    rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
+	
+	getValues := psrpc.NewRPC[*api.GetValueRequest, *api.ValueResult](rpcClient, "GetValue")
+    sub, err := getValues.RequestAll(context.Background(), &proto.GetValueRequest{})
     if err != nil {
         return	
     }
@@ -222,7 +220,7 @@ func main() {
         if response.Err != nil {
             fmt.Println("error:", err)	
         } else {
-            total += response.Result.(*ValueResult).Value	
+            total += response.Result.Value	
         }
     }
     fmt.Println("total:", total)
@@ -233,7 +231,7 @@ func main() {
 
 Proto:
 ```protobuf
-package proto;
+package api;
 
 message CalculateUserStatsRequest {
   int64 from_unix_time = 1;
@@ -253,10 +251,11 @@ Server:
 func main() {
     svc := NewProcessingService()
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcServer := psrpc.NewRPCServer("ProcessingService", psrpc.NewRedisMessageBus(rc))
+    serverID := "test_server"
+    rpcServer := psrpc.NewRPCServer("ProcessingService", serverID, psrpc.NewRedisMessageBus(rc))
     defer rpcServer.Close()
 	
-    rpcServer.RegisterHandler("CalculateUserStats", svc.CalculateUserStats, psrpc.WithAffinityFunc(getAffinity))
+    rpcServer.RegisterHandler(psrpc.NewHandler("CalculateUserStats", svc.CalculateUserStats).WithAffinityFunc(getAffinity))
     ...
 }
 
@@ -267,8 +266,7 @@ func getAffinity(req proto.Message) float32 {
 
 type ProcessingService struct {}
 
-func (s *ProcessingService) CalculateUserStats(ctx context.Context, req proto.Message) (proto.Message, error) {
-    request := req.(*proto.CalculateUserStatsRequest)
+func (s *ProcessingService) CalculateUserStats(ctx context.Context, req *api.CalculateUserStatsRequest) (*api.CalculateUserStatsResponse, error) {
     userStats, err := getUserStats(req.FromUnixTime, req.ToUnixTime)
     if err != nil {
         return nil, err
@@ -288,7 +286,10 @@ Client:
 ```go
 func main() {
     rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    rpcClient := psrpc.NewRPCClient("ProcessingService", psrpc.NewRedisMessageBus(rc))
+    clientID := "test_client"
+    rpcClient := psrpc.NewRPCClient("ProcessingService", clientID, psrpc.NewRedisMessageBus(rc))
+	
+    calculateStats := psrpc.NewRPC[*api.CalculateUserStatsRequest, *api.CalculateUserStatsResponse](rpcClient, "CalculateUserStats")
     
     req := &proto.CalculateUserStatsRequest{
         FromUnixTime: time.Now().Add(-time.Day * 30).UnixNano(),
@@ -303,28 +304,12 @@ func main() {
         ShortCircuitTimeout:  time.Millisecond * 250,
     }
 	
-    res, err := rpcClient.SendSingleRequest(
+    res, err := calculateStats.RequestSingle(
         context.Background(),
-        "CalculateUserStats",
         req,
         psrpc.WithAffinityOpts(affinityOpts),
         psrpc.WithTimeout(time.Second * 30), // this query takes a while for larger ranges, use a longer timeout
     )
-    result := res.(*proto.CalculateUserStatsResponse)
-    fmt.Printf("%+v", result)
+    fmt.Printf("%+v", res)
 }
 ```
-
-## Using your own message bus
-
-To use this RPC system with a message bus other than Redis or Nats, simply implement the MessageBus interface, and plug it into your RPCClient and RPCServer:
-
-```go
-type MessageBus interface {
-    Publish(ctx context.Context, channel string, msg proto.Message) error
-    Subscribe(ctx context.Context, channel string) (Subscription, error)
-    SubscribeQueue(ctx context.Context, channel string) (Subscription, error)
-}
-```
-
-See bus_nats.go and bus_redis.go for example implementations.
