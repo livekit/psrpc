@@ -33,6 +33,7 @@ jobs:
         with:
           min-go-version: 1.18
           version: 2022.1
+          install-go: false
 
       - name: Start Redis
         uses: supercharge/redis-github-action@1.4.0
