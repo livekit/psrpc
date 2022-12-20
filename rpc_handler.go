@@ -8,47 +8,56 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
+type Handler interface {
+	isHandler(*handler[proto.Message, proto.Message])
+
+	getRPC() string
+	setSub(Subscription[*internal.Request])
+	getAffinity(proto.Message) float32
+	handle(context.Context, proto.Message) (proto.Message, error)
+	close() error
+}
+
 type handler[RequestType proto.Message, ResponseType proto.Message] struct {
-	rpcHandlerInternal
+	Handler
 
 	rpc          string
 	sub          Subscription[*internal.Request]
 	handlerFunc  func(context.Context, RequestType) (ResponseType, error)
-	affinityFunc AffinityFunc
-}
-
-type rpcHandlerInternal interface {
-	isHandler(*handler[proto.Message, proto.Message])
-
-	getRPC() string
-	getAffinityFunc() AffinityFunc
-	setSub(sub Subscription[*internal.Request])
-	handle(context.Context, proto.Message) (proto.Message, error)
-	close() error
+	affinityFunc AffinityFunc[RequestType]
 }
 
 func NewHandler[RequestType proto.Message, ResponseType proto.Message](
 	rpc string,
 	handlerFunc func(context.Context, RequestType) (ResponseType, error),
 ) Handler {
-
 	return &handler[RequestType, ResponseType]{
 		rpc:         rpc,
 		handlerFunc: handlerFunc,
 	}
 }
 
-func (h *handler[RequestType, ResponseType]) WithAffinityFunc(affinityFunc AffinityFunc) Handler {
-	h.affinityFunc = affinityFunc
-	return h
+func NewHandlerWithAffinity[RequestType proto.Message, ResponseType proto.Message](
+	rpc string,
+	handlerFunc func(context.Context, RequestType) (ResponseType, error),
+	affinityFunc AffinityFunc[RequestType],
+) Handler {
+	return &handler[RequestType, ResponseType]{
+		rpc:          rpc,
+		handlerFunc:  handlerFunc,
+		affinityFunc: affinityFunc,
+	}
 }
 
 func (h *handler[RequestType, ResponseType]) getRPC() string {
 	return h.rpc
 }
 
-func (h *handler[RequestType, ResponseType]) getAffinityFunc() AffinityFunc {
-	return h.affinityFunc
+func (h *handler[RequestType, ResponseType]) getAffinity(req proto.Message) float32 {
+	if h.affinityFunc != nil {
+		return h.affinityFunc(req.(RequestType))
+	}
+	return 1
 }
 
 func (h *handler[RequestType, ResponseType]) setSub(sub Subscription[*internal.Request]) {

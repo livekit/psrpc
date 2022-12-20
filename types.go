@@ -27,13 +27,6 @@ type Subscription[MessageType proto.Message] interface {
 
 // --- Server ---
 
-type Handler interface {
-	// set affinity function
-	WithAffinityFunc(affinityFunc AffinityFunc) Handler
-
-	rpcHandlerInternal
-}
-
 type RPCServer interface {
 	// register a handler
 	RegisterHandler(h Handler) error

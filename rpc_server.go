@@ -133,11 +133,7 @@ func (s *rpcServer) handleRequest(h Handler, req *internal.Request) error {
 	}
 
 	if !req.Multi {
-		affinity := float32(1)
-		if af := h.getAffinityFunc(); af != nil {
-			affinity = af(request)
-		}
-
+		affinity := h.getAffinity(request)
 		claimed, err := s.claimRequest(ctx, req, affinity)
 		if err != nil {
 			return err

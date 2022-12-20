@@ -34,20 +34,20 @@ type RPCServer interface {
 
 ```go
 // send a request to a single server, and receive one response
-func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
+func RequestSingle[ResponseType proto.Message](
     ctx context.Context, 
     client RPCClient, 
     rpc string, 
-    request RequestType, 
+    request proto.Message,
     opts ...RequestOption,
 ) (ResponseType, error)
 
 // send a request to all servers, and receive one response per server
-func RequestAll[RequestType proto.Message, ResponseType proto.Message](
+func RequestAll[ResponseType proto.Message](
     ctx context.Context, 
     client RPCClient, 
     rpc string, 
-    request RequestType,
+    request proto.Message,
     opts ...RequestOption,
 ) (<-chan *Response[ResponseType], error)
 
@@ -88,11 +88,11 @@ For example, the following could be used to return an affinity based on cpu load
 ```go
 func main() {
     ...
-    rpcServer.RegisterHandler(psrpc.NewHandler("MyRPC", handlerFunc).WithAffinityFunc(getAffinity))
+    rpcServer.RegisterHandler(psrpc.NewHandlerWithAffinity("MyRPC", handlerFunc, getAffinity))
     ...
 }
 
-func getAffinity(req proto.Message) float32 {
+func getAffinity(req *api.Request) float32 {
     return stats.GetIdleCPU()
 }
 ```
@@ -115,11 +115,11 @@ affinityOpts := psrpc.AffinityOpts{
     AffinityTimeout:      time.Second,
     ShortCircuitTimeout:  time.Millisecond * 250,
 }
-res, err := psrpc.RequestSingle[*api.Request, *api.Response](
+res, err := psrpc.RequestSingle[*api.Response](
     context.Background(), 
     rpcClient,
     "MyRPC",
-    req,
+    &api.Request{},
     psrpc.WithAffinityOpts(affinityOpts))
 ```
 
@@ -172,7 +172,7 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    res, err := psrpc.RequestSingle[*api.AddRequest, *api.AddResult](
+    res, err := psrpc.RequestSingle[*api.AddResult](
         context.Background(), 
         rpcClient, 
         "AddValue", 
@@ -226,7 +226,7 @@ func main() {
     clientID := "test_client"
     rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
 	
-    sub, err := psrpc.RequestAll[*api.GetValueRequest, *api.ValueResult](
+    sub, err := psrpc.RequestAll[*api.ValueResult](
         context.Background(), 
         rpcClient, 
         "GetValue", 
@@ -282,12 +282,12 @@ func main() {
     rpcServer := psrpc.NewRPCServer("ProcessingService", serverID, psrpc.NewRedisMessageBus(rc))
     defer rpcServer.Close()
 	
-    rpcServer.RegisterHandler(psrpc.NewHandler("CalculateUserStats", svc.CalculateUserStats).WithAffinityFunc(getAffinity))
+    rpcServer.RegisterHandler(psrpc.NewHandlerWithAffinity("CalculateUserStats", svc.CalculateUserStats, getAffinity))
     ...
 }
 
 // The CalculateUserStats rpc requires a lot of CPU - use idle CPUs for the affinity metric
-func getAffinity(req proto.Message) float32 {
+func getAffinity(req *api.CalculateUserStatsRequest) float32 {
     return stats.GetIdleCPU()
 }
 
@@ -329,7 +329,7 @@ func main() {
         ShortCircuitTimeout:  time.Millisecond * 250,
     }
 	
-    res, err := psrpc.RequestSingle[*api.CalculateUserStatsRequest, *api.CalculateUserStatsResponse](
+    res, err := psrpc.RequestSingle[*api.CalculateUserStatsResponse](
         context.Background(),
         rpcClient,
         "CalculateUserStats",

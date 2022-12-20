@@ -82,8 +82,12 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 	return c, nil
 }
 
-func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
-	ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+func RequestSingle[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	request proto.Message,
+	opts ...RequestOption,
 ) (ResponseType, error) {
 
 	c := client.(*rpcClient)
@@ -156,8 +160,12 @@ func RequestSingle[RequestType proto.Message, ResponseType proto.Message](
 	}
 }
 
-func RequestAll[RequestType proto.Message, ResponseType proto.Message](
-	ctx context.Context, client RPCClient, rpc string, request RequestType, opts ...RequestOption,
+func RequestAll[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	request proto.Message,
+	opts ...RequestOption,
 ) (<-chan *Response[ResponseType], error) {
 
 	c := client.(*rpcClient)
