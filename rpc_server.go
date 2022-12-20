@@ -24,7 +24,7 @@ type rpcServer struct {
 	closed      chan struct{}
 }
 
-func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
+func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOption) RPCServer {
 	s := &rpcServer{
 		MessageBus:  bus,
 		rpcOpts:     getRPCOpts(opts...),
@@ -35,38 +35,24 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 		closed:      make(chan struct{}),
 	}
 
-	claims, err := Subscribe[*internal.ClaimResponse](s, context.Background(), getClaimResponseChannel(serviceName))
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		for {
-			select {
-			case <-s.closed:
-				_ = claims.Close()
-				return
-
-			case claim := <-claims.Channel():
-				s.mu.RLock()
-				claimChan, ok := s.claims[claim.RequestId]
-				s.mu.RUnlock()
-				if ok {
-					claimChan <- claim
-				}
-			}
-		}
-	}()
-
-	return s, nil
+	return s
 }
 
 func (s *rpcServer) RegisterHandler(h Handler) error {
+	ctx := context.Background()
+
 	rpc := h.getRPC()
-	sub, err := Subscribe[*internal.Request](s, context.Background(), getRPCChannel(s.serviceName, rpc))
+	sub, err := Subscribe[*internal.Request](s, ctx, getRPCChannel(s.serviceName, rpc))
 	if err != nil {
 		return err
 	}
+
+	claims, err := Subscribe[*internal.ClaimResponse](s, ctx, getClaimResponseChannel(s.serviceName, rpc))
+	if err != nil {
+		_ = sub.Close()
+		return err
+	}
+
 	h.setSub(sub)
 
 	s.mu.Lock()
@@ -84,6 +70,7 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 			select {
 			case <-s.closed:
 				_ = sub.Close()
+				_ = claims.Close()
 				return
 
 			case req := <-reqChan:
@@ -97,6 +84,14 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 							logger.Error(err, "failed to handle request", "requestID", req.RequestId)
 						}
 					}()
+				}
+
+			case claim := <-claims.Channel():
+				s.mu.RLock()
+				claimChan, ok := s.claims[claim.RequestId]
+				s.mu.RUnlock()
+				if ok {
+					claimChan <- claim
 				}
 			}
 		}

@@ -136,7 +136,7 @@ func RequestSingle[ResponseType proto.Message](
 	if err != nil {
 		return empty, err
 	}
-	if err = Publish(c, ctx, getClaimResponseChannel(c.serviceName), &internal.ClaimResponse{
+	if err = Publish(c, ctx, getClaimResponseChannel(c.serviceName, rpc), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {

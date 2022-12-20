@@ -10,23 +10,23 @@ import (
 )
 
 func newRequestID() string {
-	return "req_" + shortuuid.New()[:12]
+	return "REQ_" + shortuuid.New()[:12]
 }
 
 func getRPCChannel(serviceName, rpc string) string {
-	return strings.ToUpper(fmt.Sprintf("%s_%s", serviceName, rpc))
+	return strings.ToUpper(fmt.Sprintf("%s|%s|REQ", serviceName, rpc))
 }
 
 func getResponseChannel(serviceName, clientID string) string {
-	return strings.ToUpper(fmt.Sprintf("%s_res_%s", serviceName, clientID))
+	return strings.ToUpper(fmt.Sprintf("%s|%s|RES", serviceName, clientID))
 }
 
 func getClaimRequestChannel(serviceName, clientID string) string {
-	return strings.ToUpper(fmt.Sprintf("%s_claim_req_%s", serviceName, clientID))
+	return strings.ToUpper(fmt.Sprintf("%s|%s|CLAIM", serviceName, clientID))
 }
 
-func getClaimResponseChannel(serviceName string) string {
-	return strings.ToUpper(fmt.Sprintf("%s_claim_res", serviceName))
+func getClaimResponseChannel(serviceName, rpc string) string {
+	return strings.ToUpper(fmt.Sprintf("%s|%s|RCLAIM", serviceName, rpc))
 }
 
 func serialize(msg proto.Message) ([]byte, error) {
