@@ -19,15 +19,9 @@ type rpcServer struct {
 	serviceName string
 	id          string
 	mu          sync.RWMutex
-	handlers    map[string]*handler
+	handlers    map[string]Handler
 	claims      map[string]chan *internal.ClaimResponse
 	closed      chan struct{}
-}
-
-type handler struct {
-	handlerFunc  HandlerFunc
-	affinityFunc AffinityFunc
-	sub          Subscription
 }
 
 func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOption) (RPCServer, error) {
@@ -36,7 +30,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 		rpcOpts:     getRPCOpts(opts...),
 		serviceName: serviceName,
 		id:          serverID,
-		handlers:    make(map[string]*handler),
+		handlers:    make(map[string]Handler),
 		claims:      make(map[string]chan *internal.ClaimResponse),
 		closed:      make(chan struct{}),
 	}
@@ -69,18 +63,11 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 	return s, nil
 }
 
-func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ...HandlerOption) error {
+func (s *rpcServer) RegisterHandler(h Handler) error {
+	rpc := h.getRPC()
 	sub, err := s.Subscribe(context.Background(), getRPCChannel(s.serviceName, rpc))
 	if err != nil {
 		return err
-	}
-
-	h := &handler{
-		handlerFunc: handlerFunc,
-		sub:         sub,
-	}
-	for _, opt := range opts {
-		opt(h)
 	}
 
 	s.mu.Lock()
@@ -89,6 +76,7 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ..
 		s.mu.Unlock()
 		return err
 	}
+	h.setSub(sub)
 	s.handlers[rpc] = h
 	s.mu.Unlock()
 
@@ -104,8 +92,7 @@ func (s *rpcServer) RegisterHandler(rpc string, handlerFunc HandlerFunc, opts ..
 				req := p.(*internal.Request)
 				if time.Now().UnixNano() < req.Expiry {
 					go func() {
-						err := s.handleRequest(rpc, req)
-						if err != nil {
+						if err := s.handleRequest(h, req); err != nil {
 							logger.Error(err, "failed to handle request", "requestID", req.RequestId)
 						}
 					}()
@@ -128,33 +115,26 @@ func (s *rpcServer) DeregisterHandler(rpc string) error {
 	return s.closeHandlerLocked(rpc)
 }
 
-func (s *rpcServer) closeHandlerLocked(rpc string) error {
-	h, ok := s.handlers[rpc]
-	if ok {
-		delete(s.handlers, rpc)
-		return h.sub.Close()
+func (s *rpcServer) Close() {
+	select {
+	case <-s.closed:
+	default:
+		close(s.closed)
 	}
-	return nil
 }
 
-func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
-	s.mu.RLock()
-	h, ok := s.handlers[rpc]
-	s.mu.RUnlock()
-	if !ok {
-		return errors.New("handler not found")
-	}
-
+func (s *rpcServer) handleRequest(h Handler, req *internal.Request) error {
 	ctx := context.Background()
 	request, err := req.Request.UnmarshalNew()
 	if err != nil {
-		return s.sendResponse(ctx, req, nil, err)
+		_ = s.sendResponse(ctx, req, nil, err)
+		return err
 	}
 
 	if !req.Multi {
 		affinity := float32(1)
-		if h.affinityFunc != nil {
-			affinity = h.affinityFunc(request)
+		if af := h.getAffinityFunc(); af != nil {
+			affinity = af(request)
 		}
 
 		claimed, err := s.claimRequest(ctx, req, affinity)
@@ -166,7 +146,7 @@ func (s *rpcServer) handleRequest(rpc string, req *internal.Request) error {
 	}
 
 	// call handler function and return response
-	response, err := h.handlerFunc(ctx, request)
+	response, err := h.handle(ctx, request)
 	return s.sendResponse(ctx, req, response, err)
 }
 
@@ -226,10 +206,11 @@ func (s *rpcServer) sendResponse(ctx context.Context, req *internal.Request, res
 	return s.Publish(ctx, getResponseChannel(s.serviceName, req.ClientId), res)
 }
 
-func (s *rpcServer) Close() {
-	select {
-	case <-s.closed:
-	default:
-		close(s.closed)
+func (s *rpcServer) closeHandlerLocked(rpc string) error {
+	h, ok := s.handlers[rpc]
+	if ok {
+		delete(s.handlers, rpc)
+		return h.close()
 	}
+	return nil
 }

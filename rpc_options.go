@@ -34,16 +34,6 @@ func getRPCOpts(opts ...RPCOption) rpcOpts {
 	return options
 }
 
-// Handler options
-
-type HandlerOption func(*handler)
-
-func WithAffinityFunc(affinityFunc AffinityFunc) HandlerOption {
-	return func(h *handler) {
-		h.affinityFunc = affinityFunc
-	}
-}
-
 // Request options
 
 type RequestOption func(reqOpts) reqOpts
