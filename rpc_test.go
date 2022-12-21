@@ -28,10 +28,8 @@ func TestRPC(t *testing.T) {
 func testRPCs(t *testing.T, bus MessageBus) {
 	serviceName := "test"
 
-	serverA, err := NewRPCServer(serviceName, newID(), bus)
-	require.NoError(t, err)
-	serverB, err := NewRPCServer(serviceName, newID(), bus)
-	require.NoError(t, err)
+	serverA := NewRPCServer(serviceName, newID(), bus)
+	serverB := NewRPCServer(serviceName, newID(), bus)
 	client, err := NewRPCClient(serviceName, newID(), bus)
 	require.NoError(t, err)
 
