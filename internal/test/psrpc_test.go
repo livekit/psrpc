@@ -61,12 +61,14 @@ func TestGeneratedService(t *testing.T) {
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionA"))
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionB"))
 	require.NoError(t, sA.server.DeregisterGetRegionStatsTopic("regionB"))
-
 	require.NoError(t, sB.server.RegisterGetRegionStatsTopic("regionB"))
+	time.Sleep(time.Millisecond * 100)
+
 	respChan, err = cB.GetRegionStats(ctx, "regionB", req)
 	require.NoError(t, err)
 	select {
 	case res := <-respChan:
+		require.NotNil(t, res)
 		require.NoError(t, res.Err)
 	case <-time.After(time.Second):
 		t.Fatalf("timed out")
@@ -80,9 +82,9 @@ func TestGeneratedService(t *testing.T) {
 	require.NoError(t, err)
 	subB, err := cB.SubscribeProcessUpdate(ctx)
 	require.NoError(t, err)
+	time.Sleep(time.Millisecond * 100)
 
 	require.NoError(t, sA.server.PublishProcessUpdate(ctx, update))
-
 	requireOne(t, subA, subB)
 	require.NoError(t, subA.Close())
 	require.NoError(t, subB.Close())
@@ -95,6 +97,7 @@ func TestGeneratedService(t *testing.T) {
 	require.NoError(t, err)
 	subB, err = cB.SubscribeUpdateRegionState(ctx, "regionA")
 	require.NoError(t, err)
+	time.Sleep(time.Millisecond * 100)
 
 	require.NoError(t, sB.server.PublishUpdateRegionState(ctx, "regionA", update))
 	requireTwo(t, subA, subB)
@@ -113,7 +116,7 @@ func requireOne(t *testing.T, subA, subB psrpc.Subscription[*my_service.MyUpdate
 			if i == 0 {
 				continue
 			}
-		case <-time.After(time.Second * 3):
+		case <-time.After(time.Second):
 			if i == 1 {
 				continue
 			}
@@ -127,7 +130,7 @@ func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*my_service.MyUpdate
 		select {
 		case <-subA.Channel():
 		case <-subB.Channel():
-		case <-time.After(time.Second * 3):
+		case <-time.After(time.Second):
 			t.Fatalf("timed out")
 		}
 	}
