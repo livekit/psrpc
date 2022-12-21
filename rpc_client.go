@@ -3,6 +3,7 @@ package psrpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -22,6 +23,11 @@ type RPCClient interface {
 type rpcClientInternal interface {
 	isRPCClient(*rpcClient)
 }
+
+var (
+	ErrRequestTimedOut = errors.New("request timed out")
+	ErrNoResponse      = errors.New("no response from servers")
+)
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOpt) (RPCClient, error) {
 	c := &rpcClient{
@@ -183,7 +189,7 @@ func RequestTopicSingle[ResponseType proto.Message](
 		}
 
 	case <-ctx.Done():
-		return empty, errors.New("request timed out")
+		return empty, ErrRequestTimedOut
 	}
 }
 
@@ -198,17 +204,22 @@ func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, op
 	serverID := ""
 	best := float32(0)
 	shorted := false
+	claims := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			if best == 0 {
-				return "", errors.New("no valid servers found")
+				if claims == 0 {
+					return "", ErrNoResponse
+				}
+				return "", fmt.Errorf("no servers available (received %d responses)", claims)
 			} else {
 				return serverID, nil
 			}
 
 		case claim := <-claimChan:
+			claims++
 			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity && claim.Affinity > best) ||
 				(opts.MinimumAffinity <= 0 && claim.Affinity > best) {
 				if opts.AcceptFirstAvailable {

@@ -27,6 +27,8 @@ type Subscription[MessageType proto.Message] interface {
 	Close() error
 }
 
+var ErrBusNotConnected = errors.New("bus not connected")
+
 func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Message) error {
 	switch bus.getBusType() {
 	case redisBus:
@@ -34,7 +36,7 @@ func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Mess
 	case natsBus:
 		return natsPublish(bus.getNC(), ctx, channel, msg)
 	default:
-		return errors.New("not connected")
+		return ErrBusNotConnected
 	}
 }
 
@@ -45,7 +47,7 @@ func Subscribe[MessageType proto.Message](bus MessageBus, ctx context.Context, c
 	case natsBus:
 		return natsSubscribe[MessageType](bus.getNC(), ctx, channel)
 	default:
-		return nil, errors.New("not connected")
+		return nil, ErrBusNotConnected
 	}
 }
 
@@ -56,7 +58,7 @@ func SubscribeQueue[MessageType proto.Message](bus MessageBus, ctx context.Conte
 	case natsBus:
 		return natsSubscribeQueue[MessageType](bus.getNC(), ctx, channel)
 	default:
-		return nil, errors.New("not connected")
+		return nil, ErrBusNotConnected
 	}
 }
 

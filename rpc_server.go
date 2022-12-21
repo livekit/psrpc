@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -203,7 +202,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 		}
 
 	case <-time.After(timeout):
-		return false, errors.New("no response from client")
+		return false, nil
 	}
 }
 
