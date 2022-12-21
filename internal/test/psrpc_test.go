@@ -48,7 +48,7 @@ func TestGeneratedService(t *testing.T) {
 		select {
 		case res := <-respChan:
 			require.NoError(t, res.Err)
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 3):
 			t.Fatalf("timed out")
 		}
 	}
@@ -113,7 +113,7 @@ func requireOne(t *testing.T, subA, subB psrpc.Subscription[*my_service.MyUpdate
 			if i == 0 {
 				continue
 			}
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 3):
 			if i == 1 {
 				continue
 			}
@@ -127,7 +127,7 @@ func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*my_service.MyUpdate
 		select {
 		case <-subA.Channel():
 		case <-subB.Channel():
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 3):
 			t.Fatalf("timed out")
 		}
 	}
