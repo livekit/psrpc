@@ -6,7 +6,7 @@ on:
     branches-ignore: [ main ]
 
 jobs:
-  generate:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
