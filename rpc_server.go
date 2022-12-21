@@ -21,7 +21,7 @@ type RPCServer interface {
 	PublishTopic(ctx context.Context, rpc, topic string, message proto.Message) error
 	// stop listening for requests for a rpc
 	DeregisterHandler(rpc string) error
-	// stop listening on a topic for an rpc
+	// stop listening on a topic for a rpc
 	DeregisterTopic(rpc, topic string) error
 	// close all subscriptions and stop
 	Close()

@@ -642,7 +642,7 @@ func (t *psrpc) generateFileDescriptor(file *descriptor.FileDescriptorProto) {
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	_, _ = w.Write(b)
-	w.Close()
+	_ = w.Close()
 	b = buf.Bytes()
 
 	v := t.serviceMetadataVarName()
@@ -715,7 +715,7 @@ func (t *psrpc) formattedOutput() string {
 		var src bytes.Buffer
 		s := bufio.NewScanner(bytes.NewReader(raw))
 		for line := 1; s.Scan(); line++ {
-			fmt.Fprintf(&src, "%5d\t%s\n", line, s.Bytes())
+			_, _ = fmt.Fprintf(&src, "%5d\t%s\n", line, s.Bytes())
 		}
 		gen.Fail("bad Go source code was generated:", err.Error(), "\n"+src.String())
 	}

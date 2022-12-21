@@ -92,7 +92,7 @@ func (r *Registry) MessageDefinition(name string) *MessageDefinition {
 }
 
 type MessageDefinition struct {
-	// Descriptor is is the DescriptorProto defining the message.
+	// Descriptor is the DescriptorProto defining the message.
 	Descriptor *descriptor.DescriptorProto
 	// File is the File that the message was defined in. Or, if it has been
 	// publicly imported, what File was that import performed in?
@@ -223,34 +223,34 @@ func messageDefsForFile(f *descriptor.FileDescriptorProto, filesByName map[strin
 //
 // Examples:
 //
-//   optional int32 foo = 1;  // Comment attached to foo.
-//   // Comment attached to bar.
-//   optional int32 bar = 2;
+//	optional int32 foo = 1;  // Comment attached to foo.
+//	// Comment attached to bar.
+//	optional int32 bar = 2;
 //
-//   optional string baz = 3;
-//   // Comment attached to baz.
-//   // Another line attached to baz.
+//	optional string baz = 3;
+//	// Comment attached to baz.
+//	// Another line attached to baz.
 //
-//   // Comment attached to qux.
-//   //
-//   // Another line attached to qux.
-//   optional double qux = 4;
+//	// Comment attached to qux.
+//	//
+//	// Another line attached to qux.
+//	optional double qux = 4;
 //
-//   // Detached comment for corge. This is not leading or trailing comments
-//   // to qux or corge because there are blank lines separating it from
-//   // both.
+//	// Detached comment for corge. This is not leading or trailing comments
+//	// to qux or corge because there are blank lines separating it from
+//	// both.
 //
-//   // Detached comment for corge paragraph 2.
+//	// Detached comment for corge paragraph 2.
 //
-//   optional string corge = 5;
-//   /* Block comment attached
-//    * to corge.  Leading asterisks
-//    * will be removed. */
-//   /* Block comment attached to
-//    * grault. */
-//   optional int32 grault = 6;
+//	optional string corge = 5;
+//	/* Block comment attached
+//	 * to corge.  Leading asterisks
+//	 * will be removed. */
+//	/* Block comment attached to
+//	 * grault. */
+//	optional int32 grault = 6;
 //
-//   // ignored detached comments.
+//	// ignored detached comments.
 type DefinitionComments struct {
 	Leading         string
 	Trailing        string
@@ -291,19 +291,19 @@ const (
 	// tag numbers in FileDescriptorProto
 	packagePath = 2 // package
 	messagePath = 4 // message_type
-	enumPath    = 5 // enum_type
+	// enumPath    = 5 // enum_type
 	servicePath = 6 // service
 	// tag numbers in DescriptorProto
-	messageFieldPath   = 2 // field
+	// messageFieldPath   = 2 // field
 	messageMessagePath = 3 // nested_type
-	messageEnumPath    = 4 // enum_type
-	messageOneofPath   = 8 // oneof_decl
+	// messageEnumPath    = 4 // enum_type
+	// messageOneofPath   = 8 // oneof_decl
 	// tag numbers in ServiceDescriptorProto
-	serviceNamePath    = 1 // name
-	serviceMethodPath  = 2 // method
-	serviceOptionsPath = 3 // options
+	// serviceNamePath    = 1 // name
+	serviceMethodPath = 2 // method
+	// serviceOptionsPath = 3 // options
 	// tag numbers in MethodDescriptorProto
-	methodNamePath   = 1 // name
-	methodInputPath  = 2 // input_type
-	methodOutputPath = 3 // output_type
+	// methodNamePath   = 1 // name
+	// methodInputPath  = 2 // input_type
+	// methodOutputPath = 3 // output_type
 )
