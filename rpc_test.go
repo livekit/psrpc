@@ -16,16 +16,16 @@ import (
 func TestRPC(t *testing.T) {
 	t.Run("Redis", func(t *testing.T) {
 		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		testRPCs(t, NewRedisMessageBus(rc))
+		testRPC(t, NewRedisMessageBus(rc))
 	})
 
 	t.Run("Nats", func(t *testing.T) {
 		nc, _ := nats.Connect(nats.DefaultURL)
-		testRPCs(t, NewNatsMessageBus(nc))
+		testRPC(t, NewNatsMessageBus(nc))
 	})
 }
 
-func testRPCs(t *testing.T, bus MessageBus) {
+func testRPC(t *testing.T, bus MessageBus) {
 	serviceName := "test"
 
 	serverA := NewRPCServer(serviceName, newID(), bus)
@@ -76,6 +76,74 @@ func testRPCs(t *testing.T, bus MessageBus) {
 			t.Fatal("response missing")
 		}
 	}
+}
+
+func TestAffinity(t *testing.T) {
+	testAffinity(t, SelectionOpts{
+		AcceptFirstAvailable: true,
+	}, "1")
+
+	testAffinity(t, SelectionOpts{
+		AcceptFirstAvailable: true,
+		MinimumAffinity:      0.5,
+	}, "2")
+
+	testAffinity(t, SelectionOpts{
+		ShortCircuitTimeout: time.Millisecond * 150,
+	}, "2")
+
+	testAffinity(t, SelectionOpts{
+		MinimumAffinity:     0.4,
+		AffinityTimeout:     0,
+		ShortCircuitTimeout: time.Millisecond * 250,
+	}, "3")
+
+	testAffinity(t, SelectionOpts{
+		MinimumAffinity:     0.3,
+		AffinityTimeout:     time.Millisecond * 250,
+		ShortCircuitTimeout: time.Millisecond * 200,
+	}, "2")
+
+	testAffinity(t, SelectionOpts{
+		AffinityTimeout: time.Millisecond * 600,
+	}, "5")
+}
+
+func testAffinity(t *testing.T, opts SelectionOpts, expectedID string) {
+	c := make(chan *internal.ClaimRequest, 100)
+	go func() {
+		c <- &internal.ClaimRequest{
+			RequestId: "1",
+			ServerId:  "1",
+			Affinity:  0.1,
+		}
+		time.Sleep(time.Millisecond * 100)
+		c <- &internal.ClaimRequest{
+			RequestId: "1",
+			ServerId:  "2",
+			Affinity:  0.5,
+		}
+		time.Sleep(time.Millisecond * 200)
+		c <- &internal.ClaimRequest{
+			RequestId: "1",
+			ServerId:  "3",
+			Affinity:  0.7,
+		}
+		c <- &internal.ClaimRequest{
+			RequestId: "1",
+			ServerId:  "4",
+			Affinity:  0.1,
+		}
+		time.Sleep(time.Millisecond * 200)
+		c <- &internal.ClaimRequest{
+			RequestId: "1",
+			ServerId:  "5",
+			Affinity:  0.9,
+		}
+	}()
+	serverID, err := selectServer(context.Background(), c, opts)
+	require.NoError(t, err)
+	require.Equal(t, expectedID, serverID)
 }
 
 func newID() string {

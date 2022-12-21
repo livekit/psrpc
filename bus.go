@@ -22,24 +22,9 @@ type MessageBus interface {
 	getNC() *nats.Conn
 }
 
-type bus struct {
-	MessageBus
-	busType
-
-	rc redis.UniversalClient
-	nc *nats.Conn
-}
-
-func (b *bus) getBusType() busType {
-	return b.busType
-}
-
-func (b *bus) getRC() redis.UniversalClient {
-	return b.rc
-}
-
-func (b *bus) getNC() *nats.Conn {
-	return b.nc
+type Subscription[MessageType proto.Message] interface {
+	Channel() <-chan MessageType
+	Close() error
 }
 
 func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Message) error {
@@ -73,4 +58,24 @@ func SubscribeQueue[MessageType proto.Message](bus MessageBus, ctx context.Conte
 	default:
 		return nil, errors.New("not connected")
 	}
+}
+
+type bus struct {
+	MessageBus
+	busType
+
+	rc redis.UniversalClient
+	nc *nats.Conn
+}
+
+func (b *bus) getBusType() busType {
+	return b.busType
+}
+
+func (b *bus) getRC() redis.UniversalClient {
+	return b.rc
+}
+
+func (b *bus) getNC() *nats.Conn {
+	return b.nc
 }

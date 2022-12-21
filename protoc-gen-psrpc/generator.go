@@ -1,0 +1,753 @@
+// Copyright 2018 Twitch Interactive, Inc.  All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"). You may not
+// use this file except in compliance with the License. A copy of the License is
+// located at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// or in the "license" file accompanying this file. This file is distributed on
+// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+// express or implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"compress/gzip"
+	"fmt"
+	"go/parser"
+	"go/printer"
+	"go/token"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
+
+	"google.golang.org/protobuf/proto"
+	descriptor "google.golang.org/protobuf/types/descriptorpb"
+	plugin "google.golang.org/protobuf/types/pluginpb"
+
+	"github.com/pkg/errors"
+
+	"github.com/livekit/psrpc/internal/gen"
+	"github.com/livekit/psrpc/internal/gen/stringutils"
+	"github.com/livekit/psrpc/internal/gen/typemap"
+	"github.com/livekit/psrpc/protoc-gen-psrpc/options"
+)
+
+type psrpc struct {
+	filesHandled int
+
+	reg *typemap.Registry
+
+	// Map to record whether we've built each package
+	pkgs          map[string]string
+	pkgNamesInUse map[string]bool
+
+	importPrefix string            // String to prefix to imported package file names.
+	importMap    map[string]string // Mapping from .proto file name to import path.
+
+	// Package output:
+	sourceRelativePaths bool // instruction on where to write output files
+	modulePrefix        string
+
+	// Package naming:
+	genPkgName          string // Name of the package that we're generating
+	fileToGoPackageName map[*descriptor.FileDescriptorProto]string
+
+	// List of files that were inputs to the generator. We need to hold this in
+	// the struct, so we can write a header for the file that lists its inputs.
+	genFiles []*descriptor.FileDescriptorProto
+
+	// Output buffer that holds the bytes we want to write out for a single file.
+	// Gets reset after working on a file.
+	output *bytes.Buffer
+}
+
+func newGenerator() *psrpc {
+	t := &psrpc{
+		pkgs:                make(map[string]string),
+		pkgNamesInUse:       make(map[string]bool),
+		importMap:           make(map[string]string),
+		fileToGoPackageName: make(map[*descriptor.FileDescriptorProto]string),
+		output:              bytes.NewBuffer(nil),
+	}
+
+	return t
+}
+
+func (t *psrpc) Generate(in *plugin.CodeGeneratorRequest) *plugin.CodeGeneratorResponse {
+	params, err := parseCommandLineParams(in.GetParameter())
+	if err != nil {
+		gen.Fail("could not parse parameters passed to --psrpc_out", err.Error())
+	}
+	t.importPrefix = params.importPrefix
+	t.importMap = params.importMap
+	t.sourceRelativePaths = params.paths == "source_relative"
+	t.modulePrefix = params.module
+
+	t.genFiles = gen.FilesToGenerate(in)
+
+	// Collect information on types.
+	t.reg = typemap.New(in.ProtoFile)
+
+	// Register names of packages that we import.
+	t.registerPackageName("context")
+	t.registerPackageName("psrpc")
+
+	// Time to figure out package names of objects defined in protobuf. First,
+	// we'll figure out the name for the package we're generating.
+	genPkgName, err := deduceGenPkgName(t.genFiles)
+	if err != nil {
+		gen.Fail(err.Error())
+	}
+	t.genPkgName = genPkgName
+
+	// We also need to figure out the full import path of the package we're
+	// generating. It's possible to import proto definitions from different .proto
+	// files which will be generated into the same Go package, which we need to
+	// detect (and can only detect if files use fully-specified go_package
+	// options).
+	genPkgImportPath, _, _ := goPackageOption(t.genFiles[0])
+
+	// Next, we need to pick names for all the files that are dependencies.
+	for _, f := range in.ProtoFile {
+		// Is this is a file we are generating? If yes, it gets the shared package name.
+		if fileDescSliceContains(t.genFiles, f) {
+			t.fileToGoPackageName[f] = t.genPkgName
+			continue
+		}
+
+		// Is this is an imported .proto file which has the same fully-specified
+		// go_package as the targeted file for generation? If yes, it gets the
+		// shared package name too.
+		if genPkgImportPath != "" {
+			importPath, _, _ := goPackageOption(f)
+			if importPath == genPkgImportPath {
+				t.fileToGoPackageName[f] = t.genPkgName
+				continue
+			}
+		}
+
+		// This is a dependency from a different go_package. Use its package name.
+		name := f.GetPackage()
+		if name == "" {
+			name = stringutils.BaseName(f.GetName())
+		}
+		name = stringutils.CleanIdentifier(name)
+		alias := t.registerPackageName(name)
+		t.fileToGoPackageName[f] = alias
+	}
+
+	// Showtime! Generate the response.
+	resp := new(plugin.CodeGeneratorResponse)
+	resp.SupportedFeatures = proto.Uint64(uint64(plugin.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL))
+	for _, f := range t.genFiles {
+		respFile := t.generate(f)
+		if respFile != nil {
+			resp.File = append(resp.File, respFile)
+		}
+	}
+	return resp
+}
+
+func (t *psrpc) registerPackageName(name string) (alias string) {
+	alias = name
+	i := 1
+	for t.pkgNamesInUse[alias] {
+		alias = name + strconv.Itoa(i)
+		i++
+	}
+	t.pkgNamesInUse[alias] = true
+	t.pkgs[name] = alias
+	return alias
+}
+
+// deduceGenPkgName figures out the go package name to use for generated code.
+// Will try to use the explicit go_package setting in a file (if set, must be
+// consistent in all files). If no files have go_package set, then use the
+// protobuf package name (must be consistent in all files)
+func deduceGenPkgName(genFiles []*descriptor.FileDescriptorProto) (string, error) {
+	var genPkgName string
+	for _, f := range genFiles {
+		name, explicit := goPackageName(f)
+		if explicit {
+			name = stringutils.CleanIdentifier(name)
+			if genPkgName != "" && genPkgName != name {
+				// Make sure they're all set consistently.
+				return "", errors.Errorf("files have conflicting go_package settings, must be the same: %q and %q", genPkgName, name)
+			}
+			genPkgName = name
+		}
+	}
+	if genPkgName != "" {
+		return genPkgName, nil
+	}
+
+	// If there is no explicit setting, then check the implicit package name
+	// (derived from the protobuf package name) of the files and make sure it's
+	// consistent.
+	for _, f := range genFiles {
+		name, _ := goPackageName(f)
+		name = stringutils.CleanIdentifier(name)
+		if genPkgName != "" && genPkgName != name {
+			return "", errors.Errorf("files have conflicting package names, must be the same or overridden with go_package: %q and %q", genPkgName, name)
+		}
+		genPkgName = name
+	}
+
+	// All the files have the same name, so we're good.
+	return genPkgName, nil
+}
+
+func (t *psrpc) generate(file *descriptor.FileDescriptorProto) *plugin.CodeGeneratorResponse_File {
+	resp := new(plugin.CodeGeneratorResponse_File)
+	if len(file.Service) == 0 {
+		return nil
+	}
+
+	t.generateFileHeader(file)
+	t.generateImports(file)
+
+	// For each service, generate client stubs and server
+	for _, service := range file.Service {
+		t.generateService(file, service)
+	}
+
+	t.generateFileDescriptor(file)
+
+	resp.Name = proto.String(t.goFileName(file))
+	resp.Content = proto.String(t.formattedOutput())
+	t.output.Reset()
+
+	t.filesHandled++
+	return resp
+}
+
+func (t *psrpc) generateFileHeader(file *descriptor.FileDescriptorProto) {
+	t.P("// Code generated by protoc-gen-psrpc ", gen.Version, ", DO NOT EDIT.")
+	t.P("// source: ", file.GetName())
+	t.P()
+
+	comment, err := t.reg.FileComments(file)
+	if err == nil && comment.Leading != "" {
+		for _, line := range strings.Split(comment.Leading, "\n") {
+			if line != "" {
+				t.P("// " + strings.TrimPrefix(line, " "))
+			}
+		}
+		t.P()
+	}
+
+	t.P(`package `, t.genPkgName)
+	t.P()
+}
+
+func (t *psrpc) generateImports(file *descriptor.FileDescriptorProto) {
+	if len(file.Service) == 0 {
+		return
+	}
+
+	// stdlib imports
+	for _, service := range file.Service {
+		if len(service.Method) > 0 {
+			t.P(`import `, t.pkgs["context"], ` "context"`)
+			t.P()
+			break
+		}
+	}
+
+	// dependency imports
+	t.P(`import `, t.pkgs["psrpc"], ` "github.com/livekit/psrpc"`)
+
+	// It's legal to import a message and use it as an input or output for a
+	// method. Make sure to import the package of any such message. First, dedupe
+	// them.
+	deps := make(map[string]string) // Map of package name to quoted import path.
+	ourImportPath := path.Dir(t.goFileName(file))
+	for _, s := range file.Service {
+		for _, m := range s.Method {
+			defs := []*typemap.MessageDefinition{
+				t.reg.MethodInputDefinition(m),
+				t.reg.MethodOutputDefinition(m),
+			}
+			for _, def := range defs {
+				importPath, _ := parseGoPackageOption(def.File.GetOptions().GetGoPackage())
+				if importPath == "" { // no option go_package
+					importPath := path.Dir(t.goFileName(def.File)) // use the dirname of the Go filename as import path
+					if importPath == ourImportPath {
+						continue
+					}
+				}
+
+				if substitution, ok := t.importMap[def.File.GetName()]; ok {
+					importPath = substitution
+				}
+				importPath = t.importPrefix + importPath
+
+				pkg := t.goPackageName(def.File)
+				if pkg != t.genPkgName {
+					deps[pkg] = strconv.Quote(importPath)
+				}
+			}
+		}
+	}
+	pkgs := make([]string, 0, len(deps))
+	for pkg := range deps {
+		pkgs = append(pkgs, pkg)
+	}
+	sort.Strings(pkgs)
+	for _, pkg := range pkgs {
+		t.P(`import `, pkg, ` `, deps[pkg])
+	}
+	if len(deps) > 0 {
+		t.P()
+	}
+}
+
+// W forwards to g.gen.P, which prints output.
+func (t *psrpc) W(args ...string) {
+	for _, v := range args {
+		t.output.WriteString(v)
+	}
+}
+
+// P forwards to g.gen.P, which prints output.
+func (t *psrpc) P(args ...string) {
+	for _, v := range args {
+		t.output.WriteString(v)
+	}
+	t.output.WriteByte('\n')
+}
+
+// Big header comments to makes it easier to visually parse a generated file.
+func (t *psrpc) sectionComment(sectionTitle string) {
+	t.P()
+	t.P(`// `, strings.Repeat("=", len(sectionTitle)))
+	t.P(`// `, sectionTitle)
+	t.P(`// `, strings.Repeat("=", len(sectionTitle)))
+	t.P()
+}
+
+const (
+	client     = "Client"
+	ServerImpl = "ServerImpl"
+	server     = "Server"
+)
+
+func (t *psrpc) generateService(file *descriptor.FileDescriptorProto, service *descriptor.ServiceDescriptorProto) {
+	servName := serviceNameCamelCased(service)
+
+	t.sectionComment(servName + ` Client Interface`)
+	t.generateInterface(file, service, client)
+
+	t.sectionComment(servName + ` ServerImpl Interface`)
+	t.generateInterface(file, service, ServerImpl)
+
+	t.sectionComment(servName + ` Server Interface`)
+	t.generateInterface(file, service, server)
+
+	t.sectionComment(servName + ` Client`)
+	t.generateClient(service)
+
+	t.sectionComment(servName + ` Server`)
+	t.generateServer(service)
+}
+
+func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service *descriptor.ServiceDescriptorProto, iface string) {
+	servName := serviceNameCamelCased(service)
+
+	comments, err := t.reg.ServiceComments(file, service)
+	if err == nil {
+		t.printComments(comments)
+	}
+
+	t.P(`type `, servName, iface, ` interface {`)
+	for _, method := range service.Method {
+		opts := t.getOptions(method)
+		if (iface == ServerImpl && opts.Subscription) || (iface == server && !opts.Subscription && !opts.Topics) {
+			continue
+		}
+
+		comments, err = t.reg.MethodComments(file, service, method)
+		if err == nil {
+			t.printComments(comments)
+		}
+		switch iface {
+		case client:
+			t.generateClientSignature(method, opts)
+		case ServerImpl:
+			t.generateServerImplSignature(method, opts)
+		case server:
+			t.generateServerSignature(method, opts)
+		}
+	}
+	t.P(`}`)
+}
+
+func (t *psrpc) generateClientSignature(method *descriptor.MethodDescriptorProto, opts *options.Options) {
+	methName := methodNameCamelCased(method)
+	inputType := t.goTypeName(method.GetInputType())
+	outputType := t.goTypeName(method.GetOutputType())
+
+	if opts.Subscription {
+		t.W(`  Subscribe`)
+	} else {
+		t.W(`  `)
+	}
+	t.W(methName, `(`, t.pkgs["context"], `.Context`)
+	if opts.Topics {
+		t.W(`, string`)
+	}
+	if opts.Subscription {
+		t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`)
+	} else if opts.Multi {
+		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOpt) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
+	} else {
+		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOpt) (*`, outputType, `, error)`)
+	}
+	t.P()
+}
+
+func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
+	servName := serviceNameCamelCased(service)
+	structName := unexported(servName) + "Client"
+	newClientFunc := "New" + servName + "Client"
+
+	t.P(`type `, structName, ` struct {`)
+	t.P(`  client `, t.pkgs["psrpc"], `.RPCClient`)
+	t.P(`}`)
+	t.P()
+
+	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
+	t.P(`func `, newClientFunc, `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOpt) (`, servName, `Client, error) {`)
+	t.P(`  rpcClient, err := `, t.pkgs["psrpc"], `.NewRPCClient("`, servName, `", clientID, bus, opts...)`)
+	t.P(`  if err != nil {`)
+	t.P(`    return nil, err`)
+	t.P(`  }`)
+	t.P()
+	t.P(`  return &`, structName, `{`)
+	t.P(`    client: rpcClient,`)
+	t.P(`  }, nil`)
+	t.P(`}`)
+	t.P()
+
+	for _, method := range service.Method {
+		methName := methodNameCamelCased(method)
+		inputType := t.goTypeName(method.GetInputType())
+		outputType := t.goTypeName(method.GetOutputType())
+		opts := t.getOptions(method)
+
+		topicParam := `""`
+		t.W(`func (c *`, structName)
+		if opts.Subscription {
+			t.W(`) Subscribe`)
+		} else {
+			t.W(`) `)
+		}
+		t.W(methName, `(ctx `, t.pkgs["context"], `.Context`)
+		if opts.Topics {
+			topicParam = "topic"
+			t.W(`, topic string`)
+		}
+		if opts.Subscription {
+			t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`, ` {`)
+		} else {
+			t.W(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOpt`)
+			if opts.Multi {
+				t.P(`) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`, ` {`)
+			} else {
+				t.P(`) (*`, outputType, `, error)`, ` {`)
+			}
+		}
+
+		t.W(`  return `, t.pkgs["psrpc"])
+		if opts.Subscription {
+			if opts.Multi {
+				t.W(`.SubscribeTopic[*`)
+			} else {
+				t.W(`.SubscribeTopicQueue[*`)
+			}
+			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `)`)
+		} else {
+			if opts.Multi {
+				t.W(`.RequestTopicAll[*`)
+			} else {
+				t.W(`.RequestTopicSingle[*`)
+			}
+			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, req, opts...)`)
+		}
+		t.P(`}`)
+		t.P()
+	}
+}
+
+func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorProto, opts *options.Options) {
+	methName := methodNameCamelCased(method)
+	inputType := t.goTypeName(method.GetInputType())
+	outputType := t.goTypeName(method.GetOutputType())
+
+	t.P(`  `, methName, `(`, t.pkgs["context"], `.Context, *`, inputType, `) (*`, outputType, `, error)`)
+	if opts.AffinityFunc {
+		t.P(`  `, methName, `Affinity(*`, inputType, `) float32`)
+	}
+	t.P()
+}
+
+func (t *psrpc) generateServerSignature(method *descriptor.MethodDescriptorProto, opts *options.Options) {
+	methName := methodNameCamelCased(method)
+	outputType := t.goTypeName(method.GetOutputType())
+
+	if opts.Subscription {
+		t.W(`  Publish`, methName, `(`, t.pkgs["context"], `.Context`)
+		if opts.Topics {
+			t.W(`, string`)
+		}
+		t.P(`, *`, outputType, `) error`)
+		t.P()
+	} else {
+		t.P(`  Register`, methName, `Topic(string) error`)
+		t.P(`  Deregister`, methName, `Topic(string) error`)
+		t.P()
+	}
+}
+
+func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
+	servName := serviceNameCamelCased(service)
+
+	// Server implementation.
+	servStruct := serviceStruct(service)
+	t.P(`type `, servStruct, ` struct {`)
+	t.P(`  svc `, servName, `ServerImpl`)
+	t.P(`  rpc `, t.pkgs["psrpc"], `.RPCServer`)
+	t.P(`}`)
+	t.P()
+
+	// Constructor for server implementation
+	t.P(`// New`, servName, `Server builds a RPCServer that can be used to handle`)
+	t.P(`// requests that are routed to the right method in the provided svc implementation.`)
+	t.P(`func New`, servName, `Server(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOpt) (`, servName, `Server, error) {`)
+	t.P(`  rpcServer := `, t.pkgs["psrpc"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
+	t.P()
+
+	errVar := false
+	for _, method := range service.Method {
+		opts := t.getOptions(method)
+		if opts.Subscription || opts.Topics {
+			continue
+		}
+
+		if !errVar {
+			t.P(`  var err error`)
+			errVar = true
+		}
+
+		methName := methodNameCamelCased(method)
+		t.W(`  err = rpcServer.RegisterHandler(`, t.pkgs["psrpc"])
+		if t.getOptions(method).AffinityFunc {
+			t.P(`.NewHandlerWithAffinity("`, methName, `", svc.`, methName, `, svc.`, methName, `Affinity))`)
+		} else {
+			t.P(`.NewHandler("`, methName, `", svc.`, methName, `))`)
+		}
+		t.P(`  if err != nil {`)
+		t.P(`    rpcServer.Close()`)
+		t.P(`    return nil, err`)
+		t.P(`  }`)
+		t.P()
+	}
+
+	t.P(`  return &`, servStruct, `{`)
+	t.P(`    svc: svc,`)
+	t.P(`    rpc: rpcServer,`)
+	t.P(`  }, nil`)
+	t.P(`}`)
+	t.P()
+
+	for _, method := range service.Method {
+		opts := t.getOptions(method)
+		if !opts.Subscription && !opts.Topics {
+			continue
+		}
+
+		methName := methodNameCamelCased(method)
+		outputType := t.goTypeName(method.GetOutputType())
+
+		if opts.Subscription {
+			topicParam := `""`
+			t.W(`func (s *`, servStruct, `) Publish`, methName, `(ctx `, t.pkgs["context"], `.Context`)
+			if opts.Topics {
+				topicParam = `topic`
+				t.W(`, topic string`)
+			}
+			t.P(`, msg *`, outputType, `) error {`)
+			t.P(`  return s.rpc.PublishTopic(ctx, "`, methName, `", `, topicParam, `, msg)`)
+			t.P(`}`)
+			t.P()
+		} else {
+			t.P(`func (s *`, servStruct, `) Register`, methName, `Topic(topic string) error {`)
+			t.W(`  return s.rpc.RegisterHandler(`, t.pkgs["psrpc"])
+			if t.getOptions(method).AffinityFunc {
+				t.P(`.NewTopicHandlerWithAffinity("`, methName, `", topic, s.svc.`, methName, `, s.svc.`, methName, `Affinity))`)
+			} else {
+				t.P(`.NewTopicHandler("`, methName, `", topic, s.svc.`, methName, `))`)
+			}
+			t.P(`}`)
+			t.P()
+			t.P(`func (s *`, servStruct, `) Deregister`, methName, `Topic(topic string) error {`)
+			t.P(`  return s.rpc.DeregisterTopic("`, methName, `", topic)`)
+			t.P(`}`)
+			t.P()
+		}
+	}
+}
+
+func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Options {
+	if method.Options == nil {
+		return &options.Options{}
+	}
+
+	if proto.HasExtension(method.Options, options.E_Options) {
+		ext := proto.GetExtension(method.Options, options.E_Options)
+		return ext.(*options.Options)
+	}
+
+	return &options.Options{}
+}
+
+// serviceMetadataVarName is the variable name used in generated code to refer
+// to the compressed bytes of this descriptor. It is not exported, so it is only
+// valid inside the generated package.
+//
+// protoc-gen-go writes its own version of this file, but so does
+// protoc-gen-gogo - with a different name! PSRPC aims to be compatible with
+// both; the simplest way forward is to write the file descriptor again as
+// another variable that we control.
+func (t *psrpc) serviceMetadataVarName() string {
+	return fmt.Sprintf("psrpcFileDescriptor%d", t.filesHandled)
+}
+
+func (t *psrpc) generateFileDescriptor(file *descriptor.FileDescriptorProto) {
+	// Copied straight off of protoc-gen-go, which trims out comments.
+	pb := proto.Clone(file).(*descriptor.FileDescriptorProto)
+	pb.SourceCodeInfo = nil
+
+	b, err := proto.Marshal(pb)
+	if err != nil {
+		gen.Fail(err.Error())
+	}
+
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = w.Write(b)
+	w.Close()
+	b = buf.Bytes()
+
+	v := t.serviceMetadataVarName()
+	t.P()
+	t.P("var ", v, " = []byte{")
+	t.P("	// ", fmt.Sprintf("%d", len(b)), " bytes of a gzipped FileDescriptorProto")
+	for len(b) > 0 {
+		n := 16
+		if n > len(b) {
+			n = len(b)
+		}
+
+		s := ""
+		for _, c := range b[:n] {
+			s += fmt.Sprintf("0x%02x,", c)
+		}
+		t.P(`	`, s)
+
+		b = b[n:]
+	}
+	t.P("}")
+}
+
+func (t *psrpc) printComments(comments typemap.DefinitionComments) bool {
+	text := strings.TrimSuffix(comments.Leading, "\n")
+	if len(strings.TrimSpace(text)) == 0 {
+		return false
+	}
+	split := strings.Split(text, "\n")
+	for _, line := range split {
+		t.P("// ", strings.TrimPrefix(line, " "))
+	}
+	return len(split) > 0
+}
+
+// Given a protobuf name for a Message, return the Go name we will use for that
+// type, including its package prefix.
+func (t *psrpc) goTypeName(protoName string) string {
+	def := t.reg.MessageDefinition(protoName)
+	if def == nil {
+		gen.Fail("could not find message for", protoName)
+	}
+
+	var prefix string
+	if pkg := t.goPackageName(def.File); pkg != t.genPkgName {
+		prefix = pkg + "."
+	}
+
+	var name string
+	for _, parent := range def.Lineage() {
+		name += stringutils.CamelCase(parent.Descriptor.GetName()) + "_"
+	}
+	name += stringutils.CamelCase(def.Descriptor.GetName())
+	return prefix + name
+}
+
+func (t *psrpc) goPackageName(file *descriptor.FileDescriptorProto) string {
+	return t.fileToGoPackageName[file]
+}
+
+func (t *psrpc) formattedOutput() string {
+	// Reformat generated code.
+	fset := token.NewFileSet()
+	raw := t.output.Bytes()
+	ast, err := parser.ParseFile(fset, "", raw, parser.ParseComments)
+	if err != nil {
+		// Print out the bad code with line numbers.
+		// This should never happen in practice, but it can while changing generated code,
+		// so consider this a debugging aid.
+		var src bytes.Buffer
+		s := bufio.NewScanner(bytes.NewReader(raw))
+		for line := 1; s.Scan(); line++ {
+			fmt.Fprintf(&src, "%5d\t%s\n", line, s.Bytes())
+		}
+		gen.Fail("bad Go source code was generated:", err.Error(), "\n"+src.String())
+	}
+
+	out := bytes.NewBuffer(nil)
+	err = (&printer.Config{Mode: printer.TabIndent | printer.UseSpaces, Tabwidth: 8}).Fprint(out, fset, ast)
+	if err != nil {
+		gen.Fail("generated Go source code could not be reformatted:", err.Error())
+	}
+
+	return out.String()
+}
+
+func unexported(s string) string { return strings.ToLower(s[:1]) + s[1:] }
+
+func serviceNameCamelCased(service *descriptor.ServiceDescriptorProto) string {
+	return stringutils.CamelCase(service.GetName())
+}
+
+func serviceStruct(service *descriptor.ServiceDescriptorProto) string {
+	return unexported(serviceNameCamelCased(service)) + "Server"
+}
+
+func methodNameCamelCased(method *descriptor.MethodDescriptorProto) string {
+	return stringutils.CamelCase(method.GetName())
+}
+
+func fileDescSliceContains(slice []*descriptor.FileDescriptorProto, f *descriptor.FileDescriptorProto) bool {
+	for _, sf := range slice {
+		if f == sf {
+			return true
+		}
+	}
+	return false
+}

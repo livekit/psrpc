@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+// No package name
+
+option go_package = "github.com/livekit/psrpc/internal/test/no_package_name";
+
+message Msg {}
+
+service Svc {
+  rpc Send(Msg) returns(Msg);
+}

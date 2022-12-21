@@ -3,77 +3,203 @@
 Create custom protobuf-based golang RPCs built on pub/sub.
 
 Supports:
-* Redis or Nats as a backend
+* Protobuf service definitions
+* Redis or Nats as a communication layer
 * Custom server selection for RPC handling based on user-defined [affinity](#Affinity)
-* Single RPCs (RequestSingle) - one request is handled by one server, used for normal RPCs
-* Multi RPCs (RequestAll) - one request is handled by every server, used for distributed updates or result aggregation
-* Single RPC streams (JoinStreamQueue) - updates sent from the server will only be processed by a single client
-* Multi RPC streams (JoinStream) - updates sent be the server will be processed by every client
+* RPC topics - any RPC can be divided into topics, (e.g. by region)
+* Single RPCs - one request is handled by one server, used for normal RPCs
+* Multi RPCs - one request is handled by every server, used for distributed updates or result aggregation
+* Queue Subscriptions - updates sent from the server will only be processed by a single client
+* Subscriptions - updates sent be the server will be processed by every client
 
-## Interfaces
+## Usage
 
-### RPCServer
+### Protobuf
+
+PSRPC is generated from proto files, and we've added a few custom method options:
+```protobuf
+message Options {
+  // For RPCs, each client request will receive a response from every server.
+  // For subscriptions, every client will receive every update.
+  bool multi = 1;
+
+  // This method is a pub/sub.
+  bool subscription = 2;
+
+  // This method uses topics.
+  bool topics = 3;
+
+  // Your service will supply an affinity function for handler selection.
+  bool affinity_func = 4;
+}
+
+```
+
+Start with your service definition. Here's an example using different method options: 
+
+```protobuf
+syntax = "proto3";
+
+import "options.proto";
+
+option go_package = "/api";
+
+service MyService {
+  // A normal RPC - one request, one response. The request will be handled by the first available server
+  rpc NormalRPC(MyRequest) returns (MyResponse);
+  
+  // An RPC with a server affinity function for handler selection.
+  rpc IntensiveRPC(MyRequest) returns (MyResponse) {
+    option (psrpc.options).affinity_func = true;
+  };
+  
+  // A multi-rpc - a client will send one request, and receive one response each from every server
+  rpc GetStats(MyRequest) returns (MyResponse) {
+    option (psrpc.options).multi = true;
+  };
+  
+  // An RPC with topics - a client can send one request, and receive one response from each server in one region
+  rpc GetRegionStats(MyRequest) returns (MyResponse) {
+    option (psrpc.options).topics = true;
+    option (psrpc.options).multi = true;
+  }
+  
+  // A queue subscription - even if multiple clients are subscribed, only one will receive this update.
+  // The request parameter (in this case, Ignored) will always be ignored when generating go files.
+  rpc ProcessUpdate(Ignored) returns (MyUpdate) {
+    option (psrpc.options).subscription = true;
+  };
+  
+  // A normal subscription - every client will receive every update.
+  // The request parameter (in this case, Ignored) will always be ignored when generating go files.
+  rpc UpdateState(Ignored) returns (MyUpdate) {
+    option (psrpc.options).subscription = true;
+    option (psrpc.options).multi = true;
+  };
+
+  // A subscription with topics - every client subscribed to the topic will receive every update.
+  // The request parameter (in this case, Ignored) will always be ignored when generating go files.
+  rpc UpdateRegionState(Ignored) returns (MyUpdate) {
+    option (psrpc.options).subscription = true;
+    option (psrpc.options).topics = true;
+    option (psrpc.options).multi = true;
+  }
+}
+
+message Ignored {}
+message MyRequest {}
+message MyResponse {}
+message MyUpdate {}
+```
+
+### Generation
+
+Install `protoc-gen-psrpc` by running `go install github.com/livekit/psrpc/protoc-gen-psrpc`.
+
+If using the custom options above, you'll also need to download [options.proto](protoc-gen-psrpc/options/options.proto).
+
+Use the `--psrpc_out` with `protoc` and include the options file.
+
+```shell
+protoc \ 
+  --go_out=paths=source_relative:. \
+  --psrpc_out=paths=source_relative:. \
+  -I ./protoc-gen-psrpc/options \
+  -I=. my_service.proto
+```
+
+This will create a `my_service.psrpc.go` file
+
+### Client
+
+A `MyServiceClient` will be generated based on your rpc definitions:
 
 ```go
-type RPCServer interface {
-    // register a handler
-    RegisterHandler(h Handler) error
+type MyServiceClient interface {
+    // A normal RPC - one request, one response. The request will be handled by the first available server
+    NormalRPC(ctx context.Context, req *MyRequest, opts ...psrpc.RequestOpt) (*MyResponse, error)
+    
+    // An RPC with a server affinity function for handler selection.
+    IntensiveRPC(ctx context.Context, req *MyRequest, opts ...psrpc.RequestOpt) (*MyResponse, error)
+    
+    // A multi-rpc - a client will send one request, and receive one response each from every server
+    GetStats(ctx context.Context, req *MyRequest, opts ...psrpc.RequestOpt) (<-chan *psrpc.Response[*MyResponse], error)
+    
+    // An RPC with topics - a client can send one request, and receive one response from each server in one region
+    GetRegionStats(ctx context.Context, topic string, req *Request, opts ...psrpc.RequestOpt) (<-chan *psrpc.Response[*MyResponse], error)
+    
+    // A queue subscription - even if multiple clients are subscribed, only one will receive this update.
+    SubscribeProcessUpdate(ctx context.Context) (psrpc.Subscription[*MyUpdate], error)
+    
+    // A subscription with topics - every client subscribed to the topic will receive every update.
+    SubscribeUpdateRegionState(ctx context.Context, topic string) (psrpc.Subscription[*MyUpdate], error)
+}
 
-    // publish updates to a streaming rpc
-    PublishToStream(ctx context.Context, rpc string, message proto.Message) error
-
-    // stop listening for requests for a rpc
-    DeregisterHandler(rpc string) error
-
-    // close all subscriptions and stop
-    Close()
+// NewMyServiceClient creates a psrpc client that implements the MyServiceClient interface.
+func NewMyServiceClient(clientID string, bus psrpc.MessageBus, opts ...psrpc.ClientOpt) (MyServiceClient, error) {
+    ...
 }
 ```
 
-### RPCClient
-
+Multi-RPCs will return a `chan *psrpc.Response`, where you will receive an individual response or error from each server:
 ```go
-// send a request to a single server, and receive one response
-func RequestSingle[ResponseType proto.Message](
-    ctx context.Context, 
-    client RPCClient, 
-    rpc string, 
-    request proto.Message,
-    opts ...RequestOption,
-) (ResponseType, error)
-
-// send a request to all servers, and receive one response per server
-func RequestAll[ResponseType proto.Message](
-    ctx context.Context, 
-    client RPCClient, 
-    rpc string, 
-    request proto.Message,
-    opts ...RequestOption,
-) (<-chan *Response[ResponseType], error)
-
-// subscribe to a streaming rpc (all subscribed clients will receive every message)
-func JoinStream[ResponseType proto.Message](
-    ctx context.Context,
-    client RPCClient,
-    rpc string,
-) (Subscription[ResponseType], error)
-
-// join a queue for a streaming rpc (each message is only received by a single client)
-func JoinStreamQueue[ResponseType proto.Message](
-    ctx context.Context, 
-    client RPCClient,
-    rpc string,
-) (Subscription[ResponseType], error)
-
-// types
 type Response[ResponseType proto.Message] struct {
     Result ResponseType
     Err    error
 }
+```
 
+Subscription RPCs will return a `psrpc.Subscription`, where you can listen for updates on its channel:
+
+```go
 type Subscription[MessageType proto.Message] interface {
     Channel() <-chan MessageType
     Close() error
+}
+```
+
+### ServerImpl
+
+A `<ServiceName>ServerImpl` interface will be also be generated from your rpcs. Your service will need to fulfill its interface:
+
+```go
+type MyServiceServerImpl interface {
+    // A normal RPC - one request, one response. The request will be handled by the first available server
+    NormalRPC(ctx context.Context, req *MyRequest) (*MyResponse, error)
+    
+    // An RPC with a server affinity function for handler selection.
+    IntensiveRPC(ctx context.Context, req *MyRequest) (*MyResponse, error)
+    IntensiveRPCAffinity(req *MyRequest) float32
+    
+    // A multi-rpc - a client will send one request, and receive one response each from every server
+    GetStats(ctx context.Context, req *MyRequest) (*MyResponse, error)
+    
+    // An RPC with topics - a client can send one request, and receive one response from each server in one region
+    GetRegionStats(ctx context.Context, req *MyRequest) (*MyResponse, error)
+}
+```
+
+### Server
+
+Finally, a `<ServiceName>Server` will be generated. This is used to start your rpc server, as well as register and deregister topics:
+
+```go
+type MyServiceServer interface {
+    // An RPC with topics - a client can send one request, and receive one response from each server in one region
+    RegisterGetRegionStatsTopic(topic string) error
+    DeregisterGetRegionStatsTopic(topic string) error
+    
+    // A queue subscription - even if multiple clients are subscribed, only one will receive this update.
+    PublishProcessUpdate(ctx context.Context, msg *MyUpdate) error
+    
+    // A subscription with topics - every client subscribed to the topic will receive every update.
+    PublishUpdateRegionState(ctx context.Context, topic string, msg *MyUpdate) error
+}
+
+// NewMyServiceServer builds a RPCServer that can be used to handle
+// requests that are routed to the right method in the provided svc implementation.
+func NewMyServiceServer(serverID string, svc MyServiceServerImpl, bus psrpc.MessageBus, opts ...psrpc.ServerOpt) (MyServiceServer, error) {
+    ...
 }
 ```
 
@@ -81,261 +207,45 @@ type Subscription[MessageType proto.Message] interface {
 
 ### AffinityFunc
 
-The server can register an AffinityFunc for the client to decide which instance should take a SingleRequest.
+The server can implement an affinity function for the client to decide which instance should take a SingleRequest.
 A higher affinity score is better, and a score of 0 means the server is not available.
 
 For example, the following could be used to return an affinity based on cpu load:
+```protobuf
+rpc IntensiveRPC(MyRequest) returns (MyResponse) {
+  option (psrpc.options).affinity_func = true;
+};
+```
+
 ```go
-func main() {
-    ...
-    rpcServer.RegisterHandler(psrpc.NewHandlerWithAffinity("MyRPC", handlerFunc, getAffinity))
-    ...
+func (s *MyService) IntensiveRPC(ctx context.Context, req *api.MyRequest) (*api.MyResponse, error) {
+    ... // do something CPU intensive
 }
 
-func getAffinity(req *api.Request) float32 {
+func (s *MyService) IntensiveRPCAffinity(_ *MyRequest) float32 {
     return stats.GetIdleCPU()
 }
 ```
 
-### AffinityOptions
+### SelectionOpts
 
-On the client side, you can also set affinity options for server selection with SendSingleRequest.
-
-Affinity options:
-* AcceptFirstAvailable: if true, the first server to respond with an affinity greater than 0 and MinimumAffinity will be selected.
-* MinimumAffinity: Minimum affinity for a server to be considered a valid handler. 
-* AffinityTimeout: if AcceptFirstAvailable is false, the client will wait this amount of time, then select the server with the highest affinity score.
-* ShortCircuitTimeout: if AcceptFirstAvailable is false, the client will wait this amount of time after receiving its first valid response, then select the server with the highest affinity score.
-
-If no options are supplied, the client will choose the first server to respond with an affinity score > 0.
+On the client side, you can also set server selection options with single RPCs.
 
 ```go
-affinityOpts := psrpc.AffinityOpts{
+type SelectionOpts struct {
+    MinimumAffinity      float32       // (default 0) minimum affinity for a server to be considered a valid handler
+    AcceptFirstAvailable bool          // (default true)
+    AffinityTimeout      time.Duration // (default 0 (none)) server selection deadline
+    ShortCircuitTimeout  time.Duration // (default 0 (none)) deadline imposed after receiving first response
+}
+```
+
+```go
+selectionOpts := psrpc.SelectionOpts{
     MinimumAffinity:      0.5,
     AffinityTimeout:      time.Second,
     ShortCircuitTimeout:  time.Millisecond * 250,
 }
-res, err := psrpc.RequestSingle[*api.Response](
-    context.Background(), 
-    rpcClient,
-    "MyRPC",
-    &api.Request{},
-    psrpc.WithAffinityOpts(affinityOpts))
-```
 
-For a full example, see the [Advanced example](#Advanced) below.
-
-## Examples
-
-### SingleRequest
-
-Proto:
-```protobuf
-package api;
-
-message AddRequest {
-  int32 increment = 1;
-}
-
-message AddResult {
-  int32 value = 1;
-}
-```
-
-Server:
-```go
-func main() {
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    serverID := "test_server"
-    rpcServer := psrpc.NewRPCServer("CountingService", serverID, psrpc.NewRedisMessageBus(rc))
-    
-    svc := &CountingService{}
-    rpcServer.RegisterHandler(psrpc.NewHandler("AddValue", svc.AddValue))
-    ...
-}
-
-type CountingService struct {
-    counter atomic.Int32
-}
-
-func (s *CountingService) AddValue(ctx context.Context, req *api.AddReqest) (*api.AddResult, error) {
-    value := counter.Add(req.Increment)
-    return &proto.AddResult{Value: value}, nil
-}
-
-```
-
-Client:
-```go
-func main() {
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    clientID := "test_client"
-    rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
-	
-    res, err := psrpc.RequestSingle[*api.AddResult](
-        context.Background(), 
-        rpcClient, 
-        "AddValue", 
-        &api.AddRequest{Increment: 3})
-    if err != nil {
-        return	
-    }
-    fmt.Println(res.Value)
-}
-```
-
-### MultiRequest
-
-Proto:
-```protobuf
-package api;
-
-message GetValueRequest {}
-
-message ValueResult {
-  int32 value = 1;
-}
-```
-
-Server:
-```go
-func main() {
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    serverID := "test_server"
-    rpcServer := psrpc.NewRPCServer("CountingService", serverID, psrpc.NewRedisMessageBus(rc))
-    
-    svc := &Service{}
-    rpcServer.RegisterHandler(psrpc.NewHandler("GetValue", svc.GetValue))
-    ...
-}
-
-type Service struct {
-    counter atomic.Int32
-}
-
-func (s *Service) GetValue(ctx context.Context, req *api.GetValueRequest) (*api.ValueResult, error) {
-    return &api.ValueResult{Value: s.counter.Load()}, nil
-}
-
-```
-
-Client:
-```go
-func main() {
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    clientID := "test_client"
-    rpcClient := psrpc.NewRPCClient("CountingService", clientID, psrpc.NewRedisMessageBus(rc))
-	
-    sub, err := psrpc.RequestAll[*api.ValueResult](
-        context.Background(), 
-        rpcClient, 
-        "GetValue", 
-        &api.GetValueRequest{})
-    if err != nil {
-        return	
-    }
-    defer sub.Close()
-    
-    total := 0
-    for {
-        response, ok := <-sub.Channel()
-        if !ok {
-            // channel has been closed
-            break
-        }
-		
-        if response.Err != nil {
-            fmt.Println("error:", err)	
-        } else {
-            total += response.Result.Value	
-        }
-    }
-    fmt.Println("total:", total)
-}
-```
-
-### Advanced
-
-Proto:
-```protobuf
-package api;
-
-message CalculateUserStatsRequest {
-  int64 from_unix_time = 1;
-  int64 to_unix_time = 2;
-}
-
-message CalculateUserStatsResponse {
-  int32 unique_users = 1;
-  int32 new_users = 2;
-  int32 inactive_users = 3;
-  int32 daily_active_users = 4;
-}
-```
-
-Server:
-```go
-func main() {
-    svc := NewProcessingService()
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    serverID := "test_server"
-    rpcServer := psrpc.NewRPCServer("ProcessingService", serverID, psrpc.NewRedisMessageBus(rc))
-    defer rpcServer.Close()
-	
-    rpcServer.RegisterHandler(psrpc.NewHandlerWithAffinity("CalculateUserStats", svc.CalculateUserStats, getAffinity))
-    ...
-}
-
-// The CalculateUserStats rpc requires a lot of CPU - use idle CPUs for the affinity metric
-func getAffinity(req *api.CalculateUserStatsRequest) float32 {
-    return stats.GetIdleCPU()
-}
-
-type ProcessingService struct {}
-
-func (s *ProcessingService) CalculateUserStats(ctx context.Context, req *api.CalculateUserStatsRequest) (*api.CalculateUserStatsResponse, error) {
-    userStats, err := getUserStats(req.FromUnixTime, req.ToUnixTime)
-    if err != nil {
-        return nil, err
-    }
-	
-    return &api.CalculateUserStatsResponse{
-        UniqueUsers: userStats.uniqueUsers,
-        NewUsers: userStats.newUsers,
-        InactiveUsers: userStats.inactiveUsers,
-        DailyActiveUsers: userStats.dailyActiveUsers,
-    }, nil
-}
-
-```
-
-Client:
-```go
-func main() {
-    rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-    clientID := "test_client"
-    rpcClient := psrpc.NewRPCClient("ProcessingService", clientID, psrpc.NewRedisMessageBus(rc))
-	
-    req := &api.CalculateUserStatsRequest{
-        FromUnixTime: time.Now().Add(-time.Day * 30).UnixNano(),
-        ToUnixTime: time.Now().UnixNano()
-    }
-	
-    // allow one second for server selection, with at least 0.5 cpu available
-    // once the first valid server is found, selection will occur 250ms later 
-    affinityOpts := psrpc.AffinityOpts{
-        MinimumAffinity:      0.5,
-        AffinityTimeout:      time.Second,
-        ShortCircuitTimeout:  time.Millisecond * 250,
-    }
-	
-    res, err := psrpc.RequestSingle[*api.CalculateUserStatsResponse](
-        context.Background(),
-        rpcClient,
-        "CalculateUserStats",
-        req,
-        psrpc.WithAffinityOpts(affinityOpts),
-        psrpc.WithTimeout(time.Second * 30)) // this query takes a while for larger ranges, use a longer timeout
-    fmt.Printf("%+v", res)
-}
+res, err := myClient.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(selectionOpts))
 ```

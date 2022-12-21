@@ -45,4 +45,4 @@ jobs:
         uses: magefile/mage-action@v2
         with:
           version: latest
-          args: test
+          args: testall
