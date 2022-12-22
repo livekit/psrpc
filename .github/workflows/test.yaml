@@ -3,22 +3,18 @@ name: Test
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches-ignore: [ main ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/cache@v3
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/go/bin
-            ~/.cache
-          key: livekit-psrpc
+          version: '3.x'
 
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -28,12 +24,14 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Static Check
-        uses: dominikh/staticcheck-action@v1.2.0
+      - name: Install protoc-gen-go
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1
+
+      - name: Generate Protobuf
+        uses: magefile/mage-action@v2
         with:
-          min-go-version: 1.18
-          version: 2022.1
-          install-go: false
+          version: latest
+          args: proto
 
       - name: Start Redis
         uses: supercharge/redis-github-action@1.4.0
@@ -45,4 +43,11 @@ jobs:
         uses: magefile/mage-action@v2
         with:
           version: latest
-          args: test
+          args: testall
+
+      - name: Add changes
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: livekit
+          default_author: github_actions
+          message: generated protobuf

@@ -22,6 +22,46 @@ type MessageBus interface {
 	getNC() *nats.Conn
 }
 
+type Subscription[MessageType proto.Message] interface {
+	Channel() <-chan MessageType
+	Close() error
+}
+
+var ErrBusNotConnected = errors.New("bus not connected")
+
+func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Message) error {
+	switch bus.getBusType() {
+	case redisBus:
+		return redisPublish(bus.getRC(), ctx, channel, msg)
+	case natsBus:
+		return natsPublish(bus.getNC(), ctx, channel, msg)
+	default:
+		return ErrBusNotConnected
+	}
+}
+
+func Subscribe[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
+	switch bus.getBusType() {
+	case redisBus:
+		return redisSubscribe[MessageType](bus.getRC(), ctx, channel)
+	case natsBus:
+		return natsSubscribe[MessageType](bus.getNC(), ctx, channel)
+	default:
+		return nil, ErrBusNotConnected
+	}
+}
+
+func SubscribeQueue[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
+	switch bus.getBusType() {
+	case redisBus:
+		return redisSubscribeQueue[MessageType](bus.getRC(), ctx, channel)
+	case natsBus:
+		return natsSubscribeQueue[MessageType](bus.getNC(), ctx, channel)
+	default:
+		return nil, ErrBusNotConnected
+	}
+}
+
 type bus struct {
 	MessageBus
 	busType
@@ -40,37 +80,4 @@ func (b *bus) getRC() redis.UniversalClient {
 
 func (b *bus) getNC() *nats.Conn {
 	return b.nc
-}
-
-func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Message) error {
-	switch bus.getBusType() {
-	case redisBus:
-		return redisPublish(bus.getRC(), ctx, channel, msg)
-	case natsBus:
-		return natsPublish(bus.getNC(), ctx, channel, msg)
-	default:
-		return errors.New("not connected")
-	}
-}
-
-func Subscribe[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
-	switch bus.getBusType() {
-	case redisBus:
-		return redisSubscribe[MessageType](bus.getRC(), ctx, channel)
-	case natsBus:
-		return natsSubscribe[MessageType](bus.getNC(), ctx, channel)
-	default:
-		return nil, errors.New("not connected")
-	}
-}
-
-func SubscribeQueue[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
-	switch bus.getBusType() {
-	case redisBus:
-		return redisSubscribeQueue[MessageType](bus.getRC(), ctx, channel)
-	case natsBus:
-		return natsSubscribeQueue[MessageType](bus.getNC(), ctx, channel)
-	default:
-		return nil, errors.New("not connected")
-	}
 }

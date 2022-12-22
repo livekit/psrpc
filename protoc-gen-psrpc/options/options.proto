@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package psrpc;
+option go_package = "github.com/livekit/psrpc/protoc-gen-psrpc/options";
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MethodOptions {
+  optional Options options = 2198;
+}
+
+message Options {
+  // For RPCs, each client request will receive a response from every server.
+  // For subscriptions, every client will receive every update.
+  bool multi = 1;
+
+  // This method is a pub/sub.
+  bool subscription = 2;
+
+  // This method uses topics.
+  bool topics = 3;
+
+  // Your service will supply an affinity function for handler selection.
+  bool affinity_func = 4;
+}

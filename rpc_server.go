@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -12,22 +11,25 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
-type rpcServer struct {
-	MessageBus
-	rpcOpts
-
-	serviceName string
-	id          string
-	mu          sync.RWMutex
-	handlers    map[string]Handler
-	claims      map[string]chan *internal.ClaimResponse
-	closed      chan struct{}
+type RPCServer interface {
+	// register a handler
+	RegisterHandler(h Handler) error
+	// publish updates to a streaming rpc
+	Publish(ctx context.Context, rpc string, message proto.Message) error
+	// publish updates to a topic within a streaming rpc
+	PublishTopic(ctx context.Context, rpc, topic string, message proto.Message) error
+	// stop listening for requests for a rpc
+	DeregisterHandler(rpc string) error
+	// stop listening on a topic for a rpc
+	DeregisterTopic(rpc, topic string) error
+	// close all subscriptions and stop
+	Close()
 }
 
-func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOption) RPCServer {
+func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...ServerOpt) RPCServer {
 	s := &rpcServer{
 		MessageBus:  bus,
-		rpcOpts:     getRPCOpts(opts...),
+		serverOpts:  getServerOpts(opts...),
 		serviceName: serviceName,
 		id:          serverID,
 		handlers:    make(map[string]Handler),
@@ -38,16 +40,31 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...RPCOptio
 	return s
 }
 
+type rpcServer struct {
+	MessageBus
+	serverOpts
+
+	serviceName string
+	id          string
+	mu          sync.RWMutex
+	handlers    map[string]Handler
+	claims      map[string]chan *internal.ClaimResponse
+	closed      chan struct{}
+}
+
 func (s *rpcServer) RegisterHandler(h Handler) error {
 	ctx := context.Background()
 
 	rpc := h.getRPC()
-	sub, err := Subscribe[*internal.Request](s, ctx, getRPCChannel(s.serviceName, rpc))
+	topic := h.getTopic()
+	key := getHandlerKey(rpc, topic)
+
+	sub, err := Subscribe[*internal.Request](s, ctx, getRPCChannel(s.serviceName, rpc, topic))
 	if err != nil {
 		return err
 	}
 
-	claims, err := Subscribe[*internal.ClaimResponse](s, ctx, getClaimResponseChannel(s.serviceName, rpc))
+	claims, err := Subscribe[*internal.ClaimResponse](s, ctx, getClaimResponseChannel(s.serviceName, rpc, topic))
 	if err != nil {
 		_ = sub.Close()
 		return err
@@ -57,11 +74,11 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 
 	s.mu.Lock()
 	// close previous handler if exists
-	if err = s.closeHandlerLocked(rpc); err != nil {
+	if err = s.closeHandlerLocked(key); err != nil {
 		s.mu.Unlock()
 		return err
 	}
-	s.handlers[rpc] = h
+	s.handlers[key] = h
 	s.mu.Unlock()
 
 	reqChan := sub.Channel()
@@ -100,8 +117,12 @@ func (s *rpcServer) RegisterHandler(h Handler) error {
 	return nil
 }
 
-func (s *rpcServer) PublishToStream(ctx context.Context, rpc string, msg proto.Message) error {
-	return Publish(s, ctx, getRPCChannel(s.serviceName, rpc), msg)
+func (s *rpcServer) Publish(ctx context.Context, rpc string, msg proto.Message) error {
+	return s.PublishTopic(ctx, rpc, "", msg)
+}
+
+func (s *rpcServer) PublishTopic(ctx context.Context, rpc, topic string, msg proto.Message) error {
+	return Publish(s, ctx, getRPCChannel(s.serviceName, rpc, topic), msg)
 }
 
 func (s *rpcServer) DeregisterHandler(rpc string) error {
@@ -109,6 +130,13 @@ func (s *rpcServer) DeregisterHandler(rpc string) error {
 	defer s.mu.Unlock()
 
 	return s.closeHandlerLocked(rpc)
+}
+
+func (s *rpcServer) DeregisterTopic(rpc, topic string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.closeHandlerLocked(getHandlerKey(rpc, topic))
 }
 
 func (s *rpcServer) Close() {
@@ -174,7 +202,7 @@ func (s *rpcServer) claimRequest(ctx context.Context, request *internal.Request,
 		}
 
 	case <-time.After(timeout):
-		return false, errors.New("no response from client")
+		return false, nil
 	}
 }
 
@@ -198,10 +226,10 @@ func (s *rpcServer) sendResponse(ctx context.Context, req *internal.Request, res
 	return Publish(s, ctx, getResponseChannel(s.serviceName, req.ClientId), res)
 }
 
-func (s *rpcServer) closeHandlerLocked(rpc string) error {
-	h, ok := s.handlers[rpc]
+func (s *rpcServer) closeHandlerLocked(key string) error {
+	h, ok := s.handlers[key]
 	if ok {
-		delete(s.handlers, rpc)
+		delete(s.handlers, key)
 		return h.close()
 	}
 	return nil

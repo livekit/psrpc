@@ -3,6 +3,7 @@ package psrpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,27 +13,26 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
-type rpcClient struct {
-	MessageBus
-	rpcOpts
-	rpcClientInternal
+type RPCClient interface {
+	// close all subscriptions and stop
+	Close()
 
-	serviceName      string
-	id               string
-	mu               sync.RWMutex
-	claimRequests    map[string]chan *internal.ClaimRequest
-	responseChannels map[string]chan *internal.Response
-	closed           chan struct{}
+	rpcClientInternal
 }
 
 type rpcClientInternal interface {
 	isRPCClient(*rpcClient)
 }
 
-func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOption) (RPCClient, error) {
+var (
+	ErrRequestTimedOut = errors.New("request timed out")
+	ErrNoResponse      = errors.New("no response from servers")
+)
+
+func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOpt) (RPCClient, error) {
 	c := &rpcClient{
 		MessageBus:       bus,
-		rpcOpts:          getRPCOpts(opts...),
+		clientOpts:       getClientOpts(opts...),
 		serviceName:      serviceName,
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
@@ -82,16 +82,49 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...RPCOptio
 	return c, nil
 }
 
+type rpcClient struct {
+	rpcClientInternal
+
+	MessageBus
+	clientOpts
+
+	serviceName      string
+	id               string
+	mu               sync.RWMutex
+	claimRequests    map[string]chan *internal.ClaimRequest
+	responseChannels map[string]chan *internal.Response
+	closed           chan struct{}
+}
+
+func (c *rpcClient) Close() {
+	select {
+	case <-c.closed:
+	default:
+		close(c.closed)
+	}
+}
+
 func RequestSingle[ResponseType proto.Message](
 	ctx context.Context,
 	client RPCClient,
 	rpc string,
 	request proto.Message,
-	opts ...RequestOption,
+	opts ...RequestOpt,
+) (ResponseType, error) {
+	return RequestTopicSingle[ResponseType](ctx, client, rpc, "", request, opts...)
+}
+
+func RequestTopicSingle[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	topic string,
+	request proto.Message,
+	opts ...RequestOpt,
 ) (ResponseType, error) {
 
 	c := client.(*rpcClient)
-	o := getRequestOpts(c.rpcOpts, opts...)
+	o := getRequestOpts(c.clientOpts, opts...)
 	var empty ResponseType
 
 	v, err := anypb.New(request)
@@ -125,18 +158,18 @@ func RequestSingle[ResponseType proto.Message](
 		c.mu.Unlock()
 	}()
 
-	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
+	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
 		return empty, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 
-	serverID, err := selectServer(ctx, claimChan, o.affinity)
+	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
 	if err != nil {
 		return empty, err
 	}
-	if err = Publish(c, ctx, getClaimResponseChannel(c.serviceName, rpc), &internal.ClaimResponse{
+	if err = Publish(c, ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -156,8 +189,58 @@ func RequestSingle[ResponseType proto.Message](
 		}
 
 	case <-ctx.Done():
-		return empty, errors.New("request timed out")
+		return empty, ErrRequestTimedOut
 	}
+}
+
+func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, opts SelectionOpts) (string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if opts.AffinityTimeout > 0 {
+		time.AfterFunc(opts.AffinityTimeout, cancel)
+	}
+
+	serverID := ""
+	best := float32(0)
+	shorted := false
+	claims := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			if best == 0 {
+				if claims == 0 {
+					return "", ErrNoResponse
+				}
+				return "", fmt.Errorf("no servers available (received %d responses)", claims)
+			} else {
+				return serverID, nil
+			}
+
+		case claim := <-claimChan:
+			claims++
+			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity && claim.Affinity > best) ||
+				(opts.MinimumAffinity <= 0 && claim.Affinity > best) {
+				if opts.AcceptFirstAvailable {
+					return claim.ServerId, nil
+				}
+
+				serverID = claim.ServerId
+				best = claim.Affinity
+
+				if opts.ShortCircuitTimeout > 0 && !shorted {
+					shorted = true
+					time.AfterFunc(opts.ShortCircuitTimeout, cancel)
+				}
+			}
+		}
+	}
+}
+
+type Response[ResponseType proto.Message] struct {
+	Result ResponseType
+	Err    error
 }
 
 func RequestAll[ResponseType proto.Message](
@@ -165,11 +248,22 @@ func RequestAll[ResponseType proto.Message](
 	client RPCClient,
 	rpc string,
 	request proto.Message,
-	opts ...RequestOption,
+	opts ...RequestOpt,
+) (<-chan *Response[ResponseType], error) {
+	return RequestTopicAll[ResponseType](ctx, client, rpc, "", request, opts...)
+}
+
+func RequestTopicAll[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	topic string,
+	request proto.Message,
+	opts ...RequestOpt,
 ) (<-chan *Response[ResponseType], error) {
 
 	c := client.(*rpcClient)
-	o := getRequestOpts(c.rpcOpts, opts...)
+	o := getRequestOpts(c.clientOpts, opts...)
 
 	v, err := anypb.New(request)
 	if err != nil {
@@ -222,33 +316,45 @@ func RequestAll[ResponseType proto.Message](
 		}
 	}()
 
-	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc), req); err != nil {
+	if err = Publish(c, ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
 		return nil, err
 	}
 
 	return responseChannel, nil
 }
 
-func JoinStream[ResponseType proto.Message](
-	ctx context.Context, client RPCClient, rpc string,
+func SubscribeStream[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
 ) (Subscription[ResponseType], error) {
-
-	c := client.(*rpcClient)
-	return Subscribe[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc))
+	return SubscribeTopic[ResponseType](ctx, client, rpc, "")
 }
 
-func JoinStreamQueue[ResponseType proto.Message](
-	ctx context.Context, client RPCClient, rpc string,
+func SubscribeTopic[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	topic string,
 ) (Subscription[ResponseType], error) {
-
 	c := client.(*rpcClient)
-	return SubscribeQueue[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc))
+	return Subscribe[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc, topic))
 }
 
-func (c *rpcClient) Close() {
-	select {
-	case <-c.closed:
-	default:
-		close(c.closed)
-	}
+func SubscribeStreamQueue[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+) (Subscription[ResponseType], error) {
+	return SubscribeTopicQueue[ResponseType](ctx, client, rpc, "")
+}
+
+func SubscribeTopicQueue[ResponseType proto.Message](
+	ctx context.Context,
+	client RPCClient,
+	rpc string,
+	topic string,
+) (Subscription[ResponseType], error) {
+	c := client.(*rpcClient)
+	return SubscribeQueue[ResponseType](c, ctx, getRPCChannel(c.serviceName, rpc, topic))
 }

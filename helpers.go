@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/lithammer/shortuuid/v3"
 	"google.golang.org/protobuf/proto"
@@ -13,20 +12,36 @@ func newRequestID() string {
 	return "REQ_" + shortuuid.New()[:12]
 }
 
-func getRPCChannel(serviceName, rpc string) string {
-	return strings.ToUpper(fmt.Sprintf("%s|%s|REQ", serviceName, rpc))
+func getRPCChannel(serviceName, rpc, topic string) string {
+	if topic != "" {
+		return fmt.Sprintf("%s|%s|%s|REQ", serviceName, rpc, topic)
+	} else {
+		return fmt.Sprintf("%s|%s|REQ", serviceName, rpc)
+	}
+}
+
+func getHandlerKey(rpc, topic string) string {
+	if topic != "" {
+		return fmt.Sprintf("%s|%s", rpc, topic)
+	} else {
+		return rpc
+	}
 }
 
 func getResponseChannel(serviceName, clientID string) string {
-	return strings.ToUpper(fmt.Sprintf("%s|%s|RES", serviceName, clientID))
+	return fmt.Sprintf("%s|%s|RES", serviceName, clientID)
 }
 
 func getClaimRequestChannel(serviceName, clientID string) string {
-	return strings.ToUpper(fmt.Sprintf("%s|%s|CLAIM", serviceName, clientID))
+	return fmt.Sprintf("%s|%s|CLAIM", serviceName, clientID)
 }
 
-func getClaimResponseChannel(serviceName, rpc string) string {
-	return strings.ToUpper(fmt.Sprintf("%s|%s|RCLAIM", serviceName, rpc))
+func getClaimResponseChannel(serviceName, rpc, topic string) string {
+	if topic != "" {
+		return fmt.Sprintf("%s|%s|%s|RCLAIM", serviceName, rpc, topic)
+	} else {
+		return fmt.Sprintf("%s|%s|RCLAIM", serviceName, rpc)
+	}
 }
 
 func serialize(msg proto.Message) ([]byte, error) {

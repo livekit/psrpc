@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+// Test to make sure that importing other packages doesnt break
+package psrpc.internal.test.importer;
+option go_package = "github.com/livekit/psrpc/internal/test/importer";
+
+import "importable.proto";
+
+service Svc2 {
+  rpc Send(importable.Msg) returns(importable.Msg);
+}
