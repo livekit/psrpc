@@ -10,6 +10,8 @@ import (
 
 type UnaryServerInterceptor func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error)
 
+type Handler func(context.Context, proto.Message) (proto.Message, error)
+
 func WithServerRecovery() UnaryServerInterceptor {
 	return func(ctx context.Context, req proto.Message, handler Handler) (_ proto.Message, err error) {
 		defer func() {

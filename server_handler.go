@@ -12,8 +12,6 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
-type Handler func(context.Context, proto.Message) (proto.Message, error)
-
 type AffinityFunc[RequestType proto.Message] func(RequestType) float32
 
 type rpcHandler interface {
