@@ -60,7 +60,7 @@ func TestGeneratedService(t *testing.T) {
 	//   option (psrpc.options).multi = true;
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionA"))
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionB"))
-	require.NoError(t, sA.server.DeregisterGetRegionStatsTopic("regionB"))
+	sA.server.DeregisterGetRegionStatsTopic("regionB")
 	require.NoError(t, sB.server.RegisterGetRegionStatsTopic("regionB"))
 	time.Sleep(time.Millisecond * 100)
 
@@ -159,38 +159,28 @@ type MyService struct {
 	counts map[string]int
 }
 
-func (s *MyService) NormalRPC(ctx context.Context, req *my_service.MyRequest) (*my_service.MyResponse, error) {
-	s.Lock()
+func (s *MyService) NormalRPC(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
 	s.counts["NormalRPC"]++
-	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
-func (s *MyService) IntensiveRPC(ctx context.Context, req *my_service.MyRequest) (*my_service.MyResponse, error) {
-	s.Lock()
+func (s *MyService) IntensiveRPC(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
 	s.counts["IntensiveRPC"]++
-	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
-func (s *MyService) IntensiveRPCAffinity(req *my_service.MyRequest) float32 {
-	s.Lock()
+func (s *MyService) IntensiveRPCAffinity(_ *my_service.MyRequest) float32 {
 	s.counts["IntensiveRPCAffinity"]++
-	s.Unlock()
 	return rand.Float32()
 }
 
-func (s *MyService) GetStats(ctx context.Context, req *my_service.MyRequest) (*my_service.MyResponse, error) {
-	s.Lock()
+func (s *MyService) GetStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
 	s.counts["GetStats"]++
-	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
-func (s *MyService) GetRegionStats(ctx context.Context, req *my_service.MyRequest) (*my_service.MyResponse, error) {
-	s.Lock()
+func (s *MyService) GetRegionStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
 	s.counts["GetRegionStats"]++
-	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 

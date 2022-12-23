@@ -27,7 +27,7 @@ func natsSubscribe[MessageType proto.Message](
 	nc *nats.Conn, _ context.Context, channel string,
 ) (Subscription[MessageType], error) {
 
-	msgChan := make(chan *nats.Msg, ChannelSize)
+	msgChan := make(chan *nats.Msg, channelSize)
 	sub, err := nc.ChanSubscribe(channel, msgChan)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func natsSubscribeQueue[MessageType proto.Message](
 	nc *nats.Conn, _ context.Context, channel string,
 ) (Subscription[MessageType], error) {
 
-	msgChan := make(chan *nats.Msg, ChannelSize)
+	msgChan := make(chan *nats.Msg, channelSize)
 	sub, err := nc.ChanQueueSubscribe(channel, "bus", msgChan)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func toNatsSubscription[MessageType proto.Message](
 	sub *nats.Subscription, msgChan chan *nats.Msg,
 ) Subscription[MessageType] {
 
-	dataChan := make(chan MessageType, ChannelSize)
+	dataChan := make(chan MessageType, channelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan

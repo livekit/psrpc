@@ -35,7 +35,7 @@ func redisSubscribe[MessageType proto.Message](
 
 	sub := rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan MessageType, ChannelSize)
+	dataChan := make(chan MessageType, channelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan
@@ -65,7 +65,7 @@ func redisSubscribeQueue[MessageType proto.Message](
 
 	sub := rc.Subscribe(ctx, channel)
 	msgChan := sub.Channel()
-	dataChan := make(chan MessageType, ChannelSize)
+	dataChan := make(chan MessageType, channelSize)
 	go func() {
 		for {
 			msg, ok := <-msgChan

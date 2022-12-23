@@ -334,7 +334,7 @@ func (t *psrpc) sectionComment(sectionTitle string) {
 
 const (
 	client     = "Client"
-	ServerImpl = "ServerImpl"
+	serverImpl = "ServerImpl"
 	server     = "Server"
 )
 
@@ -345,7 +345,7 @@ func (t *psrpc) generateService(file *descriptor.FileDescriptorProto, service *d
 	t.generateInterface(file, service, client)
 
 	t.sectionComment(servName + ` ServerImpl Interface`)
-	t.generateInterface(file, service, ServerImpl)
+	t.generateInterface(file, service, serverImpl)
 
 	t.sectionComment(servName + ` Server Interface`)
 	t.generateInterface(file, service, server)
@@ -368,7 +368,7 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 	t.P(`type `, servName, iface, ` interface {`)
 	for _, method := range service.Method {
 		opts := t.getOptions(method)
-		if (iface == ServerImpl && opts.Subscription) || (iface == server && !opts.Subscription && !opts.Topics) {
+		if (iface == serverImpl && opts.Subscription) || (iface == server && !opts.Subscription && !opts.Topics) {
 			continue
 		}
 
@@ -379,11 +379,18 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 		switch iface {
 		case client:
 			t.generateClientSignature(method, opts)
-		case ServerImpl:
+		case serverImpl:
 			t.generateServerImplSignature(method, opts)
 		case server:
 			t.generateServerSignature(method, opts)
 		}
+	}
+	if iface == server {
+		t.P(`  // Close and wait for pending RPCs to complete`)
+		t.P(`  Shutdown()`)
+		t.P()
+		t.P(`  // Close immediately, without waiting for pending RPCs`)
+		t.P(`  Kill()`)
 	}
 	t.P(`}`)
 }
@@ -405,9 +412,9 @@ func (t *psrpc) generateClientSignature(method *descriptor.MethodDescriptorProto
 	if opts.Subscription {
 		t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`)
 	} else if opts.Multi {
-		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOpt) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
+		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOption) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
 	} else {
-		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOpt) (*`, outputType, `, error)`)
+		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOption) (*`, outputType, `, error)`)
 	}
 	t.P()
 }
@@ -418,12 +425,12 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 	newClientFunc := "New" + servName + "Client"
 
 	t.P(`type `, structName, ` struct {`)
-	t.P(`  client `, t.pkgs["psrpc"], `.RPCClient`)
+	t.P(`  client *`, t.pkgs["psrpc"], `.RPCClient`)
 	t.P(`}`)
 	t.P()
 
 	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
-	t.P(`func `, newClientFunc, `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOpt) (`, servName, `Client, error) {`)
+	t.P(`func `, newClientFunc, `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client, error) {`)
 	t.P(`  rpcClient, err := `, t.pkgs["psrpc"], `.NewRPCClient("`, servName, `", clientID, bus, opts...)`)
 	t.P(`  if err != nil {`)
 	t.P(`    return nil, err`)
@@ -456,7 +463,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		if opts.Subscription {
 			t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`, ` {`)
 		} else {
-			t.W(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOpt`)
+			t.W(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption`)
 			if opts.Multi {
 				t.P(`) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`, ` {`)
 			} else {
@@ -467,16 +474,16 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		t.W(`  return `, t.pkgs["psrpc"])
 		if opts.Subscription {
 			if opts.Multi {
-				t.W(`.SubscribeTopic[*`)
+				t.W(`.Join[*`)
 			} else {
-				t.W(`.SubscribeTopicQueue[*`)
+				t.W(`.JoinQueue[*`)
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `)`)
 		} else {
 			if opts.Multi {
-				t.W(`.RequestTopicAll[*`)
+				t.W(`.RequestMulti[*`)
 			} else {
-				t.W(`.RequestTopicSingle[*`)
+				t.W(`.RequestSingle[*`)
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, req, opts...)`)
 		}
@@ -510,7 +517,7 @@ func (t *psrpc) generateServerSignature(method *descriptor.MethodDescriptorProto
 		t.P()
 	} else {
 		t.P(`  Register`, methName, `Topic(string) error`)
-		t.P(`  Deregister`, methName, `Topic(string) error`)
+		t.P(`  Deregister`, methName, `Topic(string)`)
 		t.P()
 	}
 }
@@ -522,15 +529,15 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	servStruct := serviceStruct(service)
 	t.P(`type `, servStruct, ` struct {`)
 	t.P(`  svc `, servName, `ServerImpl`)
-	t.P(`  rpc `, t.pkgs["psrpc"], `.RPCServer`)
+	t.P(`  rpc *`, t.pkgs["psrpc"], `.RPCServer`)
 	t.P(`}`)
 	t.P()
 
 	// Constructor for server implementation
-	t.P(`// New`, servName, `Server builds a RPCServer that can be used to handle`)
-	t.P(`// requests that are routed to the right method in the provided svc implementation.`)
-	t.P(`func New`, servName, `Server(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOpt) (`, servName, `Server, error) {`)
-	t.P(`  rpcServer := `, t.pkgs["psrpc"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
+	t.P(`// New`, servName, `Server builds a RPCServer that will route requests`)
+	t.P(`// to the corresponding method in the provided svc implementation.`)
+	t.P(`func New`, servName, `Server(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server, error) {`)
+	t.P(`  s := `, t.pkgs["psrpc"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
 	t.P()
 
 	errVar := false
@@ -546,14 +553,14 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		}
 
 		methName := methodNameCamelCased(method)
-		t.W(`  err = rpcServer.RegisterHandler(`, t.pkgs["psrpc"])
+		t.W(`  err = `, t.pkgs["psrpc"], `.RegisterHandler(s, "`, methName, `", "", svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
-			t.P(`.NewHandlerWithAffinity("`, methName, `", svc.`, methName, `, svc.`, methName, `Affinity))`)
+			t.P(`, svc.`, methName, `Affinity)`)
 		} else {
-			t.P(`.NewHandler("`, methName, `", svc.`, methName, `))`)
+			t.P(`, nil)`)
 		}
 		t.P(`  if err != nil {`)
-		t.P(`    rpcServer.Close()`)
+		t.P(`    s.Close(false)`)
 		t.P(`    return nil, err`)
 		t.P(`  }`)
 		t.P()
@@ -561,7 +568,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 
 	t.P(`  return &`, servStruct, `{`)
 	t.P(`    svc: svc,`)
-	t.P(`    rpc: rpcServer,`)
+	t.P(`    rpc: s,`)
 	t.P(`  }, nil`)
 	t.P(`}`)
 	t.P()
@@ -583,25 +590,33 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 				t.W(`, topic string`)
 			}
 			t.P(`, msg *`, outputType, `) error {`)
-			t.P(`  return s.rpc.PublishTopic(ctx, "`, methName, `", `, topicParam, `, msg)`)
+			t.P(`  return s.rpc.Publish(ctx, "`, methName, `", `, topicParam, `, msg)`)
 			t.P(`}`)
 			t.P()
 		} else {
 			t.P(`func (s *`, servStruct, `) Register`, methName, `Topic(topic string) error {`)
-			t.W(`  return s.rpc.RegisterHandler(`, t.pkgs["psrpc"])
+			t.W(`  return `, t.pkgs["psrpc"], `.RegisterHandler(s.rpc, "`, methName, `", topic, s.svc.`, methName)
 			if t.getOptions(method).AffinityFunc {
-				t.P(`.NewTopicHandlerWithAffinity("`, methName, `", topic, s.svc.`, methName, `, s.svc.`, methName, `Affinity))`)
+				t.P(`, s.svc.`, methName, `Affinity)`)
 			} else {
-				t.P(`.NewTopicHandler("`, methName, `", topic, s.svc.`, methName, `))`)
+				t.P(`, nil)`)
 			}
 			t.P(`}`)
 			t.P()
-			t.P(`func (s *`, servStruct, `) Deregister`, methName, `Topic(topic string) error {`)
-			t.P(`  return s.rpc.DeregisterTopic("`, methName, `", topic)`)
+			t.P(`func (s *`, servStruct, `) Deregister`, methName, `Topic(topic string) {`)
+			t.P(`  s.rpc.DeregisterHandler("`, methName, `", topic)`)
 			t.P(`}`)
 			t.P()
 		}
 	}
+	t.P(`func (s *`, servStruct, `) Shutdown() {`)
+	t.P(`  s.rpc.Close(false)`)
+	t.P(`}`)
+	t.P()
+	t.P(`func (s *`, servStruct, `) Kill() {`)
+	t.P(`  s.rpc.Close(true)`)
+	t.P(`}`)
+	t.P()
 }
 
 func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Options {

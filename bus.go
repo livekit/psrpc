@@ -12,8 +12,9 @@ import (
 type busType string
 
 const (
-	redisBus busType = "redis"
-	natsBus  busType = "nats"
+	redisBus    busType = "redis"
+	natsBus     busType = "nats"
+	channelSize         = 100
 )
 
 type MessageBus interface {
@@ -29,7 +30,7 @@ type Subscription[MessageType proto.Message] interface {
 
 var ErrBusNotConnected = errors.New("bus not connected")
 
-func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Message) error {
+func Publish(ctx context.Context, bus MessageBus, channel string, msg proto.Message) error {
 	switch bus.getBusType() {
 	case redisBus:
 		return redisPublish(bus.getRC(), ctx, channel, msg)
@@ -40,7 +41,7 @@ func Publish(bus MessageBus, ctx context.Context, channel string, msg proto.Mess
 	}
 }
 
-func Subscribe[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
+func Subscribe[MessageType proto.Message](ctx context.Context, bus MessageBus, channel string) (Subscription[MessageType], error) {
 	switch bus.getBusType() {
 	case redisBus:
 		return redisSubscribe[MessageType](bus.getRC(), ctx, channel)
@@ -51,7 +52,7 @@ func Subscribe[MessageType proto.Message](bus MessageBus, ctx context.Context, c
 	}
 }
 
-func SubscribeQueue[MessageType proto.Message](bus MessageBus, ctx context.Context, channel string) (Subscription[MessageType], error) {
+func SubscribeQueue[MessageType proto.Message](ctx context.Context, bus MessageBus, channel string) (Subscription[MessageType], error) {
 	switch bus.getBusType() {
 	case redisBus:
 		return redisSubscribeQueue[MessageType](bus.getRC(), ctx, channel)

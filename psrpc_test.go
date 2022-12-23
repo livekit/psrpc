@@ -35,33 +35,29 @@ func testRPC(t *testing.T, bus MessageBus) {
 
 	counter := 0
 	rpc := "add_one"
-	addOneHandler := NewHandler(rpc, func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
+	addOne := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		counter++
 		return &internal.Response{RequestId: req.RequestId}, nil
-	})
-	err = serverA.RegisterHandler(addOneHandler)
+	}
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, "", addOne, nil)
 	require.NoError(t, err)
-	err = serverB.RegisterHandler(addOneHandler)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, "", addOne, nil)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	requestID := newRequestID()
 	res, err := RequestSingle[*internal.Response](
-		ctx,
-		client,
-		rpc,
-		&internal.Request{RequestId: requestID})
+		ctx, client, rpc, "", &internal.Request{RequestId: requestID},
+	)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
 	requestID = newRequestID()
-	resChan, err := RequestAll[*internal.Response](
-		ctx,
-		client,
-		rpc,
-		&internal.Request{RequestId: requestID})
+	resChan, err := RequestMulti[*internal.Response](
+		ctx, client, rpc, "", &internal.Request{RequestId: requestID},
+	)
 	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {
@@ -72,7 +68,7 @@ func testRPC(t *testing.T, bus MessageBus) {
 				return
 			}
 			require.Equal(t, res.Result.RequestId, requestID)
-		case <-time.After(DefaultTimeout):
+		case <-time.After(DefaultClientTimeout + time.Second):
 			t.Fatal("response missing")
 		}
 	}
