@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
-
-	"github.com/livekit/psrpc/internal"
 )
 
 type RPCServer struct {
@@ -21,7 +19,6 @@ type RPCServer struct {
 	mu          sync.RWMutex
 	handlers    map[string]rpcHandler
 	active      atomic.Int32
-	claims      map[string]chan *internal.ClaimResponse
 	shutdown    chan struct{}
 }
 
@@ -32,7 +29,6 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...ServerOp
 		serviceName: serviceName,
 		id:          serverID,
 		handlers:    make(map[string]rpcHandler),
-		claims:      make(map[string]chan *internal.ClaimResponse),
 		shutdown:    make(chan struct{}),
 	}
 
@@ -55,77 +51,30 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	key := getHandlerKey(rpc, topic)
 	s.mu.RLock()
 	_, ok := s.handlers[key]
+	s.mu.RUnlock()
 	if ok {
-		s.mu.RUnlock()
 		return errors.New("handler already exists")
 	}
-	s.mu.RUnlock()
-
-	ctx := context.Background()
-	requests, err := Subscribe[*internal.Request](ctx, s, getRPCChannel(s.serviceName, rpc, topic))
-	if err != nil {
-		return err
-	}
-
-	claims, err := Subscribe[*internal.ClaimResponse](ctx, s, getClaimResponseChannel(s.serviceName, rpc, topic))
-	if err != nil {
-		_ = requests.Close()
-		return err
-	}
-	complete := make(chan struct{})
 
 	// create handler
-	s.active.Add(1)
-	h := newRPCHandler(rpc, topic, svcImpl, s.chainedUnaryInterceptors, affinityFunc)
-	h.drain = func() {
-		_ = requests.Close
+	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedUnaryInterceptors, affinityFunc)
+	if err != nil {
+		return err
 	}
-	h.onComplete = func() {
-		_ = claims.Close()
+
+	s.active.Add(1)
+	h.onCompleted = func() {
 		s.mu.Lock()
 		delete(s.handlers, key)
 		s.mu.Unlock()
 		s.active.Add(-1)
-		close(complete)
 	}
 
 	s.mu.Lock()
 	s.handlers[key] = h
 	s.mu.Unlock()
 
-	reqChan := requests.Channel()
-	go func() {
-		for {
-			select {
-			case <-complete:
-				return
-
-			case ir := <-reqChan:
-				if ir == nil {
-					continue
-				}
-				if time.Now().UnixNano() < ir.Expiry {
-					go func() {
-						if err := h.handleRequest(s, ir); err != nil {
-							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
-						}
-					}()
-				}
-
-			case claim := <-claims.Channel():
-				if claim == nil {
-					continue
-				}
-				s.mu.RLock()
-				claimChan, ok := s.claims[claim.RequestId]
-				s.mu.RUnlock()
-				if ok {
-					claimChan <- claim
-				}
-			}
-		}
-	}()
-
+	h.run(s)
 	return nil
 }
 

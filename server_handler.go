@@ -2,6 +2,7 @@ package psrpc
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,26 +21,48 @@ type rpcHandler interface {
 }
 
 type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
+	mu           sync.RWMutex
 	rpc          string
 	topic        string
+	requestSub   Subscription[*internal.Request]
+	claimSub     Subscription[*internal.ClaimResponse]
+	claims       map[string]chan *internal.ClaimResponse
 	affinityFunc AffinityFunc[RequestType]
 	handler      func(context.Context, RequestType) (ResponseType, error)
 	handling     atomic.Int32
-	drain        func()
-	onComplete   func()
+	complete     chan struct{}
+	onCompleted  func()
 }
 
 func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
+	s *RPCServer,
 	rpc string,
 	topic string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	interceptor UnaryServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],
-) *rpcHandlerImpl[RequestType, ResponseType] {
+) (*rpcHandlerImpl[RequestType, ResponseType], error) {
+
+	ctx := context.Background()
+	requestSub, err := Subscribe[*internal.Request](ctx, s, getRPCChannel(s.serviceName, rpc, topic))
+	if err != nil {
+		return nil, err
+	}
+
+	claimSub, err := Subscribe[*internal.ClaimResponse](ctx, s, getClaimResponseChannel(s.serviceName, rpc, topic))
+	if err != nil {
+		_ = requestSub.Close()
+		return nil, err
+	}
+
 	h := &rpcHandlerImpl[RequestType, ResponseType]{
 		rpc:          rpc,
 		topic:        topic,
+		requestSub:   requestSub,
+		claimSub:     claimSub,
+		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
+		complete:     make(chan struct{}),
 	}
 	if interceptor == nil {
 		h.handler = svcImpl
@@ -51,7 +74,45 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 			return res.(ResponseType), err
 		}
 	}
-	return h
+
+	return h, nil
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
+	go func() {
+		requests := h.requestSub.Channel()
+		claims := h.claimSub.Channel()
+
+		for {
+			select {
+			case <-h.complete:
+				return
+
+			case ir := <-requests:
+				if ir == nil {
+					continue
+				}
+				if time.Now().UnixNano() < ir.Expiry {
+					go func() {
+						if err := h.handleRequest(s, ir); err != nil {
+							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
+						}
+					}()
+				}
+
+			case claim := <-claims:
+				if claim == nil {
+					continue
+				}
+				h.mu.RLock()
+				claimChan, ok := h.claims[claim.RequestId]
+				h.mu.RUnlock()
+				if ok {
+					claimChan <- claim
+				}
+			}
+		}
+	}()
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
@@ -93,9 +154,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
 
-	s.mu.Lock()
-	s.claims[ir.RequestId] = claimResponseChan
-	s.mu.Unlock()
+	h.mu.Lock()
+	h.claims[ir.RequestId] = claimResponseChan
+	h.mu.Unlock()
 
 	var affinity float32
 	if h.affinityFunc != nil {
@@ -114,9 +175,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	}
 
 	defer func() {
-		s.mu.Lock()
-		delete(s.claims, ir.RequestId)
-		s.mu.Unlock()
+		h.mu.Lock()
+		delete(h.claims, ir.RequestId)
+		h.mu.Unlock()
 	}()
 
 	timeout := time.Duration(ir.Expiry - time.Now().UnixNano())
@@ -160,9 +221,11 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) close() {
-	h.drain()
+	_ = h.requestSub.Close()
 	for h.handling.Load() > 0 {
 		time.Sleep(time.Millisecond * 100)
 	}
-	h.onComplete()
+	_ = h.claimSub.Close()
+	close(h.complete)
+	h.onCompleted()
 }
