@@ -3,9 +3,9 @@ package psrpc
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -119,8 +119,8 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	s *RPCServer,
 	ir *internal.Request,
 ) error {
-	h.handling.Add(1)
-	defer h.handling.Add(-1)
+	h.handling.Inc()
+	defer h.handling.Dec()
 
 	ctx := context.Background()
 	r, err := ir.Request.UnmarshalNew()

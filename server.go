@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -62,12 +62,12 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 		return err
 	}
 
-	s.active.Add(1)
+	s.active.Inc()
 	h.onCompleted = func() {
 		s.mu.Lock()
 		delete(s.handlers, key)
 		s.mu.Unlock()
-		s.active.Add(-1)
+		s.active.Dec()
 	}
 
 	s.mu.Lock()
