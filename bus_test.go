@@ -32,12 +32,13 @@ func testSubscribe(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
 	channel := newID()
-	subA, err := Subscribe[*internal.Request](bus, ctx, channel)
+	subA, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
-	subB, err := Subscribe[*internal.Request](bus, ctx, channel)
+	subB, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
+	time.Sleep(time.Millisecond * 100)
 
-	require.NoError(t, Publish(bus, ctx, channel, &internal.Request{
+	require.NoError(t, bus.Publish(ctx, channel, &internal.Request{
 		RequestId: "1",
 	}))
 
@@ -53,12 +54,13 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
 	channel := newID()
-	subA, err := SubscribeQueue[*internal.Request](bus, ctx, channel)
+	subA, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
-	subB, err := SubscribeQueue[*internal.Request](bus, ctx, channel)
+	subB, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
+	time.Sleep(time.Millisecond * 100)
 
-	require.NoError(t, Publish(bus, ctx, channel, &internal.Request{
+	require.NoError(t, bus.Publish(ctx, channel, &internal.Request{
 		RequestId: "2",
 	}))
 
@@ -68,7 +70,7 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 		if m != nil {
 			received++
 		}
-	case <-time.After(DefaultTimeout):
+	case <-time.After(DefaultClientTimeout):
 		// continue
 	}
 
@@ -77,7 +79,7 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 		if m != nil {
 			received++
 		}
-	case <-time.After(DefaultTimeout):
+	case <-time.After(DefaultClientTimeout):
 		// continue
 	}
 
