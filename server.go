@@ -11,9 +11,9 @@ import (
 )
 
 type RPCServer struct {
-	MessageBus
 	serverOpts
 
+	bus         MessageBus
 	serviceName string
 	id          string
 	mu          sync.RWMutex
@@ -24,8 +24,8 @@ type RPCServer struct {
 
 func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...ServerOption) *RPCServer {
 	s := &RPCServer{
-		MessageBus:  bus,
 		serverOpts:  getServerOpts(opts...),
+		bus:         bus,
 		serviceName: serviceName,
 		id:          serverID,
 		handlers:    make(map[string]rpcHandler),
@@ -89,7 +89,7 @@ func (s *RPCServer) DeregisterHandler(rpc, topic string) {
 }
 
 func (s *RPCServer) Publish(ctx context.Context, rpc, topic string, msg proto.Message) error {
-	return Publish(ctx, s.MessageBus, getRPCChannel(s.serviceName, rpc, topic), msg)
+	return s.bus.Publish(ctx, getRPCChannel(s.serviceName, rpc, topic), msg)
 }
 
 func (s *RPCServer) Close(force bool) {

@@ -20,8 +20,8 @@ var (
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
 	c := &RPCClient{
-		MessageBus:       bus,
 		clientOpts:       getClientOpts(opts...),
+		bus:              bus,
 		serviceName:      serviceName,
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
@@ -30,12 +30,16 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 	}
 
 	ctx := context.Background()
-	responses, err := Subscribe[*internal.Response](ctx, c, getResponseChannel(serviceName, clientID))
+	responses, err := Subscribe[*internal.Response](
+		ctx, c.bus, getResponseChannel(serviceName, clientID), c.channelSize,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	claims, err := Subscribe[*internal.ClaimRequest](ctx, c, getClaimRequestChannel(serviceName, clientID))
+	claims, err := Subscribe[*internal.ClaimRequest](
+		ctx, c.bus, getClaimRequestChannel(serviceName, clientID), c.channelSize,
+	)
 	if err != nil {
 		_ = responses.Close()
 		return nil, err
@@ -72,9 +76,9 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 }
 
 type RPCClient struct {
-	MessageBus
 	clientOpts
 
+	bus              MessageBus
 	serviceName      string
 	id               string
 	mu               sync.RWMutex
@@ -119,7 +123,7 @@ func RequestSingle[ResponseType proto.Message](
 		Request:   v,
 	}
 
-	claimChan := make(chan *internal.ClaimRequest, channelSize)
+	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
 	resChan := make(chan *internal.Response, 1)
 
 	c.mu.Lock()
@@ -134,7 +138,7 @@ func RequestSingle[ResponseType proto.Message](
 		c.mu.Unlock()
 	}()
 
-	if err = Publish(ctx, c, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
+	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
 		return empty, err
 	}
 
@@ -145,7 +149,7 @@ func RequestSingle[ResponseType proto.Message](
 	if err != nil {
 		return empty, err
 	}
-	if err = Publish(ctx, c, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -246,13 +250,13 @@ func RequestMulti[ResponseType proto.Message](
 		Request:   v,
 	}
 
-	resChan := make(chan *internal.Response, channelSize)
+	resChan := make(chan *internal.Response, c.channelSize)
 
 	c.mu.Lock()
 	c.responseChannels[requestID] = resChan
 	c.mu.Unlock()
 
-	responseChannel := make(chan *Response[ResponseType], channelSize)
+	responseChannel := make(chan *Response[ResponseType], c.channelSize)
 	go func() {
 		timer := time.NewTimer(o.timeout)
 		for {
@@ -281,7 +285,7 @@ func RequestMulti[ResponseType proto.Message](
 		}
 	}()
 
-	if err = Publish(ctx, c, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
+	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
 		return nil, err
 	}
 
@@ -294,7 +298,7 @@ func Join[ResponseType proto.Message](
 	rpc string,
 	topic string,
 ) (Subscription[ResponseType], error) {
-	return Subscribe[ResponseType](ctx, c, getRPCChannel(c.serviceName, rpc, topic))
+	return Subscribe[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
 }
 
 func JoinQueue[ResponseType proto.Message](
@@ -303,5 +307,5 @@ func JoinQueue[ResponseType proto.Message](
 	rpc string,
 	topic string,
 ) (Subscription[ResponseType], error) {
-	return SubscribeQueue[ResponseType](ctx, c, getRPCChannel(c.serviceName, rpc, topic))
+	return SubscribeQueue[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
 }

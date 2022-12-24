@@ -42,12 +42,16 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
 	ctx := context.Background()
-	requestSub, err := Subscribe[*internal.Request](ctx, s, getRPCChannel(s.serviceName, rpc, topic))
+	requestSub, err := Subscribe[*internal.Request](
+		ctx, s.bus, getRPCChannel(s.serviceName, rpc, topic), s.channelSize,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	claimSub, err := Subscribe[*internal.ClaimResponse](ctx, s, getClaimResponseChannel(s.serviceName, rpc, topic))
+	claimSub, err := Subscribe[*internal.ClaimResponse](
+		ctx, s.bus, getClaimResponseChannel(s.serviceName, rpc, topic), s.channelSize,
+	)
 	if err != nil {
 		_ = requestSub.Close()
 		return nil, err
@@ -163,7 +167,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		affinity = 1
 	}
 
-	err := Publish(ctx, s.MessageBus, getClaimRequestChannel(s.serviceName, ir.ClientId), &internal.ClaimRequest{
+	err := s.bus.Publish(ctx, getClaimRequestChannel(s.serviceName, ir.ClientId), &internal.ClaimRequest{
 		RequestId: ir.RequestId,
 		ServerId:  s.id,
 		Affinity:  affinity,
@@ -215,7 +219,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		res.Response = v
 	}
 
-	return Publish(ctx, s.MessageBus, getResponseChannel(s.serviceName, ir.ClientId), res)
+	return s.bus.Publish(ctx, getResponseChannel(s.serviceName, ir.ClientId), res)
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) close() {
