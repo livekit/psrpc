@@ -103,6 +103,9 @@ func TestGeneratedService(t *testing.T) {
 	requireTwo(t, subA, subB)
 	require.NoError(t, subA.Close())
 	require.NoError(t, subB.Close())
+
+	shutdown(t, sA)
+	shutdown(t, sB)
 }
 
 func requireOne(t *testing.T, subA, subB psrpc.Subscription[*my_service.MyUpdate]) {
@@ -150,6 +153,20 @@ func createClient(t *testing.T, bus psrpc.MessageBus) my_service.MyServiceClient
 	client, err := my_service.NewMyServiceClient(newID(), bus)
 	require.NoError(t, err)
 	return client
+}
+
+func shutdown(t *testing.T, s *MyService) {
+	done := make(chan struct{})
+	go func() {
+		s.server.Shutdown()
+		close(done)
+	}()
+	select {
+	case <-done:
+	// continue
+	case <-time.After(time.Second * 3):
+		t.Fatalf("shutdown not returning")
+	}
 }
 
 type MyService struct {

@@ -64,10 +64,10 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 
 	s.active.Inc()
 	h.onCompleted = func() {
+		s.active.Dec()
 		s.mu.Lock()
 		delete(s.handlers, key)
 		s.mu.Unlock()
-		s.active.Dec()
 	}
 
 	s.mu.Lock()
@@ -97,11 +97,16 @@ func (s *RPCServer) Close(force bool) {
 	case <-s.shutdown:
 	default:
 		close(s.shutdown)
-		s.mu.Lock()
+		handlers := make([]rpcHandler, 0)
+		s.mu.RLock()
 		for _, h := range s.handlers {
+			handlers = append(handlers, h)
+		}
+		s.mu.RUnlock()
+
+		for _, h := range handlers {
 			h.close()
 		}
-		s.mu.Unlock()
 	}
 	if !force {
 		for s.active.Load() > 0 {
