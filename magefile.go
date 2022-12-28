@@ -64,7 +64,7 @@ func Generate() error {
 	if err != nil {
 		return err
 	}
-	
+
 	base := "./internal/test"
 	dirs, err := os.ReadDir(base)
 	if err != nil {
@@ -82,12 +82,12 @@ func Generate() error {
 }
 
 func Test() error {
-	return mageutil.Run(context.Background(), "go test -v .")
+	return mageutil.Run(context.Background(), "go test -count=1 -v . ./internal/test")
 }
 
 func TestAll() error {
 	if err := Generate(); err != nil {
 		return err
 	}
-	return mageutil.Run(context.Background(), "go test ./...")
+	return mageutil.Run(context.Background(), "go test -count=1 ./...")
 }
