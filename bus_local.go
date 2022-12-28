@@ -41,61 +41,39 @@ func (l *localMessageBus) Publish(_ context.Context, channel string, msg proto.M
 }
 
 func (l *localMessageBus) Subscribe(_ context.Context, channel string, size int) (subInternal, error) {
-	msgChan := make(chan []byte, size)
-
-	l.Lock()
-	defer l.Unlock()
-
-	subs := l.subs[channel]
-	if subs == nil {
-		subs = &localSubList{}
-		subs.onUnsubscribe = func() {
-			// lock localMessageBus before localSubList
-			l.Lock()
-			subs.Lock()
-			if subs.subCount == 0 {
-				delete(l.subs, channel)
-			}
-			subs.Unlock()
-			l.Unlock()
-		}
-		l.subs[channel] = subs
-	}
-
-	sub := &localSubscription{msgChan: msgChan}
-	subs.add(sub)
-
-	return sub, nil
+	return l.subscribe(l.subs, channel, size, false)
 }
 
 func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size int) (subInternal, error) {
-	msgChan := make(chan []byte, size)
+	return l.subscribe(l.queues, channel, size, true)
+}
 
+func (l *localMessageBus) subscribe(subLists map[string]*localSubList, channel string, size int, queue bool) (subInternal, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	queue := l.queues[channel]
-	if queue == nil {
-		queue = &localSubList{
-			queue: true,
-		}
-		queue.onUnsubscribe = func() {
+	subList := subLists[channel]
+	if subList == nil {
+		subList = &localSubList{queue: queue}
+		subList.onUnsubscribe = func(index int) {
 			// lock localMessageBus before localSubList
 			l.Lock()
-			queue.Lock()
-			if queue.subCount == 0 {
-				delete(l.queues, channel)
+			subList.Lock()
+
+			close(subList.subs[index])
+			subList.subs[index] = nil
+			subList.subCount--
+			if subList.subCount == 0 {
+				delete(subLists, channel)
 			}
-			queue.Unlock()
+
+			subList.Unlock()
 			l.Unlock()
 		}
-		l.queues[channel] = queue
+		subLists[channel] = subList
 	}
 
-	sub := &localSubscription{msgChan: msgChan}
-	queue.add(sub)
-
-	return sub, nil
+	return subList.create(size), nil
 }
 
 type localSubList struct {
@@ -104,10 +82,12 @@ type localSubList struct {
 	subCount      int
 	queue         bool
 	next          int
-	onUnsubscribe func()
+	onUnsubscribe func(int)
 }
 
-func (l *localSubList) add(sub *localSubscription) {
+func (l *localSubList) create(size int) *localSubscription {
+	msgChan := make(chan []byte, size)
+
 	l.Lock()
 	defer l.Unlock()
 
@@ -118,24 +98,21 @@ func (l *localSubList) add(sub *localSubscription) {
 		if s == nil {
 			added = true
 			index = i
-			l.subs[i] = sub.msgChan
+			l.subs[i] = msgChan
 			break
 		}
 	}
 
 	if !added {
 		index = len(l.subs)
-		l.subs = append(l.subs, sub.msgChan)
+		l.subs = append(l.subs, msgChan)
 	}
 
-	sub.onClose = func() {
-		l.Lock()
-		l.subCount--
-		close(l.subs[index])
-		l.subs[index] = nil
-		l.Unlock()
-		// call after unlocking, since onUnsubscribe locks localMessageBus
-		l.onUnsubscribe()
+	return &localSubscription{
+		msgChan: msgChan,
+		onClose: func() {
+			l.onUnsubscribe(index)
+		},
 	}
 }
 
@@ -144,6 +121,7 @@ func (l *localSubList) publish(b []byte) {
 		l.Lock()
 		defer l.Unlock()
 
+		// round-robin
 		for i := 0; i <= len(l.subs); i++ {
 			if l.next >= len(l.subs) {
 				l.next = 0
@@ -159,6 +137,7 @@ func (l *localSubList) publish(b []byte) {
 		l.RLock()
 		defer l.RUnlock()
 
+		// send to all
 		for _, s := range l.subs {
 			if s != nil {
 				s <- b
