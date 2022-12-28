@@ -4,7 +4,7 @@ Create custom protobuf-based golang RPCs built on pub/sub.
 
 Supports:
 * Protobuf service definitions
-* Redis or Nats as a communication layer
+* Use Redis, Nats, or a local communication layer
 * Custom server selection for RPC handling based on user-defined [affinity](#Affinity)
 * RPC topics - any RPC can be divided into topics, (e.g. by region)
 * Single RPCs - one request is handled by one server, used for normal RPCs
@@ -96,19 +96,32 @@ message MyUpdate {}
 
 Install `protoc-gen-psrpc` by running `go install github.com/livekit/psrpc/protoc-gen-psrpc`.
 
-If using the custom options above, you'll also need to download [options.proto](protoc-gen-psrpc/options/options.proto).
+If using the custom options above, you'll also need to include [options.proto](protoc-gen-psrpc/options/options.proto).
+The simplest way to do this is to include psrpc in your project, then run
+```shell
+go list -json -m github.com/livekit/psrpc
 
-Use the `--psrpc_out` with `protoc` and include the options file.
+{
+	"Path": "github.com/livekit/psrpc",
+	"Version": "v0.2.2",
+	"Time": "2022-12-27T21:40:05Z",
+	"Dir": "/Users/dc/go/pkg/mod/github.com/livekit/psrpc@v0.2.2",
+	"GoMod": "/Users/dc/go/pkg/mod/cache/download/github.com/livekit/psrpc/@v/v0.2.2.mod",
+	"GoVersion": "1.18"
+}
+```
+
+Use the `--psrpc_out` with `protoc` and include the options directory.
 
 ```shell
 protoc \ 
   --go_out=paths=source_relative:. \
   --psrpc_out=paths=source_relative:. \
-  -I ./protoc-gen-psrpc/options \
+  -I /Users/dc/go/pkg/mod/github.com/livekit/psrpc@v0.2.2/protoc-gen-psrpc/options \
   -I=. my_service.proto
 ```
 
-This will create a `my_service.psrpc.go` file
+This will create a `my_service.psrpc.go` file.
 
 ### Client
 
@@ -194,6 +207,12 @@ type MyServiceServer interface {
     
     // A subscription with topics - every client subscribed to the topic will receive every update.
     PublishUpdateRegionState(ctx context.Context, topic string, msg *MyUpdate) error
+
+    // Close and wait for pending RPCs to complete
+    Shutdown()
+    
+    // Close immediately, without waiting for pending RPCs
+    Kill()
 }
 
 // NewMyServiceServer builds a RPCServer that can be used to handle
