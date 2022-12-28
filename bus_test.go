@@ -13,6 +13,12 @@ import (
 )
 
 func TestMessageBus(t *testing.T) {
+	t.Run("Local", func(t *testing.T) {
+		bus := NewLocalMessageBus()
+		testSubscribe(t, bus)
+		testSubscribeQueue(t, bus)
+	})
+	
 	t.Run("Redis", func(t *testing.T) {
 		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
 		bus := NewRedisMessageBus(rc)

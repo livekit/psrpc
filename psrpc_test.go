@@ -14,6 +14,10 @@ import (
 )
 
 func TestRPC(t *testing.T) {
+	t.Run("Local", func(t *testing.T) {
+		testRPC(t, NewLocalMessageBus())
+	})
+
 	t.Run("Redis", func(t *testing.T) {
 		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
 		testRPC(t, NewRedisMessageBus(rc))

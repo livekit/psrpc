@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/lithammer/shortuuid/v3"
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc"
@@ -16,9 +17,22 @@ import (
 )
 
 func TestGeneratedService(t *testing.T) {
-	rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-	bus := psrpc.NewRedisMessageBus(rc)
+	t.Run("Local", func(t *testing.T) {
+		testGeneratedService(t, psrpc.NewLocalMessageBus())
+	})
 
+	t.Run("Redis", func(t *testing.T) {
+		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
+		testGeneratedService(t, psrpc.NewRedisMessageBus(rc))
+	})
+
+	t.Run("Nats", func(t *testing.T) {
+		nc, _ := nats.Connect(nats.DefaultURL)
+		testGeneratedService(t, psrpc.NewNatsMessageBus(nc))
+	})
+}
+
+func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	ctx := context.Background()
 	req := &my_service.MyRequest{}
 	update := &my_service.MyUpdate{}
@@ -30,15 +44,28 @@ func TestGeneratedService(t *testing.T) {
 	// rpc NormalRPC(MyRequest) returns (MyResponse);
 	_, err := cA.NormalRPC(ctx, req)
 	require.NoError(t, err)
+
+	sA.Lock()
+	sB.Lock()
 	require.Equal(t, 1, sA.counts["NormalRPC"]+sB.counts["NormalRPC"])
+	sA.Unlock()
+	sB.Unlock()
 
 	// rpc IntensiveRPC(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).affinity_func = true;
-	_, err = cB.IntensiveRPC(ctx, req)
+	_, err = cB.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
+		// if using AcceptFirstAvailable, local bus can fail the affinity count check by processing too quickly
+		AffinityTimeout: time.Millisecond * 100,
+	}))
 	require.NoError(t, err)
+
+	sA.Lock()
+	sB.Lock()
 	require.Equal(t, 1, sA.counts["IntensiveRPC"]+sB.counts["IntensiveRPC"])
 	require.Equal(t, 1, sA.counts["IntensiveRPCAffinity"])
 	require.Equal(t, 1, sB.counts["IntensiveRPCAffinity"])
+	sA.Unlock()
+	sB.Unlock()
 
 	// rpc GetStats(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).multi = true;
@@ -52,8 +79,13 @@ func TestGeneratedService(t *testing.T) {
 			t.Fatalf("timed out")
 		}
 	}
+
+	sA.Lock()
+	sB.Lock()
 	require.Equal(t, 1, sA.counts["GetStats"])
 	require.Equal(t, 1, sB.counts["GetStats"])
+	sA.Unlock()
+	sB.Unlock()
 
 	// rpc GetRegionStats(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).topics = true;
@@ -73,8 +105,13 @@ func TestGeneratedService(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("timed out")
 	}
+
+	sA.Lock()
+	sB.Lock()
 	require.Equal(t, 0, sA.counts["GetRegionStats"])
 	require.Equal(t, 1, sB.counts["GetRegionStats"])
+	sA.Unlock()
+	sB.Unlock()
 
 	// rpc ProcessUpdate(Ignored) returns (MyUpdate) {
 	//   option (psrpc.options).subscription = true;
@@ -177,27 +214,37 @@ type MyService struct {
 }
 
 func (s *MyService) NormalRPC(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
+	s.Lock()
 	s.counts["NormalRPC"]++
+	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
 func (s *MyService) IntensiveRPC(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
+	s.Lock()
 	s.counts["IntensiveRPC"]++
+	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
 func (s *MyService) IntensiveRPCAffinity(_ *my_service.MyRequest) float32 {
+	s.Lock()
 	s.counts["IntensiveRPCAffinity"]++
+	s.Unlock()
 	return rand.Float32()
 }
 
 func (s *MyService) GetStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
+	s.Lock()
 	s.counts["GetStats"]++
+	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
 func (s *MyService) GetRegionStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {
+	s.Lock()
 	s.counts["GetRegionStats"]++
+	s.Unlock()
 	return &my_service.MyResponse{}, nil
 }
 
