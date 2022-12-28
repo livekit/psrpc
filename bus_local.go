@@ -44,6 +44,8 @@ func (l *localMessageBus) Subscribe(_ context.Context, channel string, size int)
 	msgChan := make(chan []byte, size)
 
 	l.Lock()
+	defer l.Unlock()
+
 	subs := l.subs[channel]
 	if subs == nil {
 		subs = &localSubList{}
@@ -58,10 +60,10 @@ func (l *localMessageBus) Subscribe(_ context.Context, channel string, size int)
 		}
 		l.subs[channel] = subs
 	}
-	l.Unlock()
 
 	sub := &localSubscription{msgChan: msgChan}
 	subs.add(sub)
+
 	return sub, nil
 }
 
@@ -69,6 +71,8 @@ func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size
 	msgChan := make(chan []byte, size)
 
 	l.Lock()
+	defer l.Unlock()
+
 	queue := l.queues[channel]
 	if queue == nil {
 		queue = &localSubList{
@@ -85,10 +89,10 @@ func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size
 		}
 		l.queues[channel] = queue
 	}
-	l.Unlock()
 
 	sub := &localSubscription{msgChan: msgChan}
 	queue.add(sub)
+
 	return sub, nil
 }
 
@@ -136,6 +140,7 @@ func (l *localSubList) publish(b []byte) {
 	if l.queue {
 		l.Lock()
 		defer l.Unlock()
+
 		for i := 0; i <= len(l.subs); i++ {
 			if l.next >= len(l.subs) {
 				l.next = 0
@@ -150,6 +155,7 @@ func (l *localSubList) publish(b []byte) {
 	} else {
 		l.RLock()
 		defer l.RUnlock()
+
 		for _, s := range l.subs {
 			if s != nil {
 				s <- b
