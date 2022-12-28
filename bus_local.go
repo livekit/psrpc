@@ -50,6 +50,7 @@ func (l *localMessageBus) Subscribe(_ context.Context, channel string, size int)
 	if subs == nil {
 		subs = &localSubList{}
 		subs.onUnsubscribe = func() {
+			// lock localMessageBus before localSubList
 			l.Lock()
 			subs.Lock()
 			if subs.subCount == 0 {
@@ -79,6 +80,7 @@ func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size
 			queue: true,
 		}
 		queue.onUnsubscribe = func() {
+			// lock localMessageBus before localSubList
 			l.Lock()
 			queue.Lock()
 			if queue.subCount == 0 {
@@ -97,7 +99,7 @@ func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size
 }
 
 type localSubList struct {
-	sync.RWMutex
+	sync.RWMutex  // locking while holding localMessageBus lock is allowed
 	subs          []chan []byte
 	subCount      int
 	queue         bool
@@ -132,6 +134,7 @@ func (l *localSubList) add(sub *localSubscription) {
 		close(l.subs[index])
 		l.subs[index] = nil
 		l.Unlock()
+		// call after unlocking, since onUnsubscribe locks localMessageBus
 		l.onUnsubscribe()
 	}
 }
