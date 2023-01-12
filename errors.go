@@ -1,0 +1,208 @@
+package psrpc
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/twitchtv/twirp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+type Error interface {
+	error
+	Code() ErrorCode
+
+	// convenience methods
+	ToHttp() int
+	ToGrpc() error
+	ToTwirp() error
+}
+
+type ErrorCode string
+
+func NewError(err error, code ErrorCode) Error {
+	return &psrpcError{
+		error: err,
+		code:  code,
+	}
+}
+
+const (
+	OK ErrorCode = ""
+	// Request Canceled by client
+	Canceled ErrorCode = "canceled"
+	// Unknown (server returned non-psrpc error)
+	Unknown ErrorCode = "unknown"
+	// Invalid argument in request
+	InvalidArgument ErrorCode = "invalid_argument"
+	// Could not unmarshal request
+	MalformedRequest ErrorCode = "malformed_request"
+	// Could not unmarshal result
+	MalformedResponse ErrorCode = "malformed_result"
+	// Request timed out
+	DeadlineExceeded ErrorCode = "deadline_exceeded"
+	// Entity not found
+	NotFound ErrorCode = "not_found"
+	// Duplicate creation attempted
+	AlreadyExists ErrorCode = "already_exists"
+	// Caller does not have required permissions
+	PermissionDenied ErrorCode = "permission_denied"
+	// Some resource has been exhausted, e.g. memory or quota
+	ResourceExhausted ErrorCode = "resource_exhausted"
+	// Inconsistent state to carry out request
+	FailedPrecondition ErrorCode = "failed_precondition"
+	// Request aborted
+	Aborted ErrorCode = "aborted"
+	// Operation was out of range
+	OutOfRange ErrorCode = "out_of_range"
+	// Operation is not implemented by the server
+	Unimplemented ErrorCode = "unimplemented"
+	// Operation failed due to an internal error
+	Internal ErrorCode = "internal"
+	// Service unavailable due to load and/or affinity constraints
+	Unavailable ErrorCode = "unavailable"
+	// Irrecoverable loss or corruption of data
+	DataLoss ErrorCode = "data_loss"
+	// Similar to PermissionDenied, used when the caller is unidentified
+	Unauthenticated ErrorCode = "unauthenticated"
+)
+
+type psrpcError struct {
+	error
+	code ErrorCode
+}
+
+func newErrorFromResponse(err, code string) Error {
+	return &psrpcError{
+		error: errors.New(err),
+		code:  ErrorCode(code),
+	}
+}
+
+func (e psrpcError) Code() ErrorCode {
+	return e.code
+}
+
+func (e psrpcError) ToHttp() int {
+	switch e.code {
+	case OK:
+		return http.StatusOK
+	case Canceled, DeadlineExceeded:
+		return http.StatusRequestTimeout
+	case Unknown, MalformedResponse, Internal, DataLoss:
+		return http.StatusInternalServerError
+	case InvalidArgument, MalformedRequest:
+		return http.StatusBadRequest
+	case NotFound:
+		return http.StatusNotFound
+	case AlreadyExists, Aborted:
+		return http.StatusConflict
+	case PermissionDenied:
+		return http.StatusForbidden
+	case ResourceExhausted:
+		return http.StatusTooManyRequests
+	case FailedPrecondition:
+		return http.StatusPreconditionFailed
+	case OutOfRange:
+		return http.StatusRequestedRangeNotSatisfiable
+	case Unimplemented:
+		return http.StatusNotImplemented
+	case Unavailable:
+		return http.StatusServiceUnavailable
+	case Unauthenticated:
+		return http.StatusUnauthorized
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func (e psrpcError) ToGrpc() error {
+	var c codes.Code
+	switch e.code {
+	case OK:
+		c = codes.OK
+	case Canceled:
+		c = codes.Canceled
+	case Unknown:
+		c = codes.Unknown
+	case InvalidArgument, MalformedRequest:
+		c = codes.InvalidArgument
+	case DeadlineExceeded:
+		c = codes.DeadlineExceeded
+	case NotFound:
+		c = codes.NotFound
+	case AlreadyExists:
+		c = codes.AlreadyExists
+	case PermissionDenied:
+		c = codes.PermissionDenied
+	case ResourceExhausted:
+		c = codes.ResourceExhausted
+	case FailedPrecondition:
+		c = codes.FailedPrecondition
+	case Aborted:
+		c = codes.Aborted
+	case OutOfRange:
+		c = codes.OutOfRange
+	case Unimplemented:
+		c = codes.Unimplemented
+	case MalformedResponse, Internal:
+		c = codes.Internal
+	case Unavailable:
+		c = codes.Unavailable
+	case DataLoss:
+		c = codes.DataLoss
+	case Unauthenticated:
+		c = codes.Unauthenticated
+	default:
+		c = codes.Unknown
+	}
+
+	return status.Error(c, e.Error())
+}
+
+func (e psrpcError) ToTwirp() error {
+	var c twirp.ErrorCode
+	switch e.code {
+	case OK:
+		c = twirp.NoError
+	case Canceled:
+		c = twirp.Canceled
+	case Unknown:
+		c = twirp.Unknown
+	case InvalidArgument:
+		c = twirp.InvalidArgument
+	case MalformedRequest, MalformedResponse:
+		c = twirp.Malformed
+	case DeadlineExceeded:
+		c = twirp.DeadlineExceeded
+	case NotFound:
+		c = twirp.NotFound
+	case AlreadyExists:
+		c = twirp.AlreadyExists
+	case PermissionDenied:
+		c = twirp.PermissionDenied
+	case ResourceExhausted:
+		c = twirp.ResourceExhausted
+	case FailedPrecondition:
+		c = twirp.FailedPrecondition
+	case Aborted:
+		c = twirp.Aborted
+	case OutOfRange:
+		c = twirp.OutOfRange
+	case Unimplemented:
+		c = twirp.Unimplemented
+	case Internal:
+		c = twirp.Internal
+	case Unavailable:
+		c = twirp.Unavailable
+	case DataLoss:
+		c = twirp.DataLoss
+	case Unauthenticated:
+		c = twirp.Unauthenticated
+	default:
+		c = twirp.Unknown
+	}
+
+	return twirp.NewError(c, e.Error())
+}

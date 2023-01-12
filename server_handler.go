@@ -128,6 +128,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	r, err := ir.Request.UnmarshalNew()
 	if err != nil {
 		var res ResponseType
+		err = NewError(err, MalformedRequest)
 		_ = h.sendResponse(s, ctx, ir, res, err)
 		return err
 	}
@@ -210,13 +211,21 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 	}
 
 	if err != nil {
-		res.Error = err.Error()
+		if e, ok := err.(Error); ok {
+			res.Error = e.Error()
+			res.Code = string(e.Code())
+		} else {
+			res.Error = err.Error()
+			res.Code = string(Internal)
+		}
 	} else if response != nil {
 		v, err := anypb.New(response)
 		if err != nil {
-			return err
+			res.Error = err.Error()
+			res.Code = string(MalformedResponse)
+		} else {
+			res.Response = v
 		}
-		res.Response = v
 	}
 
 	return s.bus.Publish(ctx, getResponseChannel(s.serviceName, ir.ClientId), res)
