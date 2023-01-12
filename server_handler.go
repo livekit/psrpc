@@ -128,7 +128,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	r, err := ir.Request.UnmarshalNew()
 	if err != nil {
 		var res ResponseType
-		err = NewError(err, MalformedRequest)
+		err = NewError(MalformedRequest, err)
 		_ = h.sendResponse(s, ctx, ir, res, err)
 		return err
 	}
@@ -216,7 +216,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Code = string(e.Code())
 		} else {
 			res.Error = err.Error()
-			res.Code = string(Internal)
+			res.Code = string(Unknown)
 		}
 	} else if response != nil {
 		v, err := anypb.New(response)

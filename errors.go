@@ -2,6 +2,7 @@ package psrpc
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/twitchtv/twirp"
@@ -21,27 +22,38 @@ type Error interface {
 
 type ErrorCode string
 
-func NewError(err error, code ErrorCode) Error {
+func NewError(code ErrorCode, err error) Error {
 	return &psrpcError{
 		error: err,
 		code:  code,
 	}
 }
 
+func NewErrorf(code ErrorCode, msg string, args ...interface{}) Error {
+	return &psrpcError{
+		error: fmt.Errorf(msg, args...),
+		code:  code,
+	}
+}
+
 const (
 	OK ErrorCode = ""
+
 	// Request Canceled by client
 	Canceled ErrorCode = "canceled"
-	// Unknown (server returned non-psrpc error)
-	Unknown ErrorCode = "unknown"
-	// Invalid argument in request
-	InvalidArgument ErrorCode = "invalid_argument"
 	// Could not unmarshal request
 	MalformedRequest ErrorCode = "malformed_request"
 	// Could not unmarshal result
 	MalformedResponse ErrorCode = "malformed_result"
 	// Request timed out
 	DeadlineExceeded ErrorCode = "deadline_exceeded"
+	// Service unavailable due to load and/or affinity constraints
+	Unavailable ErrorCode = "unavailable"
+	// Unknown (server returned non-psrpc error)
+	Unknown ErrorCode = "unknown"
+
+	// Invalid argument in request
+	InvalidArgument ErrorCode = "invalid_argument"
 	// Entity not found
 	NotFound ErrorCode = "not_found"
 	// Duplicate creation attempted
@@ -60,8 +72,6 @@ const (
 	Unimplemented ErrorCode = "unimplemented"
 	// Operation failed due to an internal error
 	Internal ErrorCode = "internal"
-	// Service unavailable due to load and/or affinity constraints
-	Unavailable ErrorCode = "unavailable"
 	// Irrecoverable loss or corruption of data
 	DataLoss ErrorCode = "data_loss"
 	// Similar to PermissionDenied, used when the caller is unidentified
