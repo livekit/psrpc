@@ -16,7 +16,7 @@ type Handler func(context.Context, proto.Message) (proto.Message, error)
 type ClientRequestHook func(ctx context.Context, req proto.Message, info RPCInfo)
 
 // Response hooks are called just before responses are returned
-// For multi-requests, response hooks are called on every response
+// For multi-requests, response hooks are called on every response, and block while executing
 type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
 
 type RPCInfo struct {
