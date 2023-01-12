@@ -3,7 +3,6 @@ package psrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -14,8 +13,8 @@ import (
 )
 
 var (
-	ErrRequestTimedOut = errors.New("request timed out")
-	ErrNoResponse      = errors.New("no response from servers")
+	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
+	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
 )
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
@@ -109,7 +108,7 @@ func RequestSingle[ResponseType proto.Message](
 
 	v, err := anypb.New(request)
 	if err != nil {
-		return empty, err
+		return empty, NewError(MalformedRequest, err)
 	}
 
 	requestID := newRequestID()
@@ -139,7 +138,7 @@ func RequestSingle[ResponseType proto.Message](
 	}()
 
 	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		return empty, err
+		return empty, NewError(Internal, err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
@@ -153,17 +152,17 @@ func RequestSingle[ResponseType proto.Message](
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
-		return empty, err
+		return empty, NewError(Internal, err)
 	}
 
 	select {
 	case resp := <-resChan:
 		if resp.Error != "" {
-			return empty, errors.New(resp.Error)
+			return empty, newErrorFromResponse(resp.Code, resp.Error)
 		} else {
 			response, err := resp.Response.UnmarshalNew()
 			if err != nil {
-				return empty, err
+				return empty, NewError(MalformedResponse, err)
 			}
 			return response.(ResponseType), nil
 		}
@@ -193,7 +192,7 @@ func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, op
 				if claims == 0 {
 					return "", ErrNoResponse
 				}
-				return "", fmt.Errorf("no servers available (received %d responses)", claims)
+				return "", NewErrorf(Unavailable, "no servers available (received %d responses)", claims)
 			} else {
 				return serverID, nil
 			}
@@ -236,7 +235,7 @@ func RequestMulti[ResponseType proto.Message](
 
 	v, err := anypb.New(request)
 	if err != nil {
-		return nil, err
+		return nil, NewError(MalformedRequest, err)
 	}
 
 	requestID := newRequestID()
@@ -264,11 +263,11 @@ func RequestMulti[ResponseType proto.Message](
 			case res := <-resChan:
 				response := &Response[ResponseType]{}
 				if res.Error != "" {
-					response.Err = errors.New(res.Error)
+					response.Err = newErrorFromResponse(res.Code, res.Error)
 				} else {
 					v, err := res.Response.UnmarshalNew()
 					if err != nil {
-						response.Err = err
+						response.Err = NewError(MalformedResponse, err)
 					} else {
 						response.Result = v.(ResponseType)
 					}
@@ -286,7 +285,7 @@ func RequestMulti[ResponseType proto.Message](
 	}()
 
 	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		return nil, err
+		return nil, NewError(Internal, err)
 	}
 
 	return responseChannel, nil
@@ -298,7 +297,11 @@ func Join[ResponseType proto.Message](
 	rpc string,
 	topic string,
 ) (Subscription[ResponseType], error) {
-	return Subscribe[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
+	sub, err := Subscribe[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
+	if err != nil {
+		return nil, NewError(Internal, err)
+	}
+	return sub, nil
 }
 
 func JoinQueue[ResponseType proto.Message](
@@ -307,5 +310,9 @@ func JoinQueue[ResponseType proto.Message](
 	rpc string,
 	topic string,
 ) (Subscription[ResponseType], error) {
-	return SubscribeQueue[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
+	sub, err := SubscribeQueue[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
+	if err != nil {
+		return nil, NewError(Internal, err)
+	}
+	return sub, nil
 }

@@ -37,7 +37,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	rpc string,
 	topic string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
-	interceptor UnaryServerInterceptor,
+	interceptor ServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
@@ -70,7 +70,10 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		h.handler = svcImpl
 	} else {
 		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
-			res, err := interceptor(ctx, req, func(context.Context, proto.Message) (proto.Message, error) {
+			res, err := interceptor(ctx, req, RPCInfo{
+				Method: h.rpc,
+				Topic:  h.topic,
+			}, func(context.Context, proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})
 			return res.(ResponseType), err
@@ -128,6 +131,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	r, err := ir.Request.UnmarshalNew()
 	if err != nil {
 		var res ResponseType
+		err = NewError(MalformedRequest, err)
 		_ = h.sendResponse(s, ctx, ir, res, err)
 		return err
 	}
@@ -210,13 +214,21 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 	}
 
 	if err != nil {
-		res.Error = err.Error()
+		if e, ok := err.(Error); ok {
+			res.Error = e.Error()
+			res.Code = string(e.Code())
+		} else {
+			res.Error = err.Error()
+			res.Code = string(Unknown)
+		}
 	} else if response != nil {
 		v, err := anypb.New(response)
 		if err != nil {
-			return err
+			res.Error = err.Error()
+			res.Code = string(MalformedResponse)
+		} else {
+			res.Response = v
 		}
-		res.Response = v
 	}
 
 	return s.bus.Publish(ctx, getResponseChannel(s.serviceName, ir.ClientId), res)

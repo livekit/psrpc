@@ -57,7 +57,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	}
 
 	// create handler
-	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedUnaryInterceptors, affinityFunc)
+	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc)
 	if err != nil {
 		return err
 	}
