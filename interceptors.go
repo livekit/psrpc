@@ -11,20 +11,6 @@ type UnaryServerInterceptor func(ctx context.Context, req proto.Message, handler
 
 type Handler func(context.Context, proto.Message) (proto.Message, error)
 
-// Recover from server panics. Should always be the first interceptor
-func WithServerRecovery() UnaryServerInterceptor {
-	return func(ctx context.Context, req proto.Message, handler Handler) (resp proto.Message, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = NewErrorf(Internal, "Caught server panic. Stack trace:\n%s", string(debug.Stack()))
-			}
-		}()
-
-		resp, err = handler(ctx, req)
-		return
-	}
-}
-
 // Log errors to a custom logger, prometheus, etc.
 func WithServerErrorLogger(logFn func(err error, code ErrorCode)) UnaryServerInterceptor {
 	return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
@@ -37,6 +23,20 @@ func WithServerErrorLogger(logFn func(err error, code ErrorCode)) UnaryServerInt
 			logFn(err, code)
 		}
 		return resp, err
+	}
+}
+
+// Recover from server panics. Should always be the last interceptor
+func WithServerRecovery() UnaryServerInterceptor {
+	return func(ctx context.Context, req proto.Message, handler Handler) (resp proto.Message, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = NewErrorf(Internal, "Caught server panic. Stack trace:\n%s", string(debug.Stack()))
+			}
+		}()
+
+		resp, err = handler(ctx, req)
+		return
 	}
 }
 

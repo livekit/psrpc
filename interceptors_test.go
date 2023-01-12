@@ -11,6 +11,7 @@ import (
 
 func TestInterceptors(t *testing.T) {
 	s := ""
+	var code ErrorCode
 
 	createInterceptor := func(i int) UnaryServerInterceptor {
 		return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
@@ -21,14 +22,18 @@ func TestInterceptors(t *testing.T) {
 		}
 	}
 	interceptors := []UnaryServerInterceptor{
+		WithServerErrorLogger(func(err error, c ErrorCode) {
+			code = c
+		}),
 		createInterceptor(1),
 		createInterceptor(2),
 		createInterceptor(3),
+		WithServerRecovery(),
 	}
 	chained := chainUnaryServerInterceptors(interceptors)
 	svcImpl := func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 		s += fmt.Sprint(4)
-		return nil, nil
+		panic("panic")
 	}
 
 	handler := func(ctx context.Context, req proto.Message) (proto.Message, error) {
@@ -39,6 +44,7 @@ func TestInterceptors(t *testing.T) {
 	}
 
 	_, err := handler(context.Background(), nil)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Equal(t, "1234321", s)
+	require.Equal(t, Internal, code)
 }
