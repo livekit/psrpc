@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"context"
-	"fmt"
 	"runtime/debug"
 
 	"google.golang.org/protobuf/proto"
@@ -12,20 +11,36 @@ type UnaryServerInterceptor func(ctx context.Context, req proto.Message, handler
 
 type Handler func(context.Context, proto.Message) (proto.Message, error)
 
+// Recover from server panics. Should always be the first interceptor
 func WithServerRecovery() UnaryServerInterceptor {
-	return func(ctx context.Context, req proto.Message, handler Handler) (_ proto.Message, err error) {
+	return func(ctx context.Context, req proto.Message, handler Handler) (resp proto.Message, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				err = fmt.Errorf("Caught server panic. Stack trace:\n%s", string(debug.Stack()))
+				err = NewErrorf(Internal, "Caught server panic. Stack trace:\n%s", string(debug.Stack()))
 			}
 		}()
 
+		resp, err = handler(ctx, req)
+		return
+	}
+}
+
+// Log errors to a custom logger, prometheus, etc.
+func WithServerErrorLogger(logFn func(err error, code ErrorCode)) UnaryServerInterceptor {
+	return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
 		resp, err := handler(ctx, req)
+		if err != nil {
+			code := Unknown
+			if e, ok := err.(Error); ok {
+				code = e.Code()
+			}
+			logFn(err, code)
+		}
 		return resp, err
 	}
 }
 
-func chainUnaryInterceptors(interceptors []UnaryServerInterceptor) UnaryServerInterceptor {
+func chainUnaryServerInterceptors(interceptors []UnaryServerInterceptor) UnaryServerInterceptor {
 	filtered := make([]UnaryServerInterceptor, 0, len(interceptors))
 	for _, interceptor := range interceptors {
 		if interceptor != nil {

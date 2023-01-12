@@ -25,7 +25,7 @@ func TestInterceptors(t *testing.T) {
 		createInterceptor(2),
 		createInterceptor(3),
 	}
-	chained := chainUnaryInterceptors(interceptors)
+	chained := chainUnaryServerInterceptors(interceptors)
 	svcImpl := func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 		s += fmt.Sprint(4)
 		return nil, nil

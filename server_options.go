@@ -50,6 +50,6 @@ func getServerOpts(opts ...ServerOption) serverOpts {
 		opt(o)
 	}
 
-	o.chainedUnaryInterceptors = chainUnaryInterceptors(o.unaryInterceptors)
+	o.chainedUnaryInterceptors = chainUnaryServerInterceptors(o.unaryInterceptors)
 	return *o
 }
