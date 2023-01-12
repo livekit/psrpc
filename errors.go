@@ -83,7 +83,11 @@ type psrpcError struct {
 	code ErrorCode
 }
 
-func newErrorFromResponse(err, code string) Error {
+func newErrorFromResponse(code, err string) Error {
+	if code == "" {
+		code = string(Unknown)
+	}
+
 	return &psrpcError{
 		error: errors.New(err),
 		code:  ErrorCode(code),

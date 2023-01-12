@@ -158,7 +158,7 @@ func RequestSingle[ResponseType proto.Message](
 	select {
 	case resp := <-resChan:
 		if resp.Error != "" {
-			return empty, newErrorFromResponse(resp.Error, resp.Code)
+			return empty, newErrorFromResponse(resp.Code, resp.Error)
 		} else {
 			response, err := resp.Response.UnmarshalNew()
 			if err != nil {
@@ -263,7 +263,7 @@ func RequestMulti[ResponseType proto.Message](
 			case res := <-resChan:
 				response := &Response[ResponseType]{}
 				if res.Error != "" {
-					response.Err = newErrorFromResponse(res.Error, res.Code)
+					response.Err = newErrorFromResponse(res.Code, res.Error)
 				} else {
 					v, err := res.Response.UnmarshalNew()
 					if err != nil {
