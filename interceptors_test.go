@@ -11,7 +11,6 @@ import (
 
 func TestInterceptors(t *testing.T) {
 	s := ""
-	var code ErrorCode
 
 	createInterceptor := func(i int) UnaryServerInterceptor {
 		return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
@@ -21,10 +20,21 @@ func TestInterceptors(t *testing.T) {
 			return res, err
 		}
 	}
+
+	var code ErrorCode
+	serverErrorLogger := func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
+		resp, err := handler(ctx, req)
+		if err != nil {
+			code = Unknown
+			if e, ok := err.(Error); ok {
+				code = e.Code()
+			}
+		}
+		return resp, err
+	}
+
 	interceptors := []UnaryServerInterceptor{
-		WithServerErrorLogger(func(err error, c ErrorCode) {
-			code = c
-		}),
+		serverErrorLogger,
 		createInterceptor(1),
 		createInterceptor(2),
 		createInterceptor(3),

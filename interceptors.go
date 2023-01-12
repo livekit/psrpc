@@ -11,21 +11,6 @@ type UnaryServerInterceptor func(ctx context.Context, req proto.Message, handler
 
 type Handler func(context.Context, proto.Message) (proto.Message, error)
 
-// Log errors to a custom logger, prometheus, etc.
-func WithServerErrorLogger(logFn func(err error, code ErrorCode)) UnaryServerInterceptor {
-	return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
-		resp, err := handler(ctx, req)
-		if err != nil {
-			code := Unknown
-			if e, ok := err.(Error); ok {
-				code = e.Code()
-			}
-			logFn(err, code)
-		}
-		return resp, err
-	}
-}
-
 // Recover from server panics. Should always be the last interceptor
 func WithServerRecovery() UnaryServerInterceptor {
 	return func(ctx context.Context, req proto.Message, handler Handler) (resp proto.Message, err error) {
