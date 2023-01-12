@@ -101,14 +101,30 @@ func RequestSingle[ResponseType proto.Message](
 	topic string,
 	request proto.Message,
 	opts ...RequestOption,
-) (ResponseType, error) {
+) (response ResponseType, err error) {
 
 	o := getRequestOpts(c.clientOpts, opts...)
-	var empty ResponseType
+	info := RPCInfo{
+		Method: rpc,
+		Topic:  topic,
+	}
+
+	// response hooks
+	defer func() {
+		for _, hook := range c.responseHooks {
+			hook(ctx, request, info, response, err)
+		}
+	}()
+
+	// request hooks
+	for _, hook := range c.requestHooks {
+		hook(ctx, request, info)
+	}
 
 	v, err := anypb.New(request)
 	if err != nil {
-		return empty, NewError(MalformedRequest, err)
+		err = NewError(MalformedRequest, err)
+		return
 	}
 
 	requestID := newRequestID()
@@ -138,7 +154,8 @@ func RequestSingle[ResponseType proto.Message](
 	}()
 
 	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		return empty, NewError(Internal, err)
+		err = NewError(Internal, err)
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
@@ -146,30 +163,35 @@ func RequestSingle[ResponseType proto.Message](
 
 	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
 	if err != nil {
-		return empty, err
+		return
 	}
 	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
-		return empty, NewError(Internal, err)
+		err = NewError(Internal, err)
+		return
 	}
 
 	select {
-	case resp := <-resChan:
-		if resp.Error != "" {
-			return empty, newErrorFromResponse(resp.Code, resp.Error)
+	case res := <-resChan:
+		if res.Error != "" {
+			err = newErrorFromResponse(res.Code, res.Error)
 		} else {
-			response, err := resp.Response.UnmarshalNew()
+			var r proto.Message
+			r, err = res.Response.UnmarshalNew()
 			if err != nil {
-				return empty, NewError(MalformedResponse, err)
+				err = NewError(MalformedResponse, err)
+			} else {
+				response = r.(ResponseType)
 			}
-			return response.(ResponseType), nil
 		}
 
 	case <-ctx.Done():
-		return empty, ErrRequestTimedOut
+		err = ErrRequestTimedOut
 	}
+
+	return
 }
 
 func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, opts SelectionOpts) (string, error) {
@@ -229,13 +251,32 @@ func RequestMulti[ResponseType proto.Message](
 	topic string,
 	request proto.Message,
 	opts ...RequestOption,
-) (<-chan *Response[ResponseType], error) {
+) (rChan <-chan *Response[ResponseType], err error) {
 
 	o := getRequestOpts(c.clientOpts, opts...)
+	info := RPCInfo{
+		Method: rpc,
+		Topic:  topic,
+	}
+
+	// call response hooks on internal failure
+	defer func() {
+		if err != nil {
+			for _, hook := range c.responseHooks {
+				hook(ctx, request, info, nil, err)
+			}
+		}
+	}()
+
+	// request hooks
+	for _, hook := range c.requestHooks {
+		hook(ctx, request, info)
+	}
 
 	v, err := anypb.New(request)
 	if err != nil {
-		return nil, NewError(MalformedRequest, err)
+		err = NewError(MalformedRequest, err)
+		return
 	}
 
 	requestID := newRequestID()
@@ -261,18 +302,23 @@ func RequestMulti[ResponseType proto.Message](
 		for {
 			select {
 			case res := <-resChan:
-				response := &Response[ResponseType]{}
+				r := &Response[ResponseType]{}
 				if res.Error != "" {
-					response.Err = newErrorFromResponse(res.Code, res.Error)
+					r.Err = newErrorFromResponse(res.Code, res.Error)
 				} else {
 					v, err := res.Response.UnmarshalNew()
 					if err != nil {
-						response.Err = NewError(MalformedResponse, err)
+						r.Err = NewError(MalformedResponse, err)
 					} else {
-						response.Result = v.(ResponseType)
+						r.Result = v.(ResponseType)
 					}
 				}
-				responseChannel <- response
+
+				// response hooks
+				for _, hook := range c.responseHooks {
+					hook(ctx, request, info, r.Result, r.Err)
+				}
+				responseChannel <- r
 
 			case <-timer.C:
 				c.mu.Lock()
@@ -285,7 +331,8 @@ func RequestMulti[ResponseType proto.Message](
 	}()
 
 	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		return nil, NewError(Internal, err)
+		err = NewError(Internal, err)
+		return
 	}
 
 	return responseChannel, nil

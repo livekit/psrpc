@@ -11,6 +11,7 @@ import (
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/test/my_service"
@@ -38,7 +39,16 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	update := &my_service.MyUpdate{}
 	sA := createServer(t, bus)
 	sB := createServer(t, bus)
-	cA := createClient(t, bus)
+
+	requestCount := 0
+	requestHook := func(ctx context.Context, req proto.Message, info psrpc.RPCInfo) {
+		requestCount++
+	}
+	responseCount := 0
+	responseHook := func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, res proto.Message, err error) {
+		responseCount++
+	}
+	cA := createClient(t, bus, psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
 	cB := createClient(t, bus)
 
 	// rpc NormalRPC(MyRequest) returns (MyResponse);
@@ -50,7 +60,9 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.Equal(t, 1, sA.counts["NormalRPC"]+sB.counts["NormalRPC"])
 	sA.Unlock()
 	sB.Unlock()
-
+	require.Equal(t, 1, requestCount)
+	require.Equal(t, 1, responseCount)
+	
 	// rpc IntensiveRPC(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).affinity_func = true;
 	_, err = cB.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
@@ -86,6 +98,8 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.Equal(t, 1, sB.counts["GetStats"])
 	sA.Unlock()
 	sB.Unlock()
+	require.Equal(t, 2, requestCount)
+	require.Equal(t, 3, responseCount)
 
 	// rpc GetRegionStats(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).topics = true;
@@ -186,8 +200,8 @@ func createServer(t *testing.T, bus psrpc.MessageBus) *MyService {
 	return svc
 }
 
-func createClient(t *testing.T, bus psrpc.MessageBus) my_service.MyServiceClient {
-	client, err := my_service.NewMyServiceClient(newID(), bus)
+func createClient(t *testing.T, bus psrpc.MessageBus, opts ...psrpc.ClientOption) my_service.MyServiceClient {
+	client, err := my_service.NewMyServiceClient(newID(), bus, opts...)
 	require.NoError(t, err)
 	return client
 }
