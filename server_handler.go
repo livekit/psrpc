@@ -37,7 +37,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	rpc string,
 	topic string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
-	interceptor UnaryServerInterceptor,
+	interceptor ServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
@@ -70,7 +70,10 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		h.handler = svcImpl
 	} else {
 		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
-			res, err := interceptor(ctx, req, func(context.Context, proto.Message) (proto.Message, error) {
+			res, err := interceptor(ctx, req, RPCInfo{
+				Method: h.rpc,
+				Topic:  h.topic,
+			}, func(context.Context, proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})
 			return res.(ResponseType), err

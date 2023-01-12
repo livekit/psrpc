@@ -12,8 +12,8 @@ import (
 func TestInterceptors(t *testing.T) {
 	s := ""
 
-	createInterceptor := func(i int) UnaryServerInterceptor {
-		return func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
+	createInterceptor := func(i int) ServerInterceptor {
+		return func(ctx context.Context, req proto.Message, _ RPCInfo, handler Handler) (proto.Message, error) {
 			s += fmt.Sprint(i)
 			res, err := handler(ctx, req)
 			s += fmt.Sprint(i)
@@ -22,7 +22,7 @@ func TestInterceptors(t *testing.T) {
 	}
 
 	var code ErrorCode
-	serverErrorLogger := func(ctx context.Context, req proto.Message, handler Handler) (proto.Message, error) {
+	serverErrorLogger := func(ctx context.Context, req proto.Message, _ RPCInfo, handler Handler) (proto.Message, error) {
 		resp, err := handler(ctx, req)
 		if err != nil {
 			code = Unknown
@@ -33,21 +33,22 @@ func TestInterceptors(t *testing.T) {
 		return resp, err
 	}
 
-	interceptors := []UnaryServerInterceptor{
+	interceptors := []ServerInterceptor{
 		serverErrorLogger,
 		createInterceptor(1),
 		createInterceptor(2),
 		createInterceptor(3),
 		WithServerRecovery(),
 	}
-	chained := chainUnaryServerInterceptors(interceptors)
+	chained := chainServerInterceptors(interceptors)
 	svcImpl := func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 		s += fmt.Sprint(4)
 		panic("panic")
 	}
 
 	handler := func(ctx context.Context, req proto.Message) (proto.Message, error) {
-		res, err := chained(ctx, req, func(context.Context, proto.Message) (proto.Message, error) {
+		info := RPCInfo{Method: "myRPC"}
+		res, err := chained(ctx, req, info, func(context.Context, proto.Message) (proto.Message, error) {
 			return svcImpl(ctx, req)
 		})
 		return res, err

@@ -11,10 +11,10 @@ const (
 type ServerOption func(*serverOpts)
 
 type serverOpts struct {
-	timeout                  time.Duration
-	channelSize              int
-	unaryInterceptors        []UnaryServerInterceptor
-	chainedUnaryInterceptors UnaryServerInterceptor
+	timeout            time.Duration
+	channelSize        int
+	interceptors       []ServerInterceptor
+	chainedInterceptor ServerInterceptor
 }
 
 func WithServerTimeout(timeout time.Duration) ServerOption {
@@ -31,11 +31,11 @@ func WithServerChannelSize(size int) ServerOption {
 	}
 }
 
-func WithUnaryServerInterceptors(interceptors ...UnaryServerInterceptor) ServerOption {
+func WithServerInterceptors(interceptors ...ServerInterceptor) ServerOption {
 	return func(o *serverOpts) {
 		for _, interceptor := range interceptors {
 			if interceptor != nil {
-				o.unaryInterceptors = append(o.unaryInterceptors, interceptor)
+				o.interceptors = append(o.interceptors, interceptor)
 			}
 		}
 	}
@@ -50,6 +50,6 @@ func getServerOpts(opts ...ServerOption) serverOpts {
 		opt(o)
 	}
 
-	o.chainedUnaryInterceptors = chainUnaryServerInterceptors(o.unaryInterceptors)
+	o.chainedInterceptor = chainServerInterceptors(o.interceptors)
 	return *o
 }
