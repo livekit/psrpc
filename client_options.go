@@ -1,6 +1,8 @@
 package psrpc
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	DefaultClientTimeout = time.Second * 3
@@ -9,8 +11,10 @@ const (
 type ClientOption func(*clientOpts)
 
 type clientOpts struct {
-	timeout     time.Duration
-	channelSize int
+	timeout       time.Duration
+	channelSize   int
+	requestHooks  []ClientRequestHook
+	responseHooks []ClientResponseHook
 }
 
 func WithClientTimeout(timeout time.Duration) ClientOption {
@@ -22,6 +26,24 @@ func WithClientTimeout(timeout time.Duration) ClientOption {
 func WithClientChannelSize(size int) ClientOption {
 	return func(o *clientOpts) {
 		o.channelSize = size
+	}
+}
+
+func WithClientRequestHooks(hooks ...ClientRequestHook) ClientOption {
+	return func(o *clientOpts) {
+		for _, hook := range hooks {
+			if hook != nil {
+				o.requestHooks = append(o.requestHooks, hook)
+			}
+		}
+	}
+}
+
+func WithClientResponseHooks(hooks ...ClientResponseHook) ClientOption {
+	return func(o *clientOpts) {
+		for _, hook := range hooks {
+			o.responseHooks = append(o.responseHooks, hook)
+		}
 	}
 }
 

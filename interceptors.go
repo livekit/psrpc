@@ -7,9 +7,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type ServerInterceptor func(context.Context, proto.Message, RPCInfo, Handler) (proto.Message, error)
+// Server interceptors wrap the service implementation
+type ServerInterceptor func(ctx context.Context, req proto.Message, info RPCInfo, handler Handler) (proto.Message, error)
 
 type Handler func(context.Context, proto.Message) (proto.Message, error)
+
+// Request hooks are called as soon as the request is made
+type ClientRequestHook func(ctx context.Context, req proto.Message, info RPCInfo)
+
+// Response hooks are called just before responses are returned
+// For multi-requests, response hooks are called on every response
+type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
 
 type RPCInfo struct {
 	Method string
@@ -55,5 +63,4 @@ func chainServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor
 			return state.next(ctx, req)
 		}
 	}
-
 }
