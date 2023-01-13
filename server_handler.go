@@ -217,7 +217,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 	if err != nil {
 		var e Error
 
-		if errors.As(err, e) {
+		if errors.As(err, &e) {
 			res.Error = e.Error()
 			res.Code = string(e.Code())
 		} else {
