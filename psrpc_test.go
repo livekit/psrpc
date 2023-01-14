@@ -81,7 +81,7 @@ func testRPC(t *testing.T, bus MessageBus) {
 	)
 	require.NoError(t, err)
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		select {
 		case res := <-resChan:
 			if res == nil {
