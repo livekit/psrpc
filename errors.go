@@ -98,6 +98,10 @@ func (e psrpcError) Code() ErrorCode {
 	return e.code
 }
 
+func (e psrpcError) Unwrap() error {
+	return e.error
+}
+
 func (e psrpcError) ToHttp() int {
 	switch e.code {
 	case OK:

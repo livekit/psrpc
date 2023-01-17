@@ -2,6 +2,7 @@ package psrpc
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -214,7 +215,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 	}
 
 	if err != nil {
-		if e, ok := err.(Error); ok {
+		var e Error
+
+		if errors.As(err, &e) {
 			res.Error = e.Error()
 			res.Code = string(e.Code())
 		} else {
