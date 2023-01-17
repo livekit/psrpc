@@ -17,7 +17,6 @@ type Error interface {
 	// convenience methods
 	ToHttp() int
 	ToGrpc() error
-	ToTwirp() error
 }
 
 type ErrorCode string
@@ -179,7 +178,7 @@ func (e psrpcError) ToGrpc() error {
 	return status.Error(c, e.Error())
 }
 
-func (e psrpcError) ToTwirp() error {
+func (e psrpcError) toTwirp() twirp.Error {
 	var c twirp.ErrorCode
 	switch e.code {
 	case OK:
@@ -223,4 +222,14 @@ func (e psrpcError) ToTwirp() error {
 	}
 
 	return twirp.NewError(c, e.Error())
+}
+
+func (e psrpcError) As(target any) bool {
+	switch te := target.(type) {
+	case *twirp.Error:
+		*te = e.toTwirp()
+		return true
+	}
+
+	return false
 }
