@@ -1,0 +1,5 @@
+Psrpc
+Copyright 2023 Livekit, Inc. All Rights Reserved.
+
+Portions of internal and protoc-gen-psrpc originated from Twirp (https://github.com/twitchtv/twirp/).
+Copyright 2018 Twitch Interactive, Inc. under Apache-2.0 License.
