@@ -277,8 +277,8 @@ PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap
 func NewError(code ErrorCode, err error) Error
 ```
 
-The `code` parameter allows providing more context about the cause of the error. A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39)
-are defined for common error conditions. PSRPC errors are serialized by the generated server implementation, and reconstructed (with the original error code) on the client.
+The `code` parameter provides more context about the cause of the error. A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39)
+are defined for common error conditions. PSRPC errors are serialized by the PSRPC server implementation, and unmarshalled (with the original error code) on the client.
 By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure, or a client error, such as a bad parameter.
 This can be used as an input to the retry logic, or success rate metrics. 
 
@@ -305,8 +305,8 @@ func convertError(err error) {
 }
 ```
 
-This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this means that twirp clients will also recieve information about the error
-cause as `twirp.Code`. This makes sure that `psrpc.Error` returned by a psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook with the full associated context. 
+This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this means that twirp clients will also receive information about the error
+cause as `twirp.Code`. This makes sure that `psrpc.Error` created by psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook with the full associated context. 
 
 `psrpc.Error` implements the `Unwrap()` method, so the original error can be retrieved by users of PSRPC. 
 
