@@ -268,3 +268,45 @@ selectionOpts := psrpc.SelectionOpts{
 
 res, err := myClient.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(selectionOpts))
 ```
+
+## Error handling
+
+PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap any other error using the `psrpc.NewError` funtion:
+
+```go
+func NewError(code ErrorCode, err error) Error
+```
+
+The `code` parameter provides more context about the cause of the error. A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39)
+are defined for common error conditions. PSRPC errors are serialized by the PSRPC server implementation, and unmarshalled (with the original error code) on the client.
+By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure, or a client error, such as a bad parameter.
+This can be used as an input to the retry logic, or success rate metrics. 
+
+The most appropriate HTTP status code for a given error can be retrieved using the `ToHttp()` method. This status code is generated from the associated error code.
+Similarly, a grpc `status.Error` can be created from a `psrpc.Error` using the `ToGrpc()` method. 
+
+A `psrpc.Error` can also be converted easily to a `twirp.Error`using the `errors.As` function:
+
+```go
+func As(err error, target any) bool
+```
+
+For instance:
+
+```go
+func convertError(err error) {
+	var twErr twirp.Error
+
+	if errors.As(err, &twErr)
+		return twErr
+	}
+
+	return err
+}
+```
+
+This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this means that twirp clients will also receive information about the error
+cause as `twirp.Code`. This makes sure that `psrpc.Error` created by psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook with the full associated context. 
+
+`psrpc.Error` implements the `Unwrap()` method, so the original error can be retrieved by users of PSRPC. 
+
