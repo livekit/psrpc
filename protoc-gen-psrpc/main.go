@@ -19,13 +19,14 @@ import (
 	"os"
 
 	"github.com/livekit/psrpc/internal/gen"
+	"github.com/livekit/psrpc/version"
 )
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *versionFlag {
-		fmt.Println(gen.Version)
+		fmt.Println(version.Version)
 		os.Exit(0)
 	}
 
