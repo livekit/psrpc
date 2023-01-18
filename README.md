@@ -303,6 +303,7 @@ func convertError(err error) {
 
 	return err
 }
+```
 
 This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this means that twirp clients will also recieve information about the error
 cause as `twirp.Code`. This makes sure that `psrpc.Error` returned by a psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook with the full matching context. 
