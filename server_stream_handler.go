@@ -106,16 +106,14 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 	s *RPCServer,
 	is *internal.Stream,
 ) error {
-	ctx := context.Background()
-
 	if open := is.GetOpen(); open != nil {
 		h.handling.Inc()
 
-		octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
+		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, is.Expiry))
+		defer cancel()
 
 		var req RecvType
-		claimed, err := h.claimRequest(s, octx, is, req)
-		defer cancel()
+		claimed, err := h.claimRequest(s, ctx, is, req)
 		if err != nil {
 			h.handling.Dec()
 			return err
@@ -136,7 +134,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 			done:     make(chan struct{}),
 		}
 
-		if err := stream.ack(octx, is); err != nil {
+		if err := stream.ack(ctx, is); err != nil {
 			h.handling.Dec()
 			return err
 		}
