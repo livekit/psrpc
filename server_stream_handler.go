@@ -80,11 +80,9 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) run(s *RPCServer) {
 					continue
 				}
 				if time.Now().UnixNano() < is.Expiry {
-					go func() {
-						if err := h.handleRequest(s, is); err != nil {
-							logger.Error(err, "failed to handle request", "requestID", is.RequestId)
-						}
-					}()
+					if err := h.handleRequest(s, is); err != nil {
+						logger.Error(err, "failed to handle request", "requestID", is.RequestId)
+					}
 				}
 
 			case claim := <-claims:
@@ -107,47 +105,12 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 	is *internal.Stream,
 ) error {
 	if open := is.GetOpen(); open != nil {
-		h.handling.Inc()
-
-		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, is.Expiry))
-		defer cancel()
-
-		var req RecvType
-		claimed, err := h.claimRequest(s, ctx, is, req)
-		if err != nil {
-			h.handling.Dec()
-			return err
-		} else if !claimed {
-			h.handling.Dec()
-			return nil
-		}
-
-		stream := &streamImpl[SendType, RecvType]{
-			adapter: &serverStream[RecvType, SendType]{
-				h:      h,
-				s:      s,
-				nodeID: open.NodeId,
-			},
-			recvChan: make(chan *Response[RecvType], s.channelSize),
-			streamID: is.StreamId,
-			acks:     map[string]chan struct{}{},
-			done:     make(chan struct{}),
-		}
-
-		if err := stream.ack(ctx, is); err != nil {
-			h.handling.Dec()
-			return err
-		}
-
-		h.mu.Lock()
-		h.streams[is.StreamId] = stream
-		h.mu.Unlock()
-
-		err = h.handler(stream)
-		if !stream.Hijacked() {
-			_ = stream.Close(err)
-		}
-		return err
+		go func() {
+			if err := h.handleOpenRequest(s, is, open); err != nil {
+				logger.Error(err, "stream handler failed", "requestID", is.RequestId)
+			}
+		}()
+		return nil
 	}
 
 	h.mu.Lock()
@@ -155,9 +118,57 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 	h.mu.Unlock()
 
 	if ok {
-		stream.handleStream(is)
+		return stream.handleStream(is)
 	}
 
+	return nil
+}
+
+func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
+	s *RPCServer,
+	is *internal.Stream,
+	open *internal.StreamOpen,
+) error {
+	h.handling.Inc()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, is.Expiry))
+	defer cancel()
+
+	var req RecvType
+	claimed, err := h.claimRequest(s, ctx, is, req)
+	if err != nil {
+		h.handling.Dec()
+		return err
+	} else if !claimed {
+		h.handling.Dec()
+		return nil
+	}
+
+	stream := &streamImpl[SendType, RecvType]{
+		adapter: &serverStream[RecvType, SendType]{
+			h:      h,
+			s:      s,
+			nodeID: open.NodeId,
+		},
+		recvChan: make(chan *Response[RecvType], s.channelSize),
+		streamID: is.StreamId,
+		acks:     map[string]chan struct{}{},
+		done:     make(chan struct{}),
+	}
+
+	if err := stream.ack(ctx, is); err != nil {
+		h.handling.Dec()
+		return err
+	}
+
+	h.mu.Lock()
+	h.streams[is.StreamId] = stream
+	h.mu.Unlock()
+
+	err = h.handler(stream)
+	if !stream.Hijacked() {
+		_ = stream.Close(err)
+	}
 	return nil
 }
 

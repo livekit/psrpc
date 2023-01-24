@@ -492,11 +492,9 @@ func runClientStream[SendType, RecvType proto.Message](
 
 		case is := <-recvChan:
 			if time.Now().UnixNano() < is.Expiry {
-				go func() {
-					if err := s.handleStream(is); err != nil {
-						logger.Error(err, "failed to handle request", "requestID", is.RequestId)
-					}
-				}()
+				if err := s.handleStream(is); err != nil {
+					logger.Error(err, "failed to handle request", "requestID", is.RequestId)
+				}
 			}
 		}
 	}

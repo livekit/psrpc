@@ -270,16 +270,12 @@ func (s *MyService) GetStats(_ context.Context, _ *my_service.MyRequest) (*my_se
 }
 
 func (s *MyService) ExchangeUpdates(stream psrpc.ServerStream[*my_service.MyServerMessage, *my_service.MyClientMessage]) error {
-	for {
-		select {
-		case <-stream.Channel():
-			s.Lock()
-			s.counts["ExchangeUpdates"]++
-			s.Unlock()
-		case <-stream.Done():
-			return nil
-		}
+	for range stream.Channel() {
+		s.Lock()
+		s.counts["ExchangeUpdates"]++
+		s.Unlock()
 	}
+	return nil
 }
 
 func (s *MyService) GetRegionStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {

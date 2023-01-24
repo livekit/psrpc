@@ -1,6 +1,7 @@
 package psrpc
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"sync"
@@ -17,7 +18,6 @@ type Stream[SendType, RecvType proto.Message] interface {
 	Channel() <-chan *Response[RecvType]
 	Send(SendType) error
 	Close(error) error
-	Done() <-chan struct{}
 	Err() error
 }
 
@@ -89,6 +89,7 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	recvChan  chan *Response[RecvType]
 	streamID  string
 	mu        sync.Mutex
+	recvQueue list.List
 	hijacked  bool
 	pending   atomic.Int32
 	acks      map[string]chan struct{}
@@ -120,7 +121,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 
 		_ = s.ack(context.Background(), is)
 
-		s.recvChan <- r
+		s.drain(r)
 
 	case *internal.Stream_Close:
 		s.mu.Lock()
@@ -128,16 +129,49 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		s.mu.Unlock()
 
 		s.closeOnce.Do(func() {
-			s.drain()
+			s.waitForPending()
 			s.adapter.close(s.streamID)
 			close(s.done)
+			s.drain(nil)
 		})
 	}
 
 	return nil
 }
 
-func (s *streamImpl[SendType, RecvType]) drain() {
+func (s *streamImpl[SendType, RecvType]) drain(r *Response[RecvType]) {
+	s.mu.Lock()
+	s.recvQueue.PushBack(r)
+	n := s.recvQueue.Len()
+	s.mu.Unlock()
+	if n > 1 {
+		return
+	}
+
+	go func() {
+		var e *list.Element
+		for {
+			s.mu.Lock()
+			if e != nil {
+				s.recvQueue.Remove(e)
+			}
+			e = s.recvQueue.Front()
+			s.mu.Unlock()
+			if e == nil {
+				return
+			}
+
+			if r := e.Value.(*Response[RecvType]); r == nil {
+				close(s.recvChan)
+				return
+			} else {
+				s.recvChan <- r
+			}
+		}
+	}()
+}
+
+func (s *streamImpl[SendType, RecvType]) waitForPending() {
 	for s.pending.Load() > 0 {
 		time.Sleep(time.Millisecond * 100)
 	}
@@ -169,10 +203,6 @@ func (s *streamImpl[SendType, RecvType]) Hijack() {
 
 func (s *streamImpl[SendType, RecvType]) Channel() <-chan *Response[RecvType] {
 	return s.recvChan
-}
-
-func (s *streamImpl[SendType, RecvType]) Done() <-chan struct{} {
-	return s.done
 }
 
 func (s *streamImpl[SendType, RecvType]) Err() error {
@@ -216,6 +246,7 @@ func (s *streamImpl[RequestType, ResponseType]) Close(reason error) error {
 
 		s.adapter.close(s.streamID)
 		close(s.done)
+		s.drain(nil)
 	})
 	return err
 }
