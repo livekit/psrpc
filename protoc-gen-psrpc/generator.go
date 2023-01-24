@@ -406,6 +406,8 @@ func (t *psrpc) generateClientSignature(method *descriptor.MethodDescriptorProto
 	}
 	if opts.Subscription {
 		t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`)
+	} else if opts.Stream {
+		t.P(`, ...`, t.pkgs["psrpc"], `.RequestOption) (`, t.pkgs["psrpc"], `.ClientStream[*`, inputType, `, *`, outputType, `], error)`)
 	} else if opts.Multi {
 		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOption) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
 	} else {
@@ -483,7 +485,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `)`)
 		} else if opts.Stream {
-			t.P(`OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, opts...)`)
+			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, opts...)`)
 		} else {
 			if opts.Multi {
 				t.W(`.RequestMulti[*`)
@@ -503,7 +505,7 @@ func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorP
 	outputType := t.goTypeName(method.GetOutputType())
 
 	if opts.Stream {
-		t.P(`  `, methName, `(`, t.pkgs["psrpc"], `.ServerStream[*`, inputType, `, *`, outputType, `]) error`)
+		t.P(`  `, methName, `(`, t.pkgs["psrpc"], `.ServerStream[*`, outputType, `, *`, inputType, `]) error`)
 		if opts.AffinityFunc {
 			t.P(`  `, methName, `Affinity(*`, inputType, `) float32`)
 		}

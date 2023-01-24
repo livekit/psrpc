@@ -6,9 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/livekit/psrpc/internal"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/livekit/psrpc/internal"
 )
 
 type Stream[SendType, RecvType proto.Message] interface {
@@ -88,6 +90,7 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	streamID  string
 	mu        sync.Mutex
 	hijacked  bool
+	pending   atomic.Int32
 	acks      map[string]chan struct{}
 	err       error
 	done      chan struct{}
@@ -115,7 +118,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			r.Result = v.(RecvType)
 		}
 
-		s.ack(context.Background(), is)
+		_ = s.ack(context.Background(), is)
 
 		s.recvChan <- r
 
@@ -125,12 +128,19 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		s.mu.Unlock()
 
 		s.closeOnce.Do(func() {
+			s.drain()
 			s.adapter.close(s.streamID)
 			close(s.done)
 		})
 	}
 
 	return nil
+}
+
+func (s *streamImpl[SendType, RecvType]) drain() {
+	for s.pending.Load() > 0 {
+		time.Sleep(time.Millisecond * 100)
+	}
 }
 
 func (s *streamImpl[SendType, RecvType]) ack(ctx context.Context, is *internal.Stream) error {
@@ -172,11 +182,11 @@ func (s *streamImpl[SendType, RecvType]) Err() error {
 }
 
 func (s *streamImpl[RequestType, ResponseType]) Close(reason error) error {
-	err := errors.New("close called on closed stream")
+	var err error = ErrStreamClosed
 
 	s.closeOnce.Do(func() {
 		if reason == nil {
-			reason = NewErrorf(Canceled, "stream closed")
+			reason = ErrStreamClosed
 		}
 
 		s.mu.Lock()
@@ -211,6 +221,9 @@ func (s *streamImpl[RequestType, ResponseType]) Close(reason error) error {
 }
 
 func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
+	s.pending.Inc()
+	defer s.pending.Dec()
+
 	v, err := anypb.New(request)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
@@ -253,6 +266,8 @@ func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
 
 	select {
 	case <-ackChan:
+	case <-s.done:
+		err = ErrStreamClosed
 	case <-ctx.Done():
 		err = ErrRequestTimedOut
 	}

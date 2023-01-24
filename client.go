@@ -3,11 +3,9 @@ package psrpc
 import (
 	"context"
 	"errors"
-	"log"
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -17,6 +15,7 @@ import (
 var (
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
+	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
 )
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
@@ -445,7 +444,6 @@ func OpenStream[SendType, RecvType proto.Message](
 	if err != nil {
 		return
 	}
-	log.Println("sending claim assignment")
 	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
@@ -493,7 +491,6 @@ func runClientStream[SendType, RecvType proto.Message](
 			return
 
 		case is := <-recvChan:
-			log.Println("client", protojson.Format(is))
 			if time.Now().UnixNano() < is.Expiry {
 				go func() {
 					if err := s.handleStream(is); err != nil {

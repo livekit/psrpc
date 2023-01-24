@@ -21,6 +21,12 @@ service MyService {
     option (psrpc.options).multi = true;
   };
 
+  // A streaming RPC - a client opens a stream, the first server to respond accepts it and both send and
+  // receive messages until one side closes the stream.
+  rpc ExchangeUpdates(MyClientMessage) returns (MyServerMessage) {
+    option (psrpc.options).stream = true;
+  };
+
   // An RPC with topics - a client can send one request, and receive one response from each server in one region
   rpc GetRegionStats(MyRequest) returns (MyResponse) {
     option (psrpc.options).topics = true;
@@ -46,3 +52,5 @@ message Ignored {}
 message MyRequest {}
 message MyResponse {}
 message MyUpdate {}
+message MyClientMessage {}
+message MyServerMessage {}
