@@ -11,7 +11,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -43,7 +42,7 @@ func TestRPC(t *testing.T) {
 
 	for _, c := range cases {
 		c := c
-		t.Run(fmt.Sprintf("RPC: %s", c.label), func(t *testing.T) {
+		t.Run(fmt.Sprintf("RPC/%s", c.label), func(t *testing.T) {
 			testRPC(t, c.bus())
 		})
 		t.Run(fmt.Sprintf("Stream/%s", c.label), func(t *testing.T) {
@@ -144,7 +143,6 @@ func testStream(t *testing.T, bus MessageBus) {
 		for {
 			select {
 			case ping := <-stream.Channel():
-				fmt.Println(protojson.Format(ping.Result))
 				if ping.Err != nil {
 					require.NoError(t, ping.Err)
 				} else {
@@ -173,14 +171,12 @@ func testStream(t *testing.T, bus MessageBus) {
 
 	for i := 0; i < 3; i++ {
 		err = stream.Send(&internal.Response{
-			SentAt: 1234,
-			Code:   "PING",
+			Code: "PING",
 		})
 		require.NoError(t, err)
 
 		select {
 		case pong := <-stream.Channel():
-			require.EqualValues(t, 1234, pong.Result.SentAt)
 			require.Equal(t, "PONG", pong.Result.Code)
 		case <-time.After(DefaultClientTimeout):
 			t.Fatal("no pong received")

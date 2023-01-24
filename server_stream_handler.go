@@ -2,12 +2,10 @@ package psrpc
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc/internal"
@@ -81,7 +79,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) run(s *RPCServer) {
 				if is == nil {
 					continue
 				}
-				log.Println("server", protojson.Format(is))
 				if time.Now().UnixNano() < is.Expiry {
 					go func() {
 						if err := h.handleRequest(s, is); err != nil {
@@ -94,7 +91,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) run(s *RPCServer) {
 				if claim == nil {
 					continue
 				}
-				log.Println("server", protojson.Format(claim))
 				h.mu.RLock()
 				claimChan, ok := h.claims[claim.RequestId]
 				h.mu.RUnlock()
@@ -110,19 +106,21 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 	s *RPCServer,
 	is *internal.Stream,
 ) error {
-	h.handling.Inc()
-
 	ctx := context.Background()
 
 	if open := is.GetOpen(); open != nil {
+		h.handling.Inc()
+
 		octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
 
 		var req RecvType
 		claimed, err := h.claimRequest(s, octx, is, req)
 		defer cancel()
 		if err != nil {
+			h.handling.Dec()
 			return err
 		} else if !claimed {
+			h.handling.Dec()
 			return nil
 		}
 
@@ -139,6 +137,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 		}
 
 		if err := stream.ack(octx, is); err != nil {
+			h.handling.Dec()
 			return err
 		}
 
