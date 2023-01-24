@@ -13,6 +13,7 @@ type ClientOption func(*clientOpts)
 type clientOpts struct {
 	timeout       time.Duration
 	channelSize   int
+	enableStreams bool
 	requestHooks  []ClientRequestHook
 	responseHooks []ClientResponseHook
 }
@@ -44,6 +45,12 @@ func WithClientResponseHooks(hooks ...ClientResponseHook) ClientOption {
 		for _, hook := range hooks {
 			o.responseHooks = append(o.responseHooks, hook)
 		}
+	}
+}
+
+func WithStreams() ClientOption {
+	return func(o *clientOpts) {
+		o.enableStreams = true
 	}
 }
 

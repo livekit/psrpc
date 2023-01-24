@@ -3,9 +3,11 @@ package psrpc
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -25,6 +27,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
 		responseChannels: make(map[string]chan *internal.Response),
+		streamChannels:   make(map[string]chan *internal.Stream),
 		closed:           make(chan struct{}),
 	}
 
@@ -44,12 +47,27 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 		return nil, err
 	}
 
+	var streams Subscription[*internal.Stream]
+	if c.enableStreams {
+		streams, err = Subscribe[*internal.Stream](
+			ctx, c.bus, getStreamChannel(serviceName, clientID), c.channelSize,
+		)
+		if err != nil {
+			_ = responses.Close()
+			_ = claims.Close()
+			return nil, err
+		}
+	} else {
+		streams = SubscribeNil[*internal.Stream]()
+	}
+
 	go func() {
 		for {
 			select {
 			case <-c.closed:
 				_ = claims.Close()
 				_ = responses.Close()
+				_ = streams.Close()
 				return
 
 			case claim := <-claims.Channel():
@@ -67,6 +85,18 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 				if ok {
 					resChan <- res
 				}
+
+			case msg, ok := <-streams.Channel():
+				if !ok {
+					continue
+				}
+				c.mu.RLock()
+				streamChan, ok := c.streamChannels[msg.StreamId]
+				c.mu.RUnlock()
+				if ok {
+					streamChan <- msg
+				}
+
 			}
 		}
 	}()
@@ -83,6 +113,7 @@ type RPCClient struct {
 	mu               sync.RWMutex
 	claimRequests    map[string]chan *internal.ClaimRequest
 	responseChannels map[string]chan *internal.Response
+	streamChannels   map[string]chan *internal.Stream
 	closed           chan struct{}
 }
 
@@ -362,4 +393,114 @@ func JoinQueue[ResponseType proto.Message](
 		return nil, NewError(Internal, err)
 	}
 	return sub, nil
+}
+
+func OpenStream[SendType, RecvType proto.Message](
+	ctx context.Context,
+	c *RPCClient,
+	rpc string,
+	topic string,
+	opts ...RequestOption,
+) (stream ClientStream[SendType, RecvType], err error) {
+
+	o := getRequestOpts(c.clientOpts, opts...)
+
+	streamID := newStreamID()
+	requestID := newRequestID()
+	now := time.Now()
+	req := &internal.Stream{
+		StreamId:  streamID,
+		RequestId: requestID,
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(o.timeout).UnixNano(),
+		Body: &internal.Stream_Open{
+			Open: &internal.StreamOpen{
+				NodeId: c.id,
+			},
+		},
+	}
+
+	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
+	recvChan := make(chan *internal.Stream, 1)
+
+	c.mu.Lock()
+	c.claimRequests[requestID] = claimChan
+	c.streamChannels[streamID] = recvChan
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		delete(c.claimRequests, streamID)
+		c.mu.Unlock()
+	}()
+
+	if err = c.bus.Publish(ctx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+		return nil, NewError(Internal, err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+
+	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
+	if err != nil {
+		return
+	}
+	log.Println("sending claim assignment")
+	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+		RequestId: requestID,
+		ServerId:  serverID,
+	}); err != nil {
+		return nil, NewError(Internal, err)
+	}
+
+	ackChan := make(chan struct{})
+
+	s := &streamImpl[SendType, RecvType]{
+		adapter: &clientStream{
+			c:     c,
+			rpc:   rpc,
+			topic: topic,
+		},
+		recvChan: make(chan *Response[RecvType], c.channelSize),
+		streamID: streamID,
+		acks:     map[string]chan struct{}{requestID: ackChan},
+		done:     make(chan struct{}),
+	}
+
+	go runClientStream(c, s, recvChan)
+
+	select {
+	case <-ackChan:
+		return s, nil
+
+	case <-ctx.Done():
+		return nil, ErrRequestTimedOut
+	}
+}
+
+func runClientStream[SendType, RecvType proto.Message](
+	c *RPCClient,
+	s *streamImpl[SendType, RecvType],
+	recvChan chan *internal.Stream,
+) {
+	for {
+		select {
+		case <-s.done:
+			return
+
+		case <-c.closed:
+			s.Close(nil)
+			return
+
+		case is := <-recvChan:
+			log.Println("client", protojson.Format(is))
+			if time.Now().UnixNano() < is.Expiry {
+				go func() {
+					if err := s.handleStream(is); err != nil {
+						logger.Error(err, "failed to handle request", "requestID", is.RequestId)
+					}
+				}()
+			}
+		}
+	}
 }

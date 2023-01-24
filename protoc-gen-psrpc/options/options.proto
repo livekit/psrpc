@@ -22,4 +22,7 @@ message Options {
 
   // Your service will supply an affinity function for handler selection.
   bool affinity_func = 4;
+
+  // The method uses bidirectional streaming.
+  bool stream = 5;
 }
