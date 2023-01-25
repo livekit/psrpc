@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.2.3
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/lithammer/shortuuid/v3 v3.0.7
-	github.com/livekit/mageutil v0.0.0-20221002073820-d9198083cfdc
+	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1
 	github.com/nats-io/nats.go v1.21.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.1
