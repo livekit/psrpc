@@ -400,7 +400,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	rpc string,
 	topic string,
 	opts ...RequestOption,
-) (stream ClientStream[SendType, RecvType], err error) {
+) (ClientStream[SendType, RecvType], error) {
 
 	o := getRequestOpts(c.clientOpts, opts...)
 
@@ -433,7 +433,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		c.mu.Unlock()
 	}()
 
-	if err = c.bus.Publish(ctx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+	if err := c.bus.Publish(ctx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
 		return nil, NewError(Internal, err)
 	}
 
@@ -442,7 +442,7 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
 	if err != nil {
-		return
+		return nil, err
 	}
 	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
@@ -453,7 +453,7 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	ackChan := make(chan struct{})
 
-	s := &streamImpl[SendType, RecvType]{
+	stream := &streamImpl[SendType, RecvType]{
 		adapter: &clientStream{
 			c:     c,
 			rpc:   rpc,
@@ -465,11 +465,20 @@ func OpenStream[SendType, RecvType proto.Message](
 		done:     make(chan struct{}),
 	}
 
-	go runClientStream(c, s, recvChan)
+	info := RPCInfo{
+		Method: rpc,
+		Topic:  topic,
+	}
+	stream.handler = &streamHandler[SendType, RecvType]{stream}
+	for _, interceptor := range c.streamInterceptors {
+		stream.handler = interceptor(info, stream.handler)
+	}
+
+	go runClientStream(c, stream, recvChan)
 
 	select {
 	case <-ackChan:
-		return s, nil
+		return stream, err
 
 	case <-ctx.Done():
 		return nil, ErrRequestTimedOut

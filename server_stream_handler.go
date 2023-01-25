@@ -11,6 +11,8 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
+type StreamAffinityFunc func() float32
+
 type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	mu           sync.RWMutex
 	rpc          string
@@ -19,7 +21,7 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	claimSub     Subscription[*internal.ClaimResponse]
 	streams      map[string]*streamImpl[SendType, RecvType]
 	claims       map[string]chan *internal.ClaimResponse
-	affinityFunc AffinityFunc[RecvType]
+	affinityFunc StreamAffinityFunc
 	handler      func(ServerStream[SendType, RecvType]) error
 	handling     atomic.Int32
 	complete     chan struct{}
@@ -32,7 +34,7 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 	topic string,
 	svcImpl func(ServerStream[SendType, RecvType]) error,
 	interceptor ServerInterceptor,
-	affinityFunc AffinityFunc[RecvType],
+	affinityFunc StreamAffinityFunc,
 ) (*streamRPCHandlerImpl[RecvType, SendType], error) {
 
 	ctx := context.Background()
@@ -134,8 +136,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, is.Expiry))
 	defer cancel()
 
-	var req RecvType
-	claimed, err := h.claimRequest(s, ctx, is, req)
+	claimed, err := h.claimRequest(s, ctx, is)
 	if err != nil {
 		h.handling.Dec()
 		return err
@@ -154,6 +155,15 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		streamID: is.StreamId,
 		acks:     map[string]chan struct{}{},
 		done:     make(chan struct{}),
+	}
+
+	info := RPCInfo{
+		Method: h.rpc,
+		Topic:  h.topic,
+	}
+	stream.handler = &streamHandler[SendType, RecvType]{stream}
+	for _, interceptor := range s.streamInterceptors {
+		stream.handler = interceptor(info, stream.handler)
 	}
 
 	if err := stream.ack(ctx, is); err != nil {
@@ -176,7 +186,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	s *RPCServer,
 	ctx context.Context,
 	is *internal.Stream,
-	req RecvType,
 ) (bool, error) {
 
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
@@ -187,7 +196,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 
 	var affinity float32
 	if h.affinityFunc != nil {
-		affinity = h.affinityFunc(req)
+		affinity = h.affinityFunc()
 	} else {
 		affinity = 1
 	}

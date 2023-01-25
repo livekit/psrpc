@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -31,11 +32,7 @@ type ClientStream[SendType, RecvType proto.Message] interface {
 }
 
 type streamAdapter interface {
-	send(
-		ctx context.Context,
-		msg *internal.Stream,
-	) error
-
+	send(ctx context.Context, msg *internal.Stream) error
 	close(streamID string)
 }
 
@@ -45,10 +42,7 @@ type clientStream struct {
 	topic string
 }
 
-func (s *clientStream) send(
-	ctx context.Context,
-	msg *internal.Stream,
-) (err error) {
+func (s *clientStream) send(ctx context.Context, msg *internal.Stream) (err error) {
 	if err = s.c.bus.Publish(ctx, getStreamServerChannel(s.c.serviceName, s.rpc, s.topic), msg); err != nil {
 		err = NewError(Internal, err)
 	}
@@ -67,10 +61,7 @@ type serverStream[SendType, RecvType proto.Message] struct {
 	nodeID string
 }
 
-func (s *serverStream[RequestType, ResponseType]) send(
-	ctx context.Context,
-	msg *internal.Stream,
-) (err error) {
+func (s *serverStream[RequestType, ResponseType]) send(ctx context.Context, msg *internal.Stream) (err error) {
 	if err = s.s.bus.Publish(ctx, getStreamChannel(s.s.serviceName, s.nodeID), msg); err != nil {
 		err = NewError(Internal, err)
 	}
@@ -84,8 +75,25 @@ func (s *serverStream[RequestType, ResponseType]) close(streamID string) {
 	s.h.handling.Dec()
 }
 
+type streamHandler[SendType, RecvType proto.Message] struct {
+	i *streamImpl[SendType, RecvType]
+}
+
+func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message, err error) {
+	h.i.recv(msg, err)
+}
+
+func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message) error {
+	return h.i.send(msg)
+}
+
+func (h *streamHandler[SendType, RecvType]) Close(cause error) error {
+	return h.i.close(cause)
+}
+
 type streamImpl[SendType, RecvType proto.Message] struct {
 	adapter   streamAdapter
+	handler   StreamHandler
 	recvChan  chan *Response[RecvType]
 	streamID  string
 	mu        sync.Mutex
@@ -111,35 +119,36 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		}
 
 	case *internal.Stream_Message:
-		r := &Response[RecvType]{}
 		v, err := b.Message.Message.UnmarshalNew()
 		if err != nil {
-			r.Err = NewError(MalformedResponse, err)
-		} else {
-			r.Result = v.(RecvType)
+			err = NewError(MalformedResponse, err)
 		}
 
 		_ = s.ack(context.Background(), is)
 
-		s.drain(r)
+		s.handler.Recv(v, err)
 
 	case *internal.Stream_Close:
-		s.mu.Lock()
-		s.err = newErrorFromResponse(b.Close.Code, b.Close.Error)
-		s.mu.Unlock()
-
 		s.closeOnce.Do(func() {
+			s.mu.Lock()
+			s.err = newErrorFromResponse(b.Close.Code, b.Close.Error)
+			s.mu.Unlock()
+
 			s.waitForPending()
 			s.adapter.close(s.streamID)
 			close(s.done)
-			s.drain(nil)
+			s.handler.Recv(nil, io.EOF)
 		})
 	}
 
 	return nil
 }
 
-func (s *streamImpl[SendType, RecvType]) drain(r *Response[RecvType]) {
+func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message, err error) {
+	r := &Response[RecvType]{}
+	r.Result, _ = msg.(RecvType)
+	r.Err = err
+
 	s.mu.Lock()
 	s.recvQueue.PushBack(r)
 	n := s.recvQueue.Len()
@@ -161,12 +170,12 @@ func (s *streamImpl[SendType, RecvType]) drain(r *Response[RecvType]) {
 				return
 			}
 
-			if r := e.Value.(*Response[RecvType]); r == nil {
+			r := e.Value.(*Response[RecvType])
+			if r.Err == io.EOF {
 				close(s.recvChan)
 				return
-			} else {
-				s.recvChan <- r
 			}
+			s.recvChan <- r
 		}
 	}()
 }
@@ -189,47 +198,25 @@ func (s *streamImpl[SendType, RecvType]) ack(ctx context.Context, is *internal.S
 	})
 }
 
-func (s *streamImpl[SendType, RecvType]) Hijacked() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.hijacked
-}
-
-func (s *streamImpl[SendType, RecvType]) Hijack() {
-	s.mu.Lock()
-	s.hijacked = true
-	s.mu.Unlock()
-}
-
-func (s *streamImpl[SendType, RecvType]) Channel() <-chan *Response[RecvType] {
-	return s.recvChan
-}
-
-func (s *streamImpl[SendType, RecvType]) Err() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.err
-}
-
-func (s *streamImpl[RequestType, ResponseType]) Close(reason error) error {
+func (s *streamImpl[RequestType, ResponseType]) close(cause error) error {
 	var err error = ErrStreamClosed
 
 	s.closeOnce.Do(func() {
-		if reason == nil {
-			reason = ErrStreamClosed
+		if cause == nil {
+			cause = ErrStreamClosed
 		}
 
 		s.mu.Lock()
-		s.err = reason
+		s.err = cause
 		s.mu.Unlock()
 
 		msg := &internal.StreamClose{}
 		var e Error
-		if errors.As(reason, &e) {
+		if errors.As(cause, &e) {
 			msg.Error = e.Error()
 			msg.Code = string(e.Code())
 		} else {
-			msg.Error = reason.Error()
+			msg.Error = cause.Error()
 			msg.Code = string(Unknown)
 		}
 
@@ -244,18 +231,19 @@ func (s *streamImpl[RequestType, ResponseType]) Close(reason error) error {
 			},
 		})
 
+		s.waitForPending()
 		s.adapter.close(s.streamID)
 		close(s.done)
-		s.drain(nil)
+		s.handler.Recv(nil, io.EOF)
 	})
 	return err
 }
 
-func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
+func (s *streamImpl[SendType, RecvType]) send(msg proto.Message) (err error) {
 	s.pending.Inc()
 	defer s.pending.Dec()
 
-	v, err := anypb.New(request)
+	v, err := anypb.New(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -304,4 +292,34 @@ func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
 	}
 
 	return
+}
+
+func (s *streamImpl[SendType, RecvType]) Hijacked() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hijacked
+}
+
+func (s *streamImpl[SendType, RecvType]) Hijack() {
+	s.mu.Lock()
+	s.hijacked = true
+	s.mu.Unlock()
+}
+
+func (s *streamImpl[SendType, RecvType]) Channel() <-chan *Response[RecvType] {
+	return s.recvChan
+}
+
+func (s *streamImpl[SendType, RecvType]) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
+}
+
+func (s *streamImpl[RequestType, ResponseType]) Close(cause error) error {
+	return s.handler.Close(cause)
+}
+
+func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
+	return s.handler.Send(request)
 }

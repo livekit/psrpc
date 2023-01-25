@@ -78,22 +78,12 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	return nil
 }
 
-func (s *RPCServer) DeregisterHandler(rpc, topic string) {
-	key := getHandlerKey(rpc, topic)
-	s.mu.RLock()
-	h, ok := s.handlers[key]
-	s.mu.RUnlock()
-	if ok {
-		go h.close()
-	}
-}
-
 func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message](
 	s *RPCServer,
 	rpc string,
 	topic string,
 	svcImpl func(ServerStream[ResponseType, RequestType]) error,
-	affinityFunc AffinityFunc[RequestType],
+	affinityFunc StreamAffinityFunc,
 ) error {
 	select {
 	case <-s.shutdown:
@@ -131,7 +121,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	return nil
 }
 
-func (s *RPCServer) DeregisterStreamHandler(rpc, topic string) {
+func (s *RPCServer) DeregisterHandler(rpc, topic string) {
 	key := getHandlerKey(rpc, topic)
 	s.mu.RLock()
 	h, ok := s.handlers[key]
