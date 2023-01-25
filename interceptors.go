@@ -21,7 +21,7 @@ type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInf
 
 type StreamHandler interface {
 	Recv(msg proto.Message, err error)
-	Send(msg proto.Message) error
+	Send(msg proto.Message, opts ...StreamOption) error
 	Close(cause error) error
 }
 
@@ -71,4 +71,11 @@ func chainServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor
 			return state.next(ctx, req)
 		}
 	}
+}
+
+func chainStreamInterceptors(interceptors []StreamInterceptor, info RPCInfo, handler StreamHandler) StreamHandler {
+	for i := len(interceptors) - 1; i >= 0; i-- {
+		handler = interceptors[i](info, handler)
+	}
+	return handler
 }

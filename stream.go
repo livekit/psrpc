@@ -76,24 +76,27 @@ func (s *serverStream[RequestType, ResponseType]) close(streamID string) {
 }
 
 type streamHandler[SendType, RecvType proto.Message] struct {
-	i *streamImpl[SendType, RecvType]
+	*streamImpl[SendType, RecvType]
 }
 
 func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message, err error) {
-	h.i.recv(msg, err)
+	h.recv(msg, err)
 }
 
-func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message) error {
-	return h.i.send(msg)
+func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message, opts ...StreamOption) error {
+	return h.send(msg)
 }
 
 func (h *streamHandler[SendType, RecvType]) Close(cause error) error {
-	return h.i.close(cause)
+	return h.close(cause)
 }
 
 type streamImpl[SendType, RecvType proto.Message] struct {
+	streamOpts
 	adapter   streamAdapter
 	handler   StreamHandler
+	ctx       context.Context
+	cancelCtx context.CancelFunc
 	recvChan  chan *Response[RecvType]
 	streamID  string
 	mu        sync.Mutex
@@ -102,7 +105,6 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	pending   atomic.Int32
 	acks      map[string]chan struct{}
 	err       error
-	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -121,10 +123,14 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 	case *internal.Stream_Message:
 		v, err := b.Message.Message.UnmarshalNew()
 		if err != nil {
-			err = NewError(MalformedResponse, err)
+			err = NewError(MalformedRequest, err)
 		}
 
-		_ = s.ack(context.Background(), is)
+		ctx, cancel := context.WithDeadline(s.ctx, time.Unix(0, is.Expiry))
+		defer cancel()
+		if err := s.ack(ctx, is); err != nil {
+			return err
+		}
 
 		s.handler.Recv(v, err)
 
@@ -136,7 +142,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 
 			s.waitForPending()
 			s.adapter.close(s.streamID)
-			close(s.done)
+			s.cancelCtx()
 			s.handler.Recv(nil, io.EOF)
 		})
 	}
@@ -221,11 +227,11 @@ func (s *streamImpl[RequestType, ResponseType]) close(cause error) error {
 		}
 
 		now := time.Now()
-		err = s.adapter.send(context.Background(), &internal.Stream{
+		err = s.adapter.send(s.ctx, &internal.Stream{
 			StreamId:  s.streamID,
 			RequestId: newRequestID(),
 			SentAt:    now.UnixNano(),
-			Expiry:    now.Add(DefaultClientTimeout).UnixNano(),
+			Expiry:    now.Add(s.timeout).UnixNano(),
 			Body: &internal.Stream_Close{
 				Close: msg,
 			},
@@ -233,15 +239,17 @@ func (s *streamImpl[RequestType, ResponseType]) close(cause error) error {
 
 		s.waitForPending()
 		s.adapter.close(s.streamID)
-		close(s.done)
+		s.cancelCtx()
 		s.handler.Recv(nil, io.EOF)
 	})
 	return err
 }
 
-func (s *streamImpl[SendType, RecvType]) send(msg proto.Message) (err error) {
+func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamOption) (err error) {
 	s.pending.Inc()
 	defer s.pending.Dec()
+
+	o := getStreamOpts(s.streamOpts, opts...)
 
 	v, err := anypb.New(msg)
 	if err != nil {
@@ -263,9 +271,9 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message) (err error) {
 	}()
 
 	now := time.Now()
-	deadline := now.Add(DefaultClientTimeout)
+	deadline := now.Add(o.timeout)
 
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(s.ctx, deadline)
 	defer cancel()
 
 	err = s.adapter.send(ctx, &internal.Stream{
@@ -285,8 +293,6 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message) (err error) {
 
 	select {
 	case <-ackChan:
-	case <-s.done:
-		err = ErrStreamClosed
 	case <-ctx.Done():
 		err = ErrRequestTimedOut
 	}

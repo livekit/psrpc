@@ -403,6 +403,10 @@ func OpenStream[SendType, RecvType proto.Message](
 ) (ClientStream[SendType, RecvType], error) {
 
 	o := getRequestOpts(c.clientOpts, opts...)
+	info := RPCInfo{
+		Method: rpc,
+		Topic:  topic,
+	}
 
 	streamID := newStreamID()
 	requestID := newRequestID()
@@ -433,18 +437,18 @@ func OpenStream[SendType, RecvType proto.Message](
 		c.mu.Unlock()
 	}()
 
-	if err := c.bus.Publish(ctx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+	octx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+
+	if err := c.bus.Publish(octx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
 		return nil, NewError(Internal, err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, o.timeout)
-	defer cancel()
-
-	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
+	serverID, err := selectServer(octx, claimChan, o.selectionOpts)
 	if err != nil {
 		return nil, err
 	}
-	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+	if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
 		RequestId: requestID,
 		ServerId:  serverID,
 	}); err != nil {
@@ -454,6 +458,9 @@ func OpenStream[SendType, RecvType proto.Message](
 	ackChan := make(chan struct{})
 
 	stream := &streamImpl[SendType, RecvType]{
+		streamOpts: streamOpts{
+			timeout: c.timeout,
+		},
 		adapter: &clientStream{
 			c:     c,
 			rpc:   rpc,
@@ -462,17 +469,9 @@ func OpenStream[SendType, RecvType proto.Message](
 		recvChan: make(chan *Response[RecvType], c.channelSize),
 		streamID: streamID,
 		acks:     map[string]chan struct{}{requestID: ackChan},
-		done:     make(chan struct{}),
 	}
-
-	info := RPCInfo{
-		Method: rpc,
-		Topic:  topic,
-	}
-	stream.handler = &streamHandler[SendType, RecvType]{stream}
-	for _, interceptor := range c.streamInterceptors {
-		stream.handler = interceptor(info, stream.handler)
-	}
+	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
+	stream.handler = chainStreamInterceptors(c.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
 
 	go runClientStream(c, stream, recvChan)
 
@@ -480,7 +479,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	case <-ackChan:
 		return stream, err
 
-	case <-ctx.Done():
+	case <-octx.Done():
 		return nil, ErrRequestTimedOut
 	}
 }
@@ -492,7 +491,7 @@ func runClientStream[SendType, RecvType proto.Message](
 ) {
 	for {
 		select {
-		case <-s.done:
+		case <-s.ctx.Done():
 			return
 
 		case <-c.closed:

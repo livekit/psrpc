@@ -133,10 +133,16 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 ) error {
 	h.handling.Inc()
 
-	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, is.Expiry))
+	info := RPCInfo{
+		Method: h.rpc,
+		Topic:  h.topic,
+	}
+
+	ctx := context.Background()
+	octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
 	defer cancel()
 
-	claimed, err := h.claimRequest(s, ctx, is)
+	claimed, err := h.claimRequest(s, octx, is)
 	if err != nil {
 		h.handling.Dec()
 		return err
@@ -146,6 +152,9 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	}
 
 	stream := &streamImpl[SendType, RecvType]{
+		streamOpts: streamOpts{
+			timeout: s.timeout,
+		},
 		adapter: &serverStream[RecvType, SendType]{
 			h:      h,
 			s:      s,
@@ -154,19 +163,11 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		recvChan: make(chan *Response[RecvType], s.channelSize),
 		streamID: is.StreamId,
 		acks:     map[string]chan struct{}{},
-		done:     make(chan struct{}),
 	}
+	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
+	stream.handler = chainStreamInterceptors(s.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
 
-	info := RPCInfo{
-		Method: h.rpc,
-		Topic:  h.topic,
-	}
-	stream.handler = &streamHandler[SendType, RecvType]{stream}
-	for _, interceptor := range s.streamInterceptors {
-		stream.handler = interceptor(info, stream.handler)
-	}
-
-	if err := stream.ack(ctx, is); err != nil {
+	if err := stream.ack(octx, is); err != nil {
 		h.handling.Dec()
 		return err
 	}
