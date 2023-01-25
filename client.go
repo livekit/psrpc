@@ -477,9 +477,10 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	select {
 	case <-ackChan:
-		return stream, err
+		return stream, nil
 
 	case <-octx.Done():
+		stream.Close(ErrRequestTimedOut)
 		return nil, ErrRequestTimedOut
 	}
 }
@@ -492,6 +493,7 @@ func runClientStream[SendType, RecvType proto.Message](
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.Close(s.ctx.Err())
 			return
 
 		case <-c.closed:
