@@ -122,6 +122,8 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		v, err := b.Message.Message.UnmarshalNew()
 		if err != nil {
 			err = NewError(MalformedRequest, err)
+			_ = s.handler.Close(err)
+			return err
 		}
 
 		if err := s.handler.Recv(v, err); err != nil {
