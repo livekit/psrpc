@@ -86,10 +86,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 					resChan <- res
 				}
 
-			case msg, ok := <-streams.Channel():
-				if !ok {
-					continue
-				}
+			case msg := <-streams.Channel():
 				c.mu.RLock()
 				streamChan, ok := c.streamChannels[msg.StreamId]
 				c.mu.RUnlock()
