@@ -16,6 +16,7 @@ var (
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
 	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
+	ErrSlowConsumer    = NewError(Unavailable, errors.New("stream message discarded by slow consumer"))
 )
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
@@ -480,7 +481,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		return stream, nil
 
 	case <-octx.Done():
-		stream.Close(ErrRequestTimedOut)
+		_ = stream.Close(ErrRequestTimedOut)
 		return nil, ErrRequestTimedOut
 	}
 }
@@ -493,11 +494,11 @@ func runClientStream[SendType, RecvType proto.Message](
 	for {
 		select {
 		case <-s.ctx.Done():
-			s.Close(s.ctx.Err())
+			_ = s.Close(s.ctx.Err())
 			return
 
 		case <-c.closed:
-			s.Close(nil)
+			_ = s.Close(nil)
 			return
 
 		case is := <-recvChan:

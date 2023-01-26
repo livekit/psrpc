@@ -165,6 +165,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	h.claims[ir.RequestId] = claimResponseChan
 	h.mu.Unlock()
 
+	defer func() {
+		h.mu.Lock()
+		delete(h.claims, ir.RequestId)
+		h.mu.Unlock()
+	}()
+
 	var affinity float32
 	if h.affinityFunc != nil {
 		affinity = h.affinityFunc(req)
@@ -180,12 +186,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	if err != nil {
 		return false, err
 	}
-
-	defer func() {
-		h.mu.Lock()
-		delete(h.claims, ir.RequestId)
-		h.mu.Unlock()
-	}()
 
 	timeout := time.Duration(ir.Expiry - time.Now().UnixNano())
 	select {

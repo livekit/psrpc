@@ -20,7 +20,7 @@ type ClientRequestHook func(ctx context.Context, req proto.Message, info RPCInfo
 type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
 
 type StreamHandler interface {
-	Recv(msg proto.Message, err error)
+	Recv(msg proto.Message, err error) error
 	Send(msg proto.Message, opts ...StreamOption) error
 	Close(cause error) error
 }

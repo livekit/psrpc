@@ -48,9 +48,6 @@ func TestRPC(t *testing.T) {
 		t.Run(fmt.Sprintf("Stream/%s", c.label), func(t *testing.T) {
 			testStream(t, c.bus())
 		})
-		t.Run(fmt.Sprintf("StreamOrder/%s", c.label), func(t *testing.T) {
-			testStreamOrder(t, c.bus())
-		})
 	}
 }
 
@@ -186,48 +183,6 @@ func testStream(t *testing.T, bus MessageBus) {
 	case <-serverClose:
 	case <-time.After(DefaultClientTimeout):
 		t.Fatal("server did not close")
-	}
-}
-
-func testStreamOrder(t *testing.T, bus MessageBus) {
-	serviceName := "test_stream"
-
-	serverA := NewRPCServer(serviceName, newID(), bus)
-
-	t.Cleanup(func() {
-		serverA.Close(true)
-	})
-
-	client, err := NewRPCClient(serviceName, newID(), bus, WithStreams())
-	require.NoError(t, err)
-
-	serverClose := make(chan struct{})
-	rpc := "send_updates"
-	handlePing := func(stream ServerStream[*internal.Response, *internal.Response]) error {
-		for i := 0; i < 1000; i++ {
-			err := stream.Send(&internal.Response{
-				SentAt: int64(i),
-			})
-			require.NoError(t, err)
-		}
-		close(serverClose)
-		return nil
-	}
-	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, "", handlePing, nil)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	stream, err := OpenStream[*internal.Response, *internal.Response](
-		ctx, client, rpc, "",
-	)
-	require.NoError(t, err)
-
-	<-serverClose
-
-	var i int64
-	for res := range stream.Channel() {
-		assert.Equal(t, i, res.Result.SentAt)
-		i++
 	}
 }
 

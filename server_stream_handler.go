@@ -112,17 +112,15 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 				logger.Error(err, "stream handler failed", "requestID", is.RequestId)
 			}
 		}()
-		return nil
+	} else {
+		h.mu.Lock()
+		stream, ok := h.streams[is.StreamId]
+		h.mu.Unlock()
+
+		if ok {
+			return stream.handleStream(is)
+		}
 	}
-
-	h.mu.Lock()
-	stream, ok := h.streams[is.StreamId]
-	h.mu.Unlock()
-
-	if ok {
-		return stream.handleStream(is)
-	}
-
 	return nil
 }
 
@@ -143,12 +141,9 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	defer cancel()
 
 	claimed, err := h.claimRequest(s, octx, is)
-	if err != nil {
+	if !claimed {
 		h.handling.Dec()
 		return err
-	} else if !claimed {
-		h.handling.Dec()
-		return nil
 	}
 
 	stream := &streamImpl[SendType, RecvType]{
@@ -167,14 +162,14 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
 	stream.handler = chainStreamInterceptors(s.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
 
-	if err := stream.ack(octx, is); err != nil {
-		h.handling.Dec()
-		return err
-	}
-
 	h.mu.Lock()
 	h.streams[is.StreamId] = stream
 	h.mu.Unlock()
+
+	if err := stream.ack(octx, is); err != nil {
+		_ = stream.Close(err)
+		return err
+	}
 
 	err = h.handler(stream)
 	if !stream.Hijacked() {
@@ -195,6 +190,12 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	h.claims[is.RequestId] = claimResponseChan
 	h.mu.Unlock()
 
+	defer func() {
+		h.mu.Lock()
+		delete(h.claims, is.RequestId)
+		h.mu.Unlock()
+	}()
+
 	var affinity float32
 	if h.affinityFunc != nil {
 		affinity = h.affinityFunc()
@@ -210,12 +211,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	if err != nil {
 		return false, err
 	}
-
-	defer func() {
-		h.mu.Lock()
-		delete(h.claims, is.RequestId)
-		h.mu.Unlock()
-	}()
 
 	timeout := time.NewTimer(time.Duration(is.Expiry - time.Now().UnixNano()))
 	defer timeout.Stop()

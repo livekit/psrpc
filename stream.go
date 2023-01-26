@@ -1,7 +1,6 @@
 package psrpc
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"io"
@@ -79,8 +78,8 @@ type streamHandler[SendType, RecvType proto.Message] struct {
 	*streamImpl[SendType, RecvType]
 }
 
-func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message, err error) {
-	h.recv(msg, err)
+func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message, err error) error {
+	return h.recv(msg, err)
 }
 
 func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message, opts ...StreamOption) error {
@@ -100,7 +99,6 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	recvChan  chan *Response[RecvType]
 	streamID  string
 	mu        sync.Mutex
-	recvQueue list.List
 	hijacked  bool
 	pending   atomic.Int32
 	acks      map[string]chan struct{}
@@ -126,13 +124,15 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			err = NewError(MalformedRequest, err)
 		}
 
+		if err := s.handler.Recv(v, err); err != nil {
+			return err
+		}
+
 		ctx, cancel := context.WithDeadline(s.ctx, time.Unix(0, is.Expiry))
 		defer cancel()
 		if err := s.ack(ctx, is); err != nil {
 			return err
 		}
-
-		s.handler.Recv(v, err)
 
 	case *internal.Stream_Close:
 		s.closeOnce.Do(func() {
@@ -150,40 +150,21 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 	return nil
 }
 
-func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message, err error) {
+func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message, err error) error {
 	r := &Response[RecvType]{}
 	r.Result, _ = msg.(RecvType)
 	r.Err = err
 
-	s.mu.Lock()
-	s.recvQueue.PushBack(r)
-	n := s.recvQueue.Len()
-	s.mu.Unlock()
-	if n > 1 {
-		return
-	}
-
-	go func() {
-		var e *list.Element
-		for {
-			s.mu.Lock()
-			if e != nil {
-				s.recvQueue.Remove(e)
-			}
-			e = s.recvQueue.Front()
-			s.mu.Unlock()
-			if e == nil {
-				return
-			}
-
-			r := e.Value.(*Response[RecvType])
-			if r.Err == io.EOF {
-				close(s.recvChan)
-				return
-			}
-			s.recvChan <- r
+	if r.Err == io.EOF {
+		close(s.recvChan)
+	} else {
+		select {
+		case s.recvChan <- r:
+		default:
+			return ErrSlowConsumer
 		}
-	}()
+	}
+	return nil
 }
 
 func (s *streamImpl[SendType, RecvType]) waitForPending() {
