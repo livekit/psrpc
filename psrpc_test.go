@@ -132,7 +132,7 @@ func testStream(t *testing.T, bus MessageBus) {
 		serverA.Close(true)
 	})
 
-	client, err := NewRPCClient(serviceName, newID(), bus, WithStreams())
+	client, err := NewRPCClientWithStreams(serviceName, newID(), bus)
 	require.NoError(t, err)
 
 	serverClose := make(chan struct{})
