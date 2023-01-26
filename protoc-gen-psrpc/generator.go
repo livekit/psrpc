@@ -428,13 +428,13 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 
 	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
 	t.P(`func `, newClientFunc, `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client, error) {`)
+	clientConstructor := `NewRPCClient`
 	for _, method := range service.Method {
 		if t.getOptions(method).Stream {
-			t.P(`  opts = append([]`, t.pkgs["psrpc"], `.ClientOption{`, t.pkgs["psrpc"], `.WithStreams()}, opts...)`)
-			break
+			clientConstructor = `NewRPCClientWithStreams`
 		}
 	}
-	t.P(`  rpcClient, err := `, t.pkgs["psrpc"], `.NewRPCClient("`, servName, `", clientID, bus, opts...)`)
+	t.P(`  rpcClient, err := `, t.pkgs["psrpc"], `.`, clientConstructor, `("`, servName, `", clientID, bus, opts...)`)
 	t.P(`  if err != nil {`)
 	t.P(`    return nil, err`)
 	t.P(`  }`)

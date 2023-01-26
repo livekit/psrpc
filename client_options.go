@@ -55,7 +55,7 @@ func WithClientStreamInterceptors(interceptors ...StreamInterceptor) ClientOptio
 	}
 }
 
-func WithStreams() ClientOption {
+func withStreams() ClientOption {
 	return func(o *clientOpts) {
 		o.enableStreams = true
 	}

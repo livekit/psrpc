@@ -101,6 +101,11 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 	return c, nil
 }
 
+func NewRPCClientWithStreams(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
+	opts = append([]ClientOption{withStreams()}, opts...)
+	return NewRPCClient(serviceName, clientID, bus, opts...)
+}
+
 type RPCClient struct {
 	clientOpts
 
