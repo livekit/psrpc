@@ -2,31 +2,53 @@ package psrpc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/nats-io/nats.go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
 )
 
 func TestRPC(t *testing.T) {
-	t.Run("Local", func(t *testing.T) {
-		testRPC(t, NewLocalMessageBus())
-	})
+	cases := []struct {
+		label string
+		bus   func() MessageBus
+	}{
+		{
+			label: "Local",
+			bus:   func() MessageBus { return NewLocalMessageBus() },
+		},
+		{
+			label: "Redis",
+			bus: func() MessageBus {
+				rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
+				return NewRedisMessageBus(rc)
+			},
+		},
+		{
+			label: "Nats",
+			bus: func() MessageBus {
+				nc, _ := nats.Connect(nats.DefaultURL)
+				return NewNatsMessageBus(nc)
+			},
+		},
+	}
 
-	t.Run("Redis", func(t *testing.T) {
-		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		testRPC(t, NewRedisMessageBus(rc))
-	})
-
-	t.Run("Nats", func(t *testing.T) {
-		nc, _ := nats.Connect(nats.DefaultURL)
-		testRPC(t, NewNatsMessageBus(nc))
-	})
+	for _, c := range cases {
+		c := c
+		t.Run(fmt.Sprintf("RPC/%s", c.label), func(t *testing.T) {
+			testRPC(t, c.bus())
+		})
+		t.Run(fmt.Sprintf("Stream/%s", c.label), func(t *testing.T) {
+			testStream(t, c.bus())
+		})
+	}
 }
 
 func testRPC(t *testing.T, bus MessageBus) {
@@ -98,6 +120,69 @@ func testRPC(t *testing.T, bus MessageBus) {
 		case <-time.After(DefaultClientTimeout + time.Second):
 			t.Fatal("response missing")
 		}
+	}
+}
+
+func testStream(t *testing.T, bus MessageBus) {
+	serviceName := "test_stream"
+
+	serverA := NewRPCServer(serviceName, newID(), bus)
+
+	t.Cleanup(func() {
+		serverA.Close(true)
+	})
+
+	client, err := NewRPCClientWithStreams(serviceName, newID(), bus)
+	require.NoError(t, err)
+
+	serverClose := make(chan struct{})
+	rpc := "ping_pong"
+	handlePing := func(stream ServerStream[*internal.Response, *internal.Response]) error {
+		defer close(serverClose)
+
+		for ping := range stream.Channel() {
+			if ping.Err != nil {
+				require.NoError(t, ping.Err)
+			} else {
+				pong := &internal.Response{
+					SentAt: ping.Result.SentAt,
+					Code:   "PONG",
+				}
+				err := stream.Send(pong)
+				require.NoError(t, err)
+			}
+		}
+		return nil
+	}
+	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, "", handlePing, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	stream, err := OpenStream[*internal.Response, *internal.Response](
+		ctx, client, rpc, "",
+	)
+	require.NoError(t, err)
+
+	for i := 0; i < 3; i++ {
+		err = stream.Send(&internal.Response{
+			Code: "PING",
+		})
+		require.NoError(t, err)
+
+		select {
+		case pong := <-stream.Channel():
+			require.Equal(t, "PONG", pong.Result.Code)
+		case <-time.After(DefaultClientTimeout):
+			t.Fatal("no pong received")
+		}
+	}
+
+	assert.NoError(t, stream.Close(nil))
+
+	select {
+	case <-serverClose:
+	case <-time.After(DefaultClientTimeout):
+		t.Fatal("server did not close")
 	}
 }
 

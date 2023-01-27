@@ -15,6 +15,8 @@ import (
 var (
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
+	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
+	ErrSlowConsumer    = NewError(Unavailable, errors.New("stream message discarded by slow consumer"))
 )
 
 func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
@@ -25,6 +27,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 		id:               clientID,
 		claimRequests:    make(map[string]chan *internal.ClaimRequest),
 		responseChannels: make(map[string]chan *internal.Response),
+		streamChannels:   make(map[string]chan *internal.Stream),
 		closed:           make(chan struct{}),
 	}
 
@@ -44,12 +47,27 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 		return nil, err
 	}
 
+	var streams Subscription[*internal.Stream]
+	if c.enableStreams {
+		streams, err = Subscribe[*internal.Stream](
+			ctx, c.bus, getStreamChannel(serviceName, clientID), c.channelSize,
+		)
+		if err != nil {
+			_ = responses.Close()
+			_ = claims.Close()
+			return nil, err
+		}
+	} else {
+		streams = SubscribeNil[*internal.Stream]()
+	}
+
 	go func() {
 		for {
 			select {
 			case <-c.closed:
 				_ = claims.Close()
 				_ = responses.Close()
+				_ = streams.Close()
 				return
 
 			case claim := <-claims.Channel():
@@ -67,11 +85,25 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 				if ok {
 					resChan <- res
 				}
+
+			case msg := <-streams.Channel():
+				c.mu.RLock()
+				streamChan, ok := c.streamChannels[msg.StreamId]
+				c.mu.RUnlock()
+				if ok {
+					streamChan <- msg
+				}
+
 			}
 		}
 	}()
 
 	return c, nil
+}
+
+func NewRPCClientWithStreams(serviceName, clientID string, bus MessageBus, opts ...ClientOption) (*RPCClient, error) {
+	opts = append([]ClientOption{withStreams()}, opts...)
+	return NewRPCClient(serviceName, clientID, bus, opts...)
 }
 
 type RPCClient struct {
@@ -83,6 +115,7 @@ type RPCClient struct {
 	mu               sync.RWMutex
 	claimRequests    map[string]chan *internal.ClaimRequest
 	responseChannels map[string]chan *internal.Response
+	streamChannels   map[string]chan *internal.Stream
 	closed           chan struct{}
 }
 
@@ -362,4 +395,120 @@ func JoinQueue[ResponseType proto.Message](
 		return nil, NewError(Internal, err)
 	}
 	return sub, nil
+}
+
+func OpenStream[SendType, RecvType proto.Message](
+	ctx context.Context,
+	c *RPCClient,
+	rpc string,
+	topic string,
+	opts ...RequestOption,
+) (ClientStream[SendType, RecvType], error) {
+
+	o := getRequestOpts(c.clientOpts, opts...)
+	info := RPCInfo{
+		Method: rpc,
+		Topic:  topic,
+	}
+
+	streamID := newStreamID()
+	requestID := newRequestID()
+	now := time.Now()
+	req := &internal.Stream{
+		StreamId:  streamID,
+		RequestId: requestID,
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(o.timeout).UnixNano(),
+		Body: &internal.Stream_Open{
+			Open: &internal.StreamOpen{
+				NodeId: c.id,
+			},
+		},
+	}
+
+	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
+	recvChan := make(chan *internal.Stream, 1)
+
+	c.mu.Lock()
+	c.claimRequests[requestID] = claimChan
+	c.streamChannels[streamID] = recvChan
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		delete(c.claimRequests, streamID)
+		c.mu.Unlock()
+	}()
+
+	octx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+
+	if err := c.bus.Publish(octx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+		return nil, NewError(Internal, err)
+	}
+
+	serverID, err := selectServer(octx, claimChan, o.selectionOpts)
+	if err != nil {
+		return nil, err
+	}
+	if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+		RequestId: requestID,
+		ServerId:  serverID,
+	}); err != nil {
+		return nil, NewError(Internal, err)
+	}
+
+	ackChan := make(chan struct{})
+
+	stream := &streamImpl[SendType, RecvType]{
+		streamOpts: streamOpts{
+			timeout: c.timeout,
+		},
+		adapter: &clientStream{
+			c:     c,
+			rpc:   rpc,
+			topic: topic,
+		},
+		recvChan: make(chan *Response[RecvType], c.channelSize),
+		streamID: streamID,
+		acks:     map[string]chan struct{}{requestID: ackChan},
+	}
+	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
+	stream.handler = chainStreamInterceptors(c.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
+
+	go runClientStream(c, stream, recvChan)
+
+	select {
+	case <-ackChan:
+		return stream, nil
+
+	case <-octx.Done():
+		_ = stream.Close(ErrRequestTimedOut)
+		return nil, ErrRequestTimedOut
+	}
+}
+
+func runClientStream[SendType, RecvType proto.Message](
+	c *RPCClient,
+	s *streamImpl[SendType, RecvType],
+	recvChan chan *internal.Stream,
+) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			_ = s.Close(s.ctx.Err())
+			return
+
+		case <-c.closed:
+			_ = s.Close(nil)
+			return
+
+		case is := <-recvChan:
+			if time.Now().UnixNano() < is.Expiry {
+				if err := s.handleStream(is); err != nil {
+					logger.Error(err, "failed to handle request", "requestID", is.RequestId)
+				}
+			}
+		}
+	}
 }

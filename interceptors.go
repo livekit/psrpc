@@ -19,6 +19,14 @@ type ClientRequestHook func(ctx context.Context, req proto.Message, info RPCInfo
 // For multi-requests, response hooks are called on every response, and block while executing
 type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
 
+type StreamHandler interface {
+	Recv(msg proto.Message, err error) error
+	Send(msg proto.Message, opts ...StreamOption) error
+	Close(cause error) error
+}
+
+type StreamInterceptor func(info RPCInfo, handler StreamHandler) StreamHandler
+
 type RPCInfo struct {
 	Method string
 	Topic  string
@@ -63,4 +71,11 @@ func chainServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor
 			return state.next(ctx, req)
 		}
 	}
+}
+
+func chainStreamInterceptors(interceptors []StreamInterceptor, info RPCInfo, handler StreamHandler) StreamHandler {
+	for i := len(interceptors) - 1; i >= 0; i-- {
+		handler = interceptors[i](info, handler)
+	}
+	return handler
 }

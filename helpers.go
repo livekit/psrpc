@@ -12,6 +12,10 @@ func newRequestID() string {
 	return "REQ_" + shortuuid.New()[:12]
 }
 
+func newStreamID() string {
+	return "STR_" + shortuuid.New()[:12]
+}
+
 func getRPCChannel(serviceName, rpc, topic string) string {
 	if topic != "" {
 		return fmt.Sprintf("%s|%s|%s|REQ", serviceName, rpc, topic)
@@ -41,6 +45,18 @@ func getClaimResponseChannel(serviceName, rpc, topic string) string {
 		return fmt.Sprintf("%s|%s|%s|RCLAIM", serviceName, rpc, topic)
 	} else {
 		return fmt.Sprintf("%s|%s|RCLAIM", serviceName, rpc)
+	}
+}
+
+func getStreamChannel(serviceName, nodeID string) string {
+	return fmt.Sprintf("%s|%s|STR", serviceName, nodeID)
+}
+
+func getStreamServerChannel(serviceName, rpc, topic string) string {
+	if topic != "" {
+		return fmt.Sprintf("%s|%s|%s|STR", serviceName, rpc, topic)
+	} else {
+		return fmt.Sprintf("%s|%s|STR", serviceName, rpc)
 	}
 }
 

@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -62,7 +63,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	sB.Unlock()
 	require.Equal(t, 1, requestCount)
 	require.Equal(t, 1, responseCount)
-	
+
 	// rpc IntensiveRPC(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).affinity_func = true;
 	_, err = cB.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
@@ -100,6 +101,23 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	sB.Unlock()
 	require.Equal(t, 2, requestCount)
 	require.Equal(t, 3, responseCount)
+
+	stream, err := cA.ExchangeUpdates(ctx)
+	require.NoError(t, err)
+	stream.Send(&my_service.MyClientMessage{})
+	stream.Send(&my_service.MyClientMessage{})
+	stream.Close(nil)
+
+	// let the service goroutine run
+	runtime.Gosched()
+
+	sA.Lock()
+	sB.Lock()
+	require.Condition(t, func() bool {
+		return sA.counts["ExchangeUpdates"] == 2 || sB.counts["ExchangeUpdates"] == 2
+	})
+	sA.Unlock()
+	sB.Unlock()
 
 	// rpc GetRegionStats(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).topics = true;
@@ -253,6 +271,15 @@ func (s *MyService) GetStats(_ context.Context, _ *my_service.MyRequest) (*my_se
 	s.counts["GetStats"]++
 	s.Unlock()
 	return &my_service.MyResponse{}, nil
+}
+
+func (s *MyService) ExchangeUpdates(stream psrpc.ServerStream[*my_service.MyServerMessage, *my_service.MyClientMessage]) error {
+	for range stream.Channel() {
+		s.Lock()
+		s.counts["ExchangeUpdates"]++
+		s.Unlock()
+	}
+	return nil
 }
 
 func (s *MyService) GetRegionStats(_ context.Context, _ *my_service.MyRequest) (*my_service.MyResponse, error) {

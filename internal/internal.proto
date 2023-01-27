@@ -33,3 +33,31 @@ message ClaimResponse {
   string request_id = 1;
   string server_id = 2;
 }
+
+message Stream {
+  string stream_id = 1;
+  string request_id = 2;
+  int64 sent_at = 3;
+  int64 expiry = 4;
+  oneof body {
+    StreamOpen open = 6;
+    StreamMessage message = 7;
+    StreamAck ack = 8;
+    StreamClose close = 9;
+  }
+}
+
+message StreamOpen {
+  string node_id = 1;
+}
+
+message StreamMessage {
+  google.protobuf.Any message = 1;
+}
+
+message StreamAck {}
+
+message StreamClose {
+  string error = 1;
+  string code = 2;
+}

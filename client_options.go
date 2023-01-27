@@ -11,10 +11,12 @@ const (
 type ClientOption func(*clientOpts)
 
 type clientOpts struct {
-	timeout       time.Duration
-	channelSize   int
-	requestHooks  []ClientRequestHook
-	responseHooks []ClientResponseHook
+	timeout            time.Duration
+	channelSize        int
+	enableStreams      bool
+	requestHooks       []ClientRequestHook
+	responseHooks      []ClientResponseHook
+	streamInterceptors []StreamInterceptor
 }
 
 func WithClientTimeout(timeout time.Duration) ClientOption {
@@ -44,6 +46,18 @@ func WithClientResponseHooks(hooks ...ClientResponseHook) ClientOption {
 		for _, hook := range hooks {
 			o.responseHooks = append(o.responseHooks, hook)
 		}
+	}
+}
+
+func WithClientStreamInterceptors(interceptors ...StreamInterceptor) ClientOption {
+	return func(o *clientOpts) {
+		o.streamInterceptors = append(o.streamInterceptors, interceptors...)
+	}
+}
+
+func withStreams() ClientOption {
+	return func(o *clientOpts) {
+		o.enableStreams = true
 	}
 }
 
