@@ -31,6 +31,9 @@ message Options {
 
   // Your service will supply an affinity function for handler selection.
   bool affinity_func = 4;
+
+  // The method uses bidirectional streaming.
+  bool stream = 5;
 }
 
 ```
@@ -146,6 +149,10 @@ type MyServiceClient interface {
     // A multi-rpc - a client will send one request, and receive one response each from every server
     GetStats(ctx context.Context, req *MyRequest, opts ...psrpc.RequestOpt) (<-chan *psrpc.Response[*MyResponse], error)
 
+    // A streaming RPC - a client opens a stream, the first server to respond accepts it and both send and
+    // receive messages until one side closes the stream.
+    ExchangeUpdates(ctx context.Context, opts ...psrpc.RequestOpt) (psrpc.ClientStream[*MyClientMessage, *MyServerMessage], error)
+
     // An RPC with topics - a client can send one request, and receive one response from each server in one region
     GetRegionStats(ctx context.Context, topic string, req *Request, opts ...psrpc.RequestOpt) (<-chan *psrpc.Response[*MyResponse], error)
 
@@ -167,6 +174,20 @@ Multi-RPCs will return a `chan *psrpc.Response`, where you will receive an indiv
 type Response[ResponseType proto.Message] struct {
     Result ResponseType
     Err    error
+}
+```
+
+Streaming RPCs will return a `psrpc.ClientStream`. You can listen for updates from its chanael, send updates, or close
+the stream.
+
+Send blocks until the message has been received. When the stream closes the cause is available to both the server and
+client from `Err`.
+```go
+type ClientStream[SendType, RecvType proto.Message] interface {
+	Channel() <-chan *Response[RecvType]
+	Send(msg SendType, opts ...StreamOption) error
+	Close(cause error) error
+	Err() error
 }
 ```
 
@@ -194,6 +215,10 @@ type MyServiceServerImpl interface {
 
     // A multi-rpc - a client will send one request, and receive one response each from every server
     GetStats(ctx context.Context, req *MyRequest) (*MyResponse, error)
+
+    // A streaming RPC - a client opens a stream, the first server to respond accepts it and both send and
+    // receive messages until one side closes the stream.
+    ExchangeUpdates(stream psrpc.ServerStream[*MyClientMessage, *MyServerMessage]) error
 
     // An RPC with topics - a client can send one request, and receive one response from each server in one region
     GetRegionStats(ctx context.Context, req *MyRequest) (*MyResponse, error)

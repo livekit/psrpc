@@ -16,8 +16,8 @@ import (
 
 type Stream[SendType, RecvType proto.Message] interface {
 	Channel() <-chan *Response[RecvType]
-	Send(SendType) error
-	Close(error) error
+	Send(msg SendType, opts ...StreamOption) error
+	Close(cause error) error
 	Err() error
 }
 
@@ -309,6 +309,6 @@ func (s *streamImpl[RequestType, ResponseType]) Close(cause error) error {
 	return s.handler.Close(cause)
 }
 
-func (s *streamImpl[SendType, RecvType]) Send(request SendType) (err error) {
-	return s.handler.Send(request)
+func (s *streamImpl[SendType, RecvType]) Send(request SendType, opts ...StreamOption) (err error) {
+	return s.handler.Send(request, opts...)
 }
