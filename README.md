@@ -177,7 +177,7 @@ type Response[ResponseType proto.Message] struct {
 }
 ```
 
-Streaming RPCs will return a `psrpc.ClientStream`. You can listen for updates from its chanael, send updates, or close
+Streaming RPCs will return a `psrpc.ClientStream`. You can listen for updates from its channel, send updates, or close
 the stream.
 
 Send blocks until the message has been received. When the stream closes the cause is available to both the server and
