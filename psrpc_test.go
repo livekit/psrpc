@@ -141,16 +141,12 @@ func testStream(t *testing.T, bus MessageBus) {
 		defer close(serverClose)
 
 		for ping := range stream.Channel() {
-			if ping.Err != nil {
-				require.NoError(t, ping.Err)
-			} else {
-				pong := &internal.Response{
-					SentAt: ping.Result.SentAt,
-					Code:   "PONG",
-				}
-				err := stream.Send(pong)
-				require.NoError(t, err)
+			pong := &internal.Response{
+				SentAt: ping.SentAt,
+				Code:   "PONG",
 			}
+			err := stream.Send(pong)
+			require.NoError(t, err)
 		}
 		return nil
 	}
@@ -171,7 +167,7 @@ func testStream(t *testing.T, bus MessageBus) {
 
 		select {
 		case pong := <-stream.Channel():
-			require.Equal(t, "PONG", pong.Result.Code)
+			require.Equal(t, "PONG", pong.Code)
 		case <-time.After(DefaultClientTimeout):
 			t.Fatal("no pong received")
 		}

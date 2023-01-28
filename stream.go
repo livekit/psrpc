@@ -3,7 +3,6 @@ package psrpc
 import (
 	"context"
 	"errors"
-	"io"
 	"sync"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 )
 
 type Stream[SendType, RecvType proto.Message] interface {
-	Channel() <-chan *Response[RecvType]
+	Channel() <-chan RecvType
 	Send(msg SendType, opts ...StreamOption) error
 	Close(cause error) error
 	Err() error
@@ -78,8 +77,8 @@ type streamHandler[SendType, RecvType proto.Message] struct {
 	*streamImpl[SendType, RecvType]
 }
 
-func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message, err error) error {
-	return h.recv(msg, err)
+func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message) error {
+	return h.recv(msg)
 }
 
 func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message, opts ...StreamOption) error {
@@ -96,7 +95,7 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	handler   StreamHandler
 	ctx       context.Context
 	cancelCtx context.CancelFunc
-	recvChan  chan *Response[RecvType]
+	recvChan  chan RecvType
 	streamID  string
 	mu        sync.Mutex
 	hijacked  bool
@@ -126,7 +125,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			return err
 		}
 
-		if err := s.handler.Recv(v, err); err != nil {
+		if err := s.handler.Recv(v); err != nil {
 			return err
 		}
 
@@ -145,26 +144,18 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			s.waitForPending()
 			s.adapter.close(s.streamID)
 			s.cancelCtx()
-			s.handler.Recv(nil, io.EOF)
+			close(s.recvChan)
 		})
 	}
 
 	return nil
 }
 
-func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message, err error) error {
-	r := &Response[RecvType]{}
-	r.Result, _ = msg.(RecvType)
-	r.Err = err
-
-	if r.Err == io.EOF {
-		close(s.recvChan)
-	} else {
-		select {
-		case s.recvChan <- r:
-		default:
-			return ErrSlowConsumer
-		}
+func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message) error {
+	select {
+	case s.recvChan <- msg.(RecvType):
+	default:
+		return ErrSlowConsumer
 	}
 	return nil
 }
@@ -223,7 +214,7 @@ func (s *streamImpl[RequestType, ResponseType]) close(cause error) error {
 		s.waitForPending()
 		s.adapter.close(s.streamID)
 		s.cancelCtx()
-		s.handler.Recv(nil, io.EOF)
+		close(s.recvChan)
 	})
 	return err
 }
@@ -295,7 +286,7 @@ func (s *streamImpl[SendType, RecvType]) Hijack() {
 	s.mu.Unlock()
 }
 
-func (s *streamImpl[SendType, RecvType]) Channel() <-chan *Response[RecvType] {
+func (s *streamImpl[SendType, RecvType]) Channel() <-chan RecvType {
 	return s.recvChan
 }
 
