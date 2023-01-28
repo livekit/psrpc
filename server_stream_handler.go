@@ -155,7 +155,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 			s:      s,
 			nodeID: open.NodeId,
 		},
-		recvChan: make(chan *Response[RecvType], s.channelSize),
+		recvChan: make(chan RecvType, s.channelSize),
 		streamID: is.StreamId,
 		acks:     map[string]chan struct{}{},
 	}

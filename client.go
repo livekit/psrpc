@@ -469,7 +469,7 @@ func OpenStream[SendType, RecvType proto.Message](
 			rpc:   rpc,
 			topic: topic,
 		},
-		recvChan: make(chan *Response[RecvType], c.channelSize),
+		recvChan: make(chan RecvType, c.channelSize),
 		streamID: streamID,
 		acks:     map[string]chan struct{}{requestID: ackChan},
 	}

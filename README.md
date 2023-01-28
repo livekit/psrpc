@@ -184,7 +184,7 @@ Send blocks until the message has been received. When the stream closes the caus
 client from `Err`.
 ```go
 type ClientStream[SendType, RecvType proto.Message] interface {
-	Channel() <-chan *Response[RecvType]
+	Channel() <-chan RecvType
 	Send(msg SendType, opts ...StreamOption) error
 	Close(cause error) error
 	Err() error

@@ -14,7 +14,7 @@ import (
 )
 
 type Stream[SendType, RecvType proto.Message] interface {
-	Channel() <-chan *Response[RecvType]
+	Channel() <-chan RecvType
 	Send(msg SendType, opts ...StreamOption) error
 	Close(cause error) error
 	Err() error
@@ -95,7 +95,7 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	handler   StreamHandler
 	ctx       context.Context
 	cancelCtx context.CancelFunc
-	recvChan  chan *Response[RecvType]
+	recvChan  chan RecvType
 	streamID  string
 	mu        sync.Mutex
 	hijacked  bool
@@ -152,11 +152,8 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 }
 
 func (s *streamImpl[SendType, RecvType]) recv(msg proto.Message) error {
-	r := &Response[RecvType]{}
-	r.Result, _ = msg.(RecvType)
-
 	select {
-	case s.recvChan <- r:
+	case s.recvChan <- msg.(RecvType):
 	default:
 		return ErrSlowConsumer
 	}
@@ -289,7 +286,7 @@ func (s *streamImpl[SendType, RecvType]) Hijack() {
 	s.mu.Unlock()
 }
 
-func (s *streamImpl[SendType, RecvType]) Channel() <-chan *Response[RecvType] {
+func (s *streamImpl[SendType, RecvType]) Channel() <-chan RecvType {
 	return s.recvChan
 }
 
