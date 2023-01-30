@@ -13,11 +13,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	plugin "google.golang.org/protobuf/types/pluginpb"
-
-	"github.com/pkg/errors"
 
 	"github.com/livekit/psrpc/internal/gen"
 	"github.com/livekit/psrpc/internal/gen/stringutils"
@@ -205,7 +204,7 @@ func (t *psrpc) generate(file *descriptor.FileDescriptorProto) *plugin.CodeGener
 	t.generateFileHeader(file)
 	t.generateImports(file)
 
-	t.P(`var _ = `, t.pkgs["version"], `.PsrpcVersion_0_2_4`)
+	t.P(`var _ = `, t.pkgs["version"], fmt.Sprintf(".PsrpcVersion_%s", strings.Replace(version.Version[1:], ".", "_", 2)))
 
 	// For each service, generate client stubs and server
 	for _, service := range file.Service {
