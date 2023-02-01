@@ -24,6 +24,7 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	affinityFunc StreamAffinityFunc
 	handler      func(ServerStream[SendType, RecvType]) error
 	handling     atomic.Int32
+	draining     atomic.Bool
 	complete     chan struct{}
 	onCompleted  func()
 }
@@ -107,6 +108,10 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 	is *internal.Stream,
 ) error {
 	if open := is.GetOpen(); open != nil {
+		if h.draining.Load() {
+			return nil
+		}
+
 		go func() {
 			if err := h.handleOpenRequest(s, is, open); err != nil {
 				logger.Error(err, "stream handler failed", "requestID", is.RequestId)
@@ -229,10 +234,11 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 }
 
 func (h *streamRPCHandlerImpl[RecvType, SendType]) close() {
-	_ = h.streamSub.Close()
+	h.draining.Store(true)
 	for h.handling.Load() > 0 {
 		time.Sleep(time.Millisecond * 100)
 	}
+	_ = h.streamSub.Close()
 	_ = h.claimSub.Close()
 	close(h.complete)
 	h.onCompleted()

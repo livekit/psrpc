@@ -102,7 +102,7 @@ type streamImpl[SendType, RecvType proto.Message] struct {
 	pending   atomic.Int32
 	acks      map[string]chan struct{}
 	err       error
-	closeOnce sync.Once
+	closed    atomic.Bool
 }
 
 func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error {
@@ -118,6 +118,10 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		}
 
 	case *internal.Stream_Message:
+		if s.closed.Load() {
+			return ErrStreamClosed
+		}
+
 		v, err := b.Message.Message.UnmarshalNew()
 		if err != nil {
 			err = NewError(MalformedRequest, err)
@@ -136,7 +140,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		}
 
 	case *internal.Stream_Close:
-		s.closeOnce.Do(func() {
+		if !s.closed.Swap(true) {
 			s.mu.Lock()
 			s.err = newErrorFromResponse(b.Close.Code, b.Close.Error)
 			s.mu.Unlock()
@@ -145,7 +149,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			s.adapter.close(s.streamID)
 			s.cancelCtx()
 			close(s.recvChan)
-		})
+		}
 	}
 
 	return nil
@@ -179,43 +183,44 @@ func (s *streamImpl[SendType, RecvType]) ack(ctx context.Context, is *internal.S
 }
 
 func (s *streamImpl[RequestType, ResponseType]) close(cause error) error {
-	var err error = ErrStreamClosed
+	if s.closed.Swap(true) {
+		return ErrStreamClosed
+	}
 
-	s.closeOnce.Do(func() {
-		if cause == nil {
-			cause = ErrStreamClosed
-		}
+	if cause == nil {
+		cause = ErrStreamClosed
+	}
 
-		s.mu.Lock()
-		s.err = cause
-		s.mu.Unlock()
+	s.mu.Lock()
+	s.err = cause
+	s.mu.Unlock()
 
-		msg := &internal.StreamClose{}
-		var e Error
-		if errors.As(cause, &e) {
-			msg.Error = e.Error()
-			msg.Code = string(e.Code())
-		} else {
-			msg.Error = cause.Error()
-			msg.Code = string(Unknown)
-		}
+	msg := &internal.StreamClose{}
+	var e Error
+	if errors.As(cause, &e) {
+		msg.Error = e.Error()
+		msg.Code = string(e.Code())
+	} else {
+		msg.Error = cause.Error()
+		msg.Code = string(Unknown)
+	}
 
-		now := time.Now()
-		err = s.adapter.send(s.ctx, &internal.Stream{
-			StreamId:  s.streamID,
-			RequestId: newRequestID(),
-			SentAt:    now.UnixNano(),
-			Expiry:    now.Add(s.timeout).UnixNano(),
-			Body: &internal.Stream_Close{
-				Close: msg,
-			},
-		})
-
-		s.waitForPending()
-		s.adapter.close(s.streamID)
-		s.cancelCtx()
-		close(s.recvChan)
+	now := time.Now()
+	err := s.adapter.send(context.Background(), &internal.Stream{
+		StreamId:  s.streamID,
+		RequestId: newRequestID(),
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(s.timeout).UnixNano(),
+		Body: &internal.Stream_Close{
+			Close: msg,
+		},
 	})
+
+	s.waitForPending()
+	s.adapter.close(s.streamID)
+	s.cancelCtx()
+	close(s.recvChan)
+
 	return err
 }
 
