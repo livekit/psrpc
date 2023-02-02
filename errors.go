@@ -233,3 +233,22 @@ func (e psrpcError) As(target any) bool {
 
 	return false
 }
+
+func (e psrpcError) IsClientError() bool {
+	switch e.code {
+	case InvalidArgument,
+		MalformedRequest,
+		NotFound,
+		Aborted,
+		PermissionDenied,
+		FailedPrecondition,
+		OutOfRange,
+		Unauthenticated,
+		Canceled,
+		AlreadyExists:
+		return true
+
+	default:
+		return false
+	}
+}
