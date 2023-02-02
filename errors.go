@@ -17,6 +17,7 @@ type Error interface {
 	// convenience methods
 	ToHttp() int
 	ToGrpc() error
+	IsClientError() bool
 }
 
 type ErrorCode string
