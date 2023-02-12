@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/lithammer/shortuuid/v3"
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
