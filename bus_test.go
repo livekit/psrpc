@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
@@ -18,7 +18,7 @@ func TestMessageBus(t *testing.T) {
 		testSubscribe(t, bus)
 		testSubscribeQueue(t, bus)
 	})
-	
+
 	t.Run("Redis", func(t *testing.T) {
 		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
 		bus := NewRedisMessageBus(rc)
