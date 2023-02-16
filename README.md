@@ -343,3 +343,85 @@ cause as `twirp.Code`. This makes sure that `psrpc.Error` created by psrpc serve
 
 `psrpc.Error` implements the `Unwrap()` method, so the original error can be retrieved by users of PSRPC.
 
+## Interceptors
+
+Interceptors allow writing middleware for RPC clients and servers. Interceptors can be used to run code during the call lifecycle such as logging, recording metrics, tracing, and retrying calls.
+PSRPC defines four interceptor types which allow intercepting requests on the client and server.
+
+### ServerInterceptor
+
+`ServerInterceptor` are invoked by the server for calls to unary and multi RPCs.
+
+```go
+type ServerInterceptor func(ctx context.Context, req proto.Message, info RPCInfo, handler Handler) (proto.Message, error)
+```
+
+The `info` parameter contains metadata about the method including the name and topic. Calling the `handler` parameter hands off execution to the next interceptor.
+
+`ServerInterceptor` are added to new servers with `WithServerInterceptor`.
+
+```go
+func WithServerInterceptors(interceptors ...ServerInterceptor) ServerOption
+```
+
+Interceptors run in the order they are added so the first interceptor passed to `WithServerInterceptors` is the first to receive a new requests. Calling the `handler` parameter invokes the second interceptor
+and so on until the service implementation receives the request and produces a response.
+
+### RPCInterceptor
+
+`RPCInterceptor` are created by clients to process requests to unary RPCs.
+
+```go
+type RPCInterceptor func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
+```
+
+`RPCInterceptor` are created by by implementing `RPCInterceptorFactory` and passing the factory to new clients using `WithClientRPCInterceptors`.
+
+```go
+type RPCInterceptorFactory func(info RPCInfo, next RPCInterceptor) RPCInterceptor
+```
+
+The `next` parameter received by `RPCInterceptorFactory` should be called by the implementation of `RPCInterceptor` to continue the call lifecycle.
+
+### MultiRPCInterceptor
+
+`MultiRPCInterceptor` are created by clients to process requests to multi RPCs. Because `MultiRPCInterceptor` process several responses for the same request implementations can define separate functions
+for each phase of the call lifecycle. The `Send` function is executed on outgoing request parameters. The `Recv` function is executed once for each response when it returns from a servers. `Close` is called when
+the deadline is reached.
+
+```go
+type MultiRPCInterceptor interface {
+	Send(ctx context.Context, msg proto.Message, opts ...RequestOption) error
+	Recv(msg proto.Message, err error)
+	Close()
+}
+```
+
+`MultiRPCInterceptor` are created by implementing `MultiRPCInterceptorFactory` and passing the factory to new clients using `WithClientMultiRPCInterceptors`.
+
+```go
+type MultiRPCInterceptorFactory func(info RPCInfo, next MultiRPCInterceptor) MultiRPCInterceptor
+```
+
+Each function in a `MultiRPCInterceptor` should call the corresponding function in the interceptor received in the `next` parameter.
+
+### StreamInterceptor
+
+`StreamInterceptor` are created by both clients and servers to process streaming RPCs. The `Send` function is executed once for each outgoing message. The `Recv` function is executed once for each incoming
+message. `Close` is called when either the local or remote host close the stream or if the stream receives a malformed message.
+
+```go
+type StreamInterceptor interface {
+	Recv(msg proto.Message) error
+	Send(msg proto.Message, opts ...StreamOption) error
+	Close(cause error) error
+}
+```
+
+`StreamInterceptor` are created by implementing `StreamInterceptorFactory` and passing the factory to new clients or servers using `WithClientStreamInterceptors` and `WithServerStreamInterceptors`.
+
+```go
+type StreamInterceptorFactory func(info RPCInfo, next StreamInterceptor) StreamInterceptor
+```
+
+Each function in a `StreamInterceptor` should call the corresponding function in the interceptor received in the `next` parameter.

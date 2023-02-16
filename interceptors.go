@@ -19,13 +19,25 @@ type ClientRequestHook func(ctx context.Context, req proto.Message, info RPCInfo
 // For multi-requests, response hooks are called on every response, and block while executing
 type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
 
-type StreamHandler interface {
+type RPCInterceptor func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
+
+type RPCInterceptorFactory func(info RPCInfo, next RPCInterceptor) RPCInterceptor
+
+type MultiRPCInterceptor interface {
+	Send(ctx context.Context, msg proto.Message, opts ...RequestOption) error
+	Recv(msg proto.Message, err error)
+	Close()
+}
+
+type MultiRPCInterceptorFactory func(info RPCInfo, next MultiRPCInterceptor) MultiRPCInterceptor
+
+type StreamInterceptor interface {
 	Recv(msg proto.Message) error
 	Send(msg proto.Message, opts ...StreamOption) error
 	Close(cause error) error
 }
 
-type StreamInterceptor func(info RPCInfo, handler StreamHandler) StreamHandler
+type StreamInterceptorFactory func(info RPCInfo, next StreamInterceptor) StreamInterceptor
 
 type RPCInfo struct {
 	Method string
@@ -73,9 +85,9 @@ func chainServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor
 	}
 }
 
-func chainStreamInterceptors(interceptors []StreamInterceptor, info RPCInfo, handler StreamHandler) StreamHandler {
-	for i := len(interceptors) - 1; i >= 0; i-- {
-		handler = interceptors[i](info, handler)
+func chainClientInterceptors[InterceptorType any, FactoryType ~func(RPCInfo, InterceptorType) InterceptorType](factories []FactoryType, info RPCInfo, interceptor InterceptorType) InterceptorType {
+	for i := len(factories) - 1; i >= 0; i-- {
+		interceptor = factories[i](info, interceptor)
 	}
-	return handler
+	return interceptor
 }
