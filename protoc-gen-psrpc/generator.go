@@ -825,15 +825,6 @@ func (t *psrpc) topicGroupsForService(service *descriptor.ServiceDescriptorProto
 	return gs
 }
 
-func (t *psrpc) fileHasTopicGroups(file *descriptor.FileDescriptorProto) bool {
-	for _, s := range file.Service {
-		if len(t.topicGroupsForService(s)) != 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // serviceMetadataVarName is the variable name used in generated code to refer
 // to the compressed bytes of this descriptor. It is not exported, so it is only
 // valid inside the generated package.
