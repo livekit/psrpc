@@ -27,6 +27,7 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	draining     atomic.Bool
 	complete     chan struct{}
 	onCompleted  func()
+	closeOnce    sync.Once
 }
 
 func newStreamRPCHandler[RecvType, SendType proto.Message](
