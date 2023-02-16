@@ -16,7 +16,7 @@ type Error interface {
 
 	// convenience methods
 	ToHttp() int
-	ToGrpc() error
+	GRPCStatus() *status.Status
 }
 
 type ErrorCode string
@@ -134,7 +134,7 @@ func (e psrpcError) ToHttp() int {
 	}
 }
 
-func (e psrpcError) ToGrpc() error {
+func (e psrpcError) GRPCStatus() *status.Status {
 	var c codes.Code
 	switch e.code {
 	case OK:
@@ -175,7 +175,7 @@ func (e psrpcError) ToGrpc() error {
 		c = codes.Unknown
 	}
 
-	return status.Error(c, e.Error())
+	return status.New(c, e.Error())
 }
 
 func (e psrpcError) toTwirp() twirp.Error {
