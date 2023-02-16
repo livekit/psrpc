@@ -241,13 +241,16 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	}
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) close() {
-	h.draining.Store(true)
-	for h.handling.Load() > 0 {
-		time.Sleep(time.Millisecond * 100)
-	}
-	_ = h.streamSub.Close()
-	_ = h.claimSub.Close()
-	close(h.complete)
-	h.onCompleted()
+func (h *streamRPCHandlerImpl[RecvType, SendType]) close(force bool) {
+	h.closeOnce.Do(func() {
+		h.draining.Store(true)
+		for !force && h.handling.Load() > 0 {
+			time.Sleep(time.Millisecond * 100)
+		}
+		_ = h.streamSub.Close()
+		_ = h.claimSub.Close()
+		h.onCompleted()
+		close(h.complete)
+	})
+	<-h.complete
 }

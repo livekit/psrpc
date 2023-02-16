@@ -10,6 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type rpcHandler interface {
+	close(force bool)
+}
+
 type RPCServer struct {
 	serverOpts
 
@@ -127,7 +131,7 @@ func (s *RPCServer) DeregisterHandler(rpc string, topic []string) {
 	h, ok := s.handlers[key]
 	s.mu.RUnlock()
 	if ok {
-		go h.close()
+		h.close(true)
 	}
 }
 
@@ -147,9 +151,16 @@ func (s *RPCServer) Close(force bool) {
 		}
 		s.mu.RUnlock()
 
+		var wg sync.WaitGroup
 		for _, h := range handlers {
-			h.close()
+			wg.Add(1)
+			h := h
+			go func() {
+				h.close(force)
+				wg.Done()
+			}()
 		}
+		wg.Wait()
 	}
 	if !force {
 		for s.active.Load() > 0 {
