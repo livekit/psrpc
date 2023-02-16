@@ -86,7 +86,6 @@ func (t *psrpc) Generate(in *plugin.CodeGeneratorRequest) *plugin.CodeGeneratorR
 	t.registerPackageName("context")
 	t.registerPackageName("psrpc")
 	t.registerPackageName("version")
-	t.registerPackageName("registration")
 
 	// Time to figure out package names of objects defined in protobuf. First,
 	// we'll figure out the name for the package we're generating.
@@ -258,9 +257,6 @@ func (t *psrpc) generateImports(file *descriptor.FileDescriptorProto) {
 	// dependency imports
 	t.P(`import `, t.pkgs["psrpc"], ` "github.com/livekit/psrpc"`)
 	t.P(`import `, t.pkgs["version"], ` "github.com/livekit/psrpc/version"`)
-	if t.fileHasTopicGroups(file) {
-		t.P(`import `, t.pkgs["registration"], ` "github.com/livekit/psrpc/registration"`)
-	}
 
 	// It's legal to import a message and use it as an input or output for a
 	// method. Make sure to import the package of any such message. First, dedupe
@@ -391,7 +387,6 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 	}
 	if iface == server {
 		for _, group := range t.topicGroupsForService(service) {
-			t.P(`  All`, group.typeName, `TopicRegisterers() `, t.pkgs["registration"], `.RegistererSlice`, fmt.Sprint(group.arity), `[`, strings.Join(group.topics.TypeNames(), `, `), `]`)
 			t.P(`  RegisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) error`)
 			t.P(`  DeregisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `)`)
 		}
@@ -649,20 +644,20 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	}
 
 	for _, group := range t.topicGroupsForService(service) {
-		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) All`, group.typeName, `TopicRegisterers() `, t.pkgs["registration"], `.RegistererSlice`, fmt.Sprint(group.arity), `[`, strings.Join(group.topics.TypeNames(), `, `), `] {`)
-		t.P(`  return `, t.pkgs["registration"], `.RegistererSlice`, fmt.Sprint(group.arity), `[`, strings.Join(group.topics.TypeNames(), `, `), `]{`)
+		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) all`, group.typeName, `TopicRegisterers() `, t.pkgs["psrpc"], `.RegistererSlice {`)
+		t.P(`  return `, t.pkgs["psrpc"], `.RegistererSlice{`)
 		for _, methName := range group.methNames {
-			t.P(`    `, t.pkgs["registration"], `.NewRegisterer`, fmt.Sprint(group.arity), `(s.Register`, methName, `Topic, s.Deregister`, methName, `Topic),`)
+			t.P(`    `, t.pkgs["psrpc"], `.NewRegisterer(s.Register`, methName, `Topic, s.Deregister`, methName, `Topic),`)
 		}
 		t.P(`  }`)
 		t.P(`}`)
 		t.P()
 		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) RegisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) error {`)
-		t.P(`  return s.All`, group.typeName, `TopicRegisterers().Register(`, strings.Join(group.topics.VarNames(), ", "), `)`)
+		t.P(`  return s.all`, group.typeName, `TopicRegisterers().Register(`, strings.Join(group.topics.VarNames(), ", "), `)`)
 		t.P(`}`)
 		t.P()
 		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) DeregisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) {`)
-		t.P(`  s.All`, group.typeName, `TopicRegisterers().Deregister(`, strings.Join(group.topics.VarNames(), ", "), `)`)
+		t.P(`  s.all`, group.typeName, `TopicRegisterers().Deregister(`, strings.Join(group.topics.VarNames(), ", "), `)`)
 		t.P(`}`)
 		t.P()
 	}
