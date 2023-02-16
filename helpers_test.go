@@ -28,3 +28,16 @@ func TestSerialization(t *testing.T) {
 	require.Equal(t, m.(*internal.Request).SentAt, msg.SentAt)
 	require.Equal(t, m.(*internal.Request).Multi, msg.Multi)
 }
+
+func TestChannelFormatters(t *testing.T) {
+	require.Equal(t, "foo|bar|a|b|c|REQ", getRPCChannel("foo", "bar", []string{"a", "b", "c"}))
+	require.Equal(t, "foo|bar|REQ", getRPCChannel("foo", "bar", nil))
+	require.Equal(t, "foo|a|b|c", getHandlerKey("foo", []string{"a", "b", "c"}))
+	require.Equal(t, "foo|bar|RES", getResponseChannel("foo", "bar"))
+	require.Equal(t, "foo|bar|CLAIM", getClaimRequestChannel("foo", "bar"))
+	require.Equal(t, "foo|bar|a|b|c|RCLAIM", getClaimResponseChannel("foo", "bar", []string{"a", "b", "c"}))
+	require.Equal(t, "foo|bar|RCLAIM", getClaimResponseChannel("foo", "bar", nil))
+	require.Equal(t, "foo|bar|STR", getStreamChannel("foo", "bar"))
+	require.Equal(t, "foo|bar|a|b|c|STR", getStreamServerChannel("foo", "bar", []string{"a", "b", "c"}))
+	require.Equal(t, "foo|bar|STR", getStreamServerChannel("foo", "bar", nil))
+}
