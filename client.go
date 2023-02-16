@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	ErrRequestCanceled = NewError(Canceled, errors.New("request canceled"))
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
 	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
@@ -220,7 +221,12 @@ func RequestSingle[ResponseType proto.Message](
 			}
 
 		case <-ctx.Done():
-			err = ErrRequestTimedOut
+			err = ctx.Err()
+			if errors.Is(err, context.Canceled) {
+				err = ErrRequestCanceled
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				err = ErrRequestTimedOut
+			}
 		}
 
 		return
@@ -430,8 +436,14 @@ func OpenStream[SendType, RecvType proto.Message](
 		return stream, nil
 
 	case <-octx.Done():
-		_ = stream.Close(ErrRequestTimedOut)
-		return nil, ErrRequestTimedOut
+		err = ctx.Err()
+		if errors.Is(err, context.Canceled) {
+			err = ErrRequestCanceled
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			err = ErrRequestTimedOut
+		}
+		_ = stream.Close(err)
+		return nil, err
 	}
 }
 
