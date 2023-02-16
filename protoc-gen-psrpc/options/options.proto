@@ -20,9 +20,22 @@ message Options {
   // This method uses topics.
   bool topics = 3;
 
+  TopicParamOptions topic_params = 4;
+
   // Your service will supply an affinity function for handler selection.
-  bool affinity_func = 4;
+  bool affinity_func = 5;
 
   // The method uses bidirectional streaming.
-  bool stream = 5;
+  bool stream = 6;
+}
+
+message TopicParamOptions {
+  // The rpc can be registered/deregistered atomically with other group members
+  string group = 1;
+
+  // The topic is composed of one or more string-like parameters.
+  repeated string names = 2;
+
+  // The topic parameters have associated string-like type parameters
+  bool typed = 3;
 }

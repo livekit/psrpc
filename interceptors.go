@@ -41,7 +41,7 @@ type StreamInterceptorFactory func(info RPCInfo, next StreamInterceptor) StreamI
 
 type RPCInfo struct {
 	Method string
-	Topic  string
+	Topic  []string
 }
 
 // Recover from server panics. Should always be the last interceptor

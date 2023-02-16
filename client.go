@@ -132,7 +132,7 @@ func RequestSingle[ResponseType proto.Message](
 	ctx context.Context,
 	c *RPCClient,
 	rpc string,
-	topic string,
+	topic []string,
 	request proto.Message,
 	opts ...RequestOption,
 ) (response ResponseType, err error) {
@@ -292,7 +292,7 @@ func RequestMulti[ResponseType proto.Message](
 	ctx context.Context,
 	c *RPCClient,
 	rpc string,
-	topic string,
+	topic []string,
 	request proto.Message,
 	opts ...RequestOption,
 ) (rChan <-chan *Response[ResponseType], err error) {
@@ -330,7 +330,7 @@ func Join[ResponseType proto.Message](
 	ctx context.Context,
 	c *RPCClient,
 	rpc string,
-	topic string,
+	topic []string,
 ) (Subscription[ResponseType], error) {
 	sub, err := Subscribe[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
 	if err != nil {
@@ -343,7 +343,7 @@ func JoinQueue[ResponseType proto.Message](
 	ctx context.Context,
 	c *RPCClient,
 	rpc string,
-	topic string,
+	topic []string,
 ) (Subscription[ResponseType], error) {
 	sub, err := SubscribeQueue[ResponseType](ctx, c.bus, getRPCChannel(c.serviceName, rpc, topic), c.channelSize)
 	if err != nil {
@@ -356,7 +356,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	ctx context.Context,
 	c *RPCClient,
 	rpc string,
-	topic string,
+	topic []string,
 	opts ...RequestOption,
 ) (ClientStream[SendType, RecvType], error) {
 

@@ -22,7 +22,7 @@ type rpcHandler interface {
 type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
 	mu           sync.RWMutex
 	rpc          string
-	topic        string
+	topic        []string
 	requestSub   Subscription[*internal.Request]
 	claimSub     Subscription[*internal.ClaimResponse]
 	claims       map[string]chan *internal.ClaimResponse
@@ -36,7 +36,7 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	s *RPCServer,
 	rpc string,
-	topic string,
+	topic []string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	interceptor ServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],

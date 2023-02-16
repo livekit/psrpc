@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	plugin "google.golang.org/protobuf/types/pluginpb"
@@ -359,7 +360,12 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 		t.printComments(comments)
 	}
 
-	t.P(`type `, servName, iface, ` interface {`)
+	var topics topicSlice
+	if iface != serverImpl {
+		topics = t.typedTopicsForService(service)
+	}
+
+	t.P(`type `, servName, iface, topics.FormatTypeParamConstraints(), ` interface {`)
 	for _, method := range service.Method {
 		opts := t.getOptions(method)
 		if (iface == serverImpl && opts.Subscription) || (iface == server && !opts.Subscription && !opts.Topics) {
@@ -380,6 +386,12 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 		}
 	}
 	if iface == server {
+		for _, group := range t.topicGroupsForService(service) {
+			t.P(`  RegisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) error`)
+			t.P(`  DeregisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `)`)
+		}
+		t.P()
+
 		t.P(`  // Close and wait for pending RPCs to complete`)
 		t.P(`  Shutdown()`)
 		t.P()
@@ -399,34 +411,35 @@ func (t *psrpc) generateClientSignature(method *descriptor.MethodDescriptorProto
 	} else {
 		t.W(`  `)
 	}
-	t.W(methName, `(`, t.pkgs["context"], `.Context`)
+	t.W(methName, `(ctx `, t.pkgs["context"], `.Context`)
 	if opts.Topics {
-		t.W(`, string`)
+		t.W(`, `, t.topicsForMethod(method).FormatParams())
 	}
 	if opts.Subscription {
 		t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`)
 	} else if opts.Stream {
-		t.P(`, ...`, t.pkgs["psrpc"], `.RequestOption) (`, t.pkgs["psrpc"], `.ClientStream[*`, inputType, `, *`, outputType, `], error)`)
+		t.P(`, opts ...`, t.pkgs["psrpc"], `.RequestOption) (`, t.pkgs["psrpc"], `.ClientStream[*`, inputType, `, *`, outputType, `], error)`)
 	} else if opts.Multi {
-		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOption) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
+		t.P(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
 	} else {
-		t.P(`, *`, inputType, `, ...`, t.pkgs["psrpc"], `.RequestOption) (*`, outputType, `, error)`)
+		t.P(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption) (*`, outputType, `, error)`)
 	}
 	t.P()
 }
 
 func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 	servName := serviceNameCamelCased(service)
+	servTopics := t.typedTopicsForService(service)
 	structName := unexported(servName) + "Client"
 	newClientFunc := "New" + servName + "Client"
 
-	t.P(`type `, structName, ` struct {`)
+	t.P(`type `, structName, servTopics.FormatTypeParamConstraints(), ` struct {`)
 	t.P(`  client *`, t.pkgs["psrpc"], `.RPCClient`)
 	t.P(`}`)
 	t.P()
 
 	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
-	t.P(`func `, newClientFunc, `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client, error) {`)
+	t.P(`func `, newClientFunc, servTopics.FormatTypeParamConstraints(), `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client`, servTopics.FormatTypeParams(), `, error) {`)
 	clientConstructor := `NewRPCClient`
 	for _, method := range service.Method {
 		if t.getOptions(method).Stream {
@@ -438,7 +451,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 	t.P(`    return nil, err`)
 	t.P(`  }`)
 	t.P()
-	t.P(`  return &`, structName, `{`)
+	t.P(`  return &`, structName, servTopics.FormatTypeParams(), `{`)
 	t.P(`    client: rpcClient,`)
 	t.P(`  }, nil`)
 	t.P(`}`)
@@ -449,9 +462,9 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		inputType := t.goTypeName(method.GetInputType())
 		outputType := t.goTypeName(method.GetOutputType())
 		opts := t.getOptions(method)
+		topics := t.topicsForMethod(method)
 
-		topicParam := `""`
-		t.W(`func (c *`, structName)
+		t.W(`func (c *`, structName, servTopics.FormatTypeParams())
 		if opts.Subscription {
 			t.W(`) Subscribe`)
 		} else {
@@ -459,8 +472,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		}
 		t.W(methName, `(ctx `, t.pkgs["context"], `.Context`)
 		if opts.Topics {
-			topicParam = "topic"
-			t.W(`, topic string`)
+			t.W(`, `, topics.FormatParams())
 		}
 		if opts.Subscription {
 			t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error) {`)
@@ -482,16 +494,16 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			} else {
 				t.W(`.JoinQueue[*`)
 			}
-			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `)`)
+			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `)`)
 		} else if opts.Stream {
-			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, opts...)`)
+			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, opts...)`)
 		} else {
 			if opts.Multi {
 				t.W(`.RequestMulti[*`)
 			} else {
 				t.W(`.RequestSingle[*`)
 			}
-			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topicParam, `, req, opts...)`)
+			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, req, opts...)`)
 		}
 		t.P(`}`)
 		t.P()
@@ -520,27 +532,28 @@ func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorP
 func (t *psrpc) generateServerSignature(method *descriptor.MethodDescriptorProto, opts *options.Options) {
 	methName := methodNameCamelCased(method)
 	outputType := t.goTypeName(method.GetOutputType())
+	topics := t.topicsForMethod(method)
 
 	if opts.Subscription {
-		t.W(`  Publish`, methName, `(`, t.pkgs["context"], `.Context`)
+		t.W(`  Publish`, methName, `(ctx `, t.pkgs["context"], `.Context`)
 		if opts.Topics {
-			t.W(`, string`)
+			t.W(`, `, topics.FormatParams())
 		}
-		t.P(`, *`, outputType, `) error`)
+		t.P(`, msg *`, outputType, `) error`)
 		t.P()
 	} else {
-		t.P(`  Register`, methName, `Topic(string) error`)
-		t.P(`  Deregister`, methName, `Topic(string)`)
-		t.P()
+		t.P(`  Register`, methName, `Topic(`, topics.FormatParams(), `) error`)
+		t.P(`  Deregister`, methName, `Topic(`, topics.FormatParams(), `)`)
 	}
 }
 
 func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	servName := serviceNameCamelCased(service)
+	servTopics := t.typedTopicsForService(service)
 
 	// Server implementation.
 	servStruct := serviceStruct(service)
-	t.P(`type `, servStruct, ` struct {`)
+	t.P(`type `, servStruct, servTopics.FormatTypeParamConstraints(), ` struct {`)
 	t.P(`  svc `, servName, `ServerImpl`)
 	t.P(`  rpc *`, t.pkgs["psrpc"], `.RPCServer`)
 	t.P(`}`)
@@ -549,7 +562,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	// Constructor for server implementation
 	t.P(`// New`, servName, `Server builds a RPCServer that will route requests`)
 	t.P(`// to the corresponding method in the provided svc implementation.`)
-	t.P(`func New`, servName, `Server(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server, error) {`)
+	t.P(`func New`, servName, `Server`, servTopics.FormatTypeParamConstraints(), `(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server`, servTopics.FormatTypeParams(), `, error) {`)
 	t.P(`  s := `, t.pkgs["psrpc"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
 	t.P()
 
@@ -570,7 +583,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		if opts.Stream {
 			registerFuncName = "RegisterStreamHandler"
 		}
-		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", "", svc.`, methName)
+		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
 			t.P(`, svc.`, methName, `Affinity)`)
 		} else {
@@ -583,7 +596,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		t.P()
 	}
 
-	t.P(`  return &`, servStruct, `{`)
+	t.P(`  return &`, servStruct, servTopics.FormatTypeParams(), `{`)
 	t.P(`    svc: svc,`)
 	t.P(`    rpc: s,`)
 	t.P(`  }, nil`)
@@ -598,16 +611,15 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 
 		methName := methodNameCamelCased(method)
 		outputType := t.goTypeName(method.GetOutputType())
+		topics := t.topicsForMethod(method)
 
 		if opts.Subscription {
-			topicParam := `""`
-			t.W(`func (s *`, servStruct, `) Publish`, methName, `(ctx `, t.pkgs["context"], `.Context`)
+			t.W(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Publish`, methName, `(ctx `, t.pkgs["context"], `.Context`)
 			if opts.Topics {
-				topicParam = `topic`
-				t.W(`, topic string`)
+				t.W(`, `, topics.FormatParams())
 			}
 			t.P(`, msg *`, outputType, `) error {`)
-			t.P(`  return s.rpc.Publish(ctx, "`, methName, `", `, topicParam, `, msg)`)
+			t.P(`  return s.rpc.Publish(ctx, "`, methName, `", `, topics.FormatCastToStringSlice(), `, msg)`)
 			t.P(`}`)
 			t.P()
 		} else {
@@ -615,8 +627,8 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			if opts.Stream {
 				registerFuncName = "RegisterStreamHandler"
 			}
-			t.P(`func (s *`, servStruct, `) Register`, methName, `Topic(topic string) error {`)
-			t.W(`  return `, t.pkgs["psrpc"], `.`, registerFuncName, `(s.rpc, "`, methName, `", topic, s.svc.`, methName)
+			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
+			t.W(`  return `, t.pkgs["psrpc"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
 			if t.getOptions(method).AffinityFunc {
 				t.P(`, s.svc.`, methName, `Affinity)`)
 			} else {
@@ -624,17 +636,37 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(`}`)
 			t.P()
-			t.P(`func (s *`, servStruct, `) Deregister`, methName, `Topic(topic string) {`)
-			t.P(`  s.rpc.DeregisterHandler("`, methName, `", topic)`)
+			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Deregister`, methName, `Topic(`, topics.FormatParams(), `) {`)
+			t.P(`  s.rpc.DeregisterHandler("`, methName, `", `, topics.FormatCastToStringSlice(), `)`)
 			t.P(`}`)
 			t.P()
 		}
 	}
-	t.P(`func (s *`, servStruct, `) Shutdown() {`)
+
+	for _, group := range t.topicGroupsForService(service) {
+		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) all`, group.typeName, `TopicRegisterers() `, t.pkgs["psrpc"], `.RegistererSlice {`)
+		t.P(`  return `, t.pkgs["psrpc"], `.RegistererSlice{`)
+		for _, methName := range group.methNames {
+			t.P(`    `, t.pkgs["psrpc"], `.NewRegisterer(s.Register`, methName, `Topic, s.Deregister`, methName, `Topic),`)
+		}
+		t.P(`  }`)
+		t.P(`}`)
+		t.P()
+		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) RegisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) error {`)
+		t.P(`  return s.all`, group.typeName, `TopicRegisterers().Register(`, strings.Join(group.topics.VarNames(), ", "), `)`)
+		t.P(`}`)
+		t.P()
+		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) DeregisterAll`, group.typeName, `Topics(`, group.topics.FormatParams(), `) {`)
+		t.P(`  s.all`, group.typeName, `TopicRegisterers().Deregister(`, strings.Join(group.topics.VarNames(), ", "), `)`)
+		t.P(`}`)
+		t.P()
+	}
+
+	t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Shutdown() {`)
 	t.P(`  s.rpc.Close(false)`)
 	t.P(`}`)
 	t.P()
-	t.P(`func (s *`, servStruct, `) Kill() {`)
+	t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Kill() {`)
 	t.P(`  s.rpc.Close(true)`)
 	t.P(`}`)
 	t.P()
@@ -651,6 +683,146 @@ func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Op
 	}
 
 	return &options.Options{}
+}
+
+type topic struct {
+	varName  string
+	typeName string
+	typed    bool
+}
+
+func (t topic) FormatCastToString() string {
+	if !t.typed {
+		return t.varName
+	}
+	return fmt.Sprintf("string(%s)", t.varName)
+}
+
+type topicSlice []topic
+
+func (s topicSlice) TypeNames() (names []string) {
+	for _, t := range s {
+		names = append(names, t.typeName)
+	}
+	return
+}
+
+func (s topicSlice) VarNames() (names []string) {
+	for _, t := range s {
+		names = append(names, t.varName)
+	}
+	return
+}
+
+func (s topicSlice) FormatTypeParamConstraints() string {
+	if len(s) == 0 || !s[0].typed {
+		return ""
+	}
+	return fmt.Sprintf("[%s ~string]", strings.Join(s.TypeNames(), ", "))
+}
+
+func (s topicSlice) FormatTypeParams() string {
+	if len(s) == 0 || !s[0].typed {
+		return ""
+	}
+	return fmt.Sprintf("[%s]", strings.Join(s.TypeNames(), ", "))
+}
+
+func (s topicSlice) FormatParams() string {
+	p := make([]string, 0, len(s))
+	for _, t := range s {
+		p = append(p, fmt.Sprintf("%s %s", t.varName, t.typeName))
+	}
+	return strings.Join(p, ", ")
+}
+
+func (s topicSlice) FormatTypeNames() string {
+	return strings.Join(s.TypeNames(), ", ")
+}
+
+func (s topicSlice) FormatCastToStringSlice() string {
+	vars := make([]string, 0, len(s))
+	for _, t := range s {
+		vars = append(vars, t.FormatCastToString())
+	}
+	if len(vars) == 0 {
+		return "nil"
+	}
+	return fmt.Sprintf("[]string{%s}", strings.Join(vars, ", "))
+}
+
+func (t *psrpc) topicsForMethod(method *descriptor.MethodDescriptorProto) topicSlice {
+	opt := t.getOptions(method)
+	if !opt.Topics {
+		return nil
+	}
+	if opt.TopicParams == nil || len(opt.TopicParams.Names) == 0 {
+		return []topic{{"topic", "string", false}}
+	}
+	ts := make([]topic, 0, len(opt.TopicParams.Names))
+	for _, p := range opt.TopicParams.Names {
+		t := topic{
+			varName:  stringutils.LowerCamelCase(p),
+			typeName: "string",
+			typed:    opt.TopicParams.Typed,
+		}
+		if t.typed {
+			t.typeName = fmt.Sprintf("%sTopicType", stringutils.CamelCase(p))
+		}
+		ts = append(ts, t)
+	}
+	return ts
+}
+
+func (t *psrpc) typedTopicsForService(service *descriptor.ServiceDescriptorProto) topicSlice {
+	var ts []topic
+	found := map[string]bool{}
+	for _, m := range service.Method {
+		for _, t := range t.topicsForMethod(m) {
+			if t.typed && !found[t.typeName] {
+				found[t.typeName] = true
+				ts = append(ts, t)
+			}
+		}
+	}
+	return ts
+}
+
+type topicGroup struct {
+	methNames []string
+	typeName  string
+	topics    topicSlice
+}
+
+type topicGroupSlice []topicGroup
+
+func (t *psrpc) topicGroupsForService(service *descriptor.ServiceDescriptorProto) topicGroupSlice {
+	var gs []topicGroup
+	found := map[string]int{}
+	for _, m := range service.Method {
+		opt := t.getOptions(m)
+		if opt.TopicParams == nil || opt.TopicParams.Group == "" || opt.Subscription {
+			continue
+		}
+
+		t := t.topicsForMethod(m)
+		g := topicGroup{
+			methNames: []string{methodNameCamelCased(m)},
+			typeName:  stringutils.CamelCase(opt.TopicParams.Group),
+			topics:    t,
+		}
+
+		if i, ok := found[opt.TopicParams.Group]; ok {
+			if !slices.Equal(gs[i].topics, g.topics) {
+				gen.Fail(fmt.Sprintf(`all members of topic group "%s" must have the same parameter names and typed values. mismatch found in "%s"`, opt.TopicParams.Group, *m.Name))
+			}
+			gs[i].methNames = append(gs[i].methNames, methodNameCamelCased(m))
+		} else {
+			found[opt.TopicParams.Group] = len(gs)
+			gs = append(gs, g)
+		}
+	}
+	return gs
 }
 
 // serviceMetadataVarName is the variable name used in generated code to refer
