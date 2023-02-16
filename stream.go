@@ -17,6 +17,7 @@ type Stream[SendType, RecvType proto.Message] interface {
 	Channel() <-chan RecvType
 	Send(msg SendType, opts ...StreamOption) error
 	Close(cause error) error
+	Context() context.Context
 	Err() error
 }
 
@@ -276,6 +277,10 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 	}
 
 	return
+}
+
+func (s *streamImpl[SendType, RecvType]) Context() context.Context {
+	return s.ctx
 }
 
 func (s *streamImpl[SendType, RecvType]) Hijacked() bool {
