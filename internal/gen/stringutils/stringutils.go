@@ -76,6 +76,13 @@ func CamelCase(s string) string {
 	return string(t)
 }
 
+// LowerCamelCase converts a snake_case string to camelCase
+func LowerCamelCase(s string) string {
+	t := []byte(CamelCase(s))
+	t[0] ^= ' '
+	return string(t)
+}
+
 // AlphaDigitize replaces non-letter, non-digit, non-underscore characters with
 // underscore.
 func AlphaDigitize(r rune) rune {

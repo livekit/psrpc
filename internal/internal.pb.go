@@ -323,6 +323,7 @@ type Stream struct {
 	SentAt    int64  `protobuf:"varint,3,opt,name=sent_at,json=sentAt,proto3" json:"sent_at,omitempty"`
 	Expiry    int64  `protobuf:"varint,4,opt,name=expiry,proto3" json:"expiry,omitempty"`
 	// Types that are assignable to Body:
+	//
 	//	*Stream_Open
 	//	*Stream_Message
 	//	*Stream_Ack

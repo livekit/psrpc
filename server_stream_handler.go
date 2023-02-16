@@ -16,7 +16,7 @@ type StreamAffinityFunc func() float32
 type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	mu           sync.RWMutex
 	rpc          string
-	topic        string
+	topic        []string
 	streamSub    Subscription[*internal.Stream]
 	claimSub     Subscription[*internal.ClaimResponse]
 	streams      map[string]*streamImpl[SendType, RecvType]
@@ -32,7 +32,7 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 func newStreamRPCHandler[RecvType, SendType proto.Message](
 	s *RPCServer,
 	rpc string,
-	topic string,
+	topic []string,
 	svcImpl func(ServerStream[SendType, RecvType]) error,
 	interceptor ServerInterceptor,
 	affinityFunc StreamAffinityFunc,

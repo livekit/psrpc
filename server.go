@@ -38,7 +38,7 @@ func NewRPCServer(serviceName, serverID string, bus MessageBus, opts ...ServerOp
 func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	s *RPCServer,
 	rpc string,
-	topic string,
+	topic []string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	affinityFunc AffinityFunc[RequestType],
 ) error {
@@ -81,7 +81,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message](
 	s *RPCServer,
 	rpc string,
-	topic string,
+	topic []string,
 	svcImpl func(ServerStream[ResponseType, RequestType]) error,
 	affinityFunc StreamAffinityFunc,
 ) error {
@@ -121,7 +121,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	return nil
 }
 
-func (s *RPCServer) DeregisterHandler(rpc, topic string) {
+func (s *RPCServer) DeregisterHandler(rpc string, topic []string) {
 	key := getHandlerKey(rpc, topic)
 	s.mu.RLock()
 	h, ok := s.handlers[key]
@@ -131,7 +131,7 @@ func (s *RPCServer) DeregisterHandler(rpc, topic string) {
 	}
 }
 
-func (s *RPCServer) Publish(ctx context.Context, rpc, topic string, msg proto.Message) error {
+func (s *RPCServer) Publish(ctx context.Context, rpc string, topic []string, msg proto.Message) error {
 	return s.bus.Publish(ctx, getRPCChannel(s.serviceName, rpc, topic), msg)
 }
 
