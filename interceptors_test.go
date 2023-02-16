@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/livekit/psrpc/internal"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc/internal"
 )
 
 func TestInterceptors(t *testing.T) {
