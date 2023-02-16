@@ -804,7 +804,7 @@ func (t *psrpc) topicGroupsForService(service *descriptor.ServiceDescriptorProto
 	found := map[string]int{}
 	for _, m := range service.Method {
 		opt := t.getOptions(m)
-		if opt.TopicParams == nil || opt.TopicParams.Group == "" {
+		if opt.TopicParams == nil || opt.TopicParams.Group == "" || opt.Subscription {
 			continue
 		}
 
