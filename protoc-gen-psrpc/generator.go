@@ -583,7 +583,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		if opts.Stream {
 			registerFuncName = "RegisterStreamHandler"
 		}
-		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", []string{}, svc.`, methName)
+		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
 			t.P(`, svc.`, methName, `Affinity)`)
 		} else {
@@ -744,6 +744,9 @@ func (s topicSlice) FormatCastToStringSlice() string {
 	vars := make([]string, 0, len(s))
 	for _, t := range s {
 		vars = append(vars, t.FormatCastToString())
+	}
+	if len(vars) == 0 {
+		return "nil"
 	}
 	return fmt.Sprintf("[]string{%s}", strings.Join(vars, ", "))
 }

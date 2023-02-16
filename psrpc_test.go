@@ -79,27 +79,27 @@ func testRPC(t *testing.T, bus MessageBus) {
 	returnError := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		return nil, retErr
 	}
-	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, []string{}, addOne, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil)
 	require.NoError(t, err)
-	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, []string{}, addOne, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	requestID := newRequestID()
 	res, err := RequestSingle[*internal.Response](
-		ctx, client, rpc, []string{}, &internal.Request{RequestId: requestID},
+		ctx, client, rpc, nil, &internal.Request{RequestId: requestID},
 	)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
-	err = RegisterHandler[*internal.Request, *internal.Response](serverC, rpc, []string{}, returnError, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverC, rpc, nil, returnError, nil)
 	require.NoError(t, err)
 
 	requestID = newRequestID()
 	resChan, err := RequestMulti[*internal.Response](
-		ctx, client, rpc, []string{}, &internal.Request{RequestId: requestID},
+		ctx, client, rpc, nil, &internal.Request{RequestId: requestID},
 	)
 	require.NoError(t, err)
 
@@ -150,12 +150,12 @@ func testStream(t *testing.T, bus MessageBus) {
 		}
 		return nil
 	}
-	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, []string{}, handlePing, nil)
+	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	stream, err := OpenStream[*internal.Response, *internal.Response](
-		ctx, client, rpc, []string{},
+		ctx, client, rpc, nil,
 	)
 	require.NoError(t, err)
 
