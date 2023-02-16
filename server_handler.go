@@ -166,7 +166,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	var affinity float32
 	if h.affinityFunc != nil {
-		affinity = h.affinityFunc()
+		affinity = h.affinityFunc(req)
 		if affinity < 0 {
 			return false, nil
 		}
