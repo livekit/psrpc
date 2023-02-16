@@ -164,6 +164,16 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	req RequestType,
 ) (bool, error) {
 
+	var affinity float32
+	if h.affinityFunc != nil {
+		affinity = h.affinityFunc()
+		if affinity < 0 {
+			return false, nil
+		}
+	} else {
+		affinity = 1
+	}
+
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
 
 	h.mu.Lock()
@@ -175,13 +185,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		delete(h.claims, ir.RequestId)
 		h.mu.Unlock()
 	}()
-
-	var affinity float32
-	if h.affinityFunc != nil {
-		affinity = h.affinityFunc(req)
-	} else {
-		affinity = 1
-	}
 
 	err := s.bus.Publish(ctx, getClaimRequestChannel(s.serviceName, ir.ClientId), &internal.ClaimRequest{
 		RequestId: ir.RequestId,
