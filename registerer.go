@@ -26,7 +26,7 @@ func (rs RegistererSlice) Register(params ...any) error {
 	for i, p := range rs {
 		ret := reflect.ValueOf(p.register).Call(paramVals)
 		if !ret[0].IsNil() {
-			rs[:i].Deregister(params)
+			rs[:i].Deregister(params...)
 			return ret[0].Interface().(error)
 		}
 	}
