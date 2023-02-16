@@ -38,7 +38,7 @@ func appendSanitizedChannelPart(buf []byte, s string) []byte {
 				buf = append(buf, lowerhex[r>>uint(s)&0xF])
 			}
 		} else {
-			buf = append(buf, `u+`...)
+			buf = append(buf, `U+`...)
 			for s := 28; s >= 0; s -= 4 {
 				buf = append(buf, lowerhex[r>>uint(s)&0xF])
 			}
