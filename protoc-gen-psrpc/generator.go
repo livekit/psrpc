@@ -791,7 +791,6 @@ func (t *psrpc) typedTopicsForService(service *descriptor.ServiceDescriptorProto
 type topicGroup struct {
 	methNames []string
 	typeName  string
-	arity     int
 	topics    topicSlice
 }
 
@@ -811,7 +810,6 @@ func (t *psrpc) topicGroupsForService(service *descriptor.ServiceDescriptorProto
 			methNames: []string{methodNameCamelCased(m)},
 			typeName:  stringutils.CamelCase(opt.TopicParams.Group),
 			topics:    t,
-			arity:     len(t),
 		}
 
 		if i, ok := found[opt.TopicParams.Group]; ok {

@@ -24,10 +24,10 @@ type RegistererSlice []Registerer
 func (rs RegistererSlice) Register(params ...any) error {
 	paramVals := anySliceReflectValues(params)
 	for i, p := range rs {
-		res := reflect.ValueOf(p.register).Call(paramVals)
-		if !res[0].IsNil() {
+		ret := reflect.ValueOf(p.register).Call(paramVals)
+		if !ret[0].IsNil() {
 			rs[:i].Deregister(params)
-			return res[0].Interface().(error)
+			return ret[0].Interface().(error)
 		}
 	}
 	return nil
