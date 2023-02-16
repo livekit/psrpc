@@ -165,7 +165,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		acks:     map[string]chan struct{}{},
 	}
 	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
-	stream.handler = chainStreamInterceptors(s.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
+	stream.interceptor = chainClientInterceptors[StreamInterceptor](s.streamInterceptors, info, &streamInterceptorRoot[SendType, RecvType]{stream})
 
 	h.mu.Lock()
 	h.streams[is.StreamId] = stream

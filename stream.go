@@ -35,13 +35,12 @@ type streamAdapter interface {
 }
 
 type clientStream struct {
-	c     *RPCClient
-	rpc   string
-	topic string
+	c    *RPCClient
+	info RPCInfo
 }
 
 func (s *clientStream) send(ctx context.Context, msg *internal.Stream) (err error) {
-	if err = s.c.bus.Publish(ctx, getStreamServerChannel(s.c.serviceName, s.rpc, s.topic), msg); err != nil {
+	if err = s.c.bus.Publish(ctx, getStreamServerChannel(s.c.serviceName, s.info.Method, s.info.Topic), msg); err != nil {
 		err = NewError(Internal, err)
 	}
 	return
@@ -73,36 +72,36 @@ func (s *serverStream[RequestType, ResponseType]) close(streamID string) {
 	s.h.handling.Dec()
 }
 
-type streamHandler[SendType, RecvType proto.Message] struct {
+type streamInterceptorRoot[SendType, RecvType proto.Message] struct {
 	*streamImpl[SendType, RecvType]
 }
 
-func (h *streamHandler[SendType, RecvType]) Recv(msg proto.Message) error {
+func (h *streamInterceptorRoot[SendType, RecvType]) Recv(msg proto.Message) error {
 	return h.recv(msg)
 }
 
-func (h *streamHandler[SendType, RecvType]) Send(msg proto.Message, opts ...StreamOption) error {
+func (h *streamInterceptorRoot[SendType, RecvType]) Send(msg proto.Message, opts ...StreamOption) error {
 	return h.send(msg)
 }
 
-func (h *streamHandler[SendType, RecvType]) Close(cause error) error {
+func (h *streamInterceptorRoot[SendType, RecvType]) Close(cause error) error {
 	return h.close(cause)
 }
 
 type streamImpl[SendType, RecvType proto.Message] struct {
 	streamOpts
-	adapter   streamAdapter
-	handler   StreamHandler
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	recvChan  chan RecvType
-	streamID  string
-	mu        sync.Mutex
-	hijacked  bool
-	pending   atomic.Int32
-	acks      map[string]chan struct{}
-	err       error
-	closed    atomic.Bool
+	adapter     streamAdapter
+	interceptor StreamInterceptor
+	ctx         context.Context
+	cancelCtx   context.CancelFunc
+	recvChan    chan RecvType
+	streamID    string
+	mu          sync.Mutex
+	hijacked    bool
+	pending     atomic.Int32
+	acks        map[string]chan struct{}
+	err         error
+	closed      atomic.Bool
 }
 
 func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error {
@@ -125,11 +124,11 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		v, err := b.Message.Message.UnmarshalNew()
 		if err != nil {
 			err = NewError(MalformedRequest, err)
-			_ = s.handler.Close(err)
+			_ = s.interceptor.Close(err)
 			return err
 		}
 
-		if err := s.handler.Recv(v); err != nil {
+		if err := s.interceptor.Recv(v); err != nil {
 			return err
 		}
 
@@ -302,9 +301,9 @@ func (s *streamImpl[SendType, RecvType]) Err() error {
 }
 
 func (s *streamImpl[RequestType, ResponseType]) Close(cause error) error {
-	return s.handler.Close(cause)
+	return s.interceptor.Close(cause)
 }
 
 func (s *streamImpl[SendType, RecvType]) Send(request SendType, opts ...StreamOption) (err error) {
-	return s.handler.Send(request, opts...)
+	return s.interceptor.Send(request, opts...)
 }

@@ -14,7 +14,7 @@ type serverOpts struct {
 	timeout            time.Duration
 	channelSize        int
 	interceptors       []ServerInterceptor
-	streamInterceptors []StreamInterceptor
+	streamInterceptors []StreamInterceptorFactory
 	chainedInterceptor ServerInterceptor
 }
 
@@ -42,7 +42,7 @@ func WithServerInterceptors(interceptors ...ServerInterceptor) ServerOption {
 	}
 }
 
-func WithServerStreamInterceptors(interceptors ...StreamInterceptor) ServerOption {
+func WithServerStreamInterceptors(interceptors ...StreamInterceptorFactory) ServerOption {
 	return func(o *serverOpts) {
 		o.streamInterceptors = append(o.streamInterceptors, interceptors...)
 	}

@@ -11,12 +11,14 @@ const (
 type ClientOption func(*clientOpts)
 
 type clientOpts struct {
-	timeout            time.Duration
-	channelSize        int
-	enableStreams      bool
-	requestHooks       []ClientRequestHook
-	responseHooks      []ClientResponseHook
-	streamInterceptors []StreamInterceptor
+	timeout              time.Duration
+	channelSize          int
+	enableStreams        bool
+	requestHooks         []ClientRequestHook
+	responseHooks        []ClientResponseHook
+	rpcInterceptors      []RPCInterceptorFactory
+	multiRPCInterceptors []MultiRPCInterceptorFactory
+	streamInterceptors   []StreamInterceptorFactory
 }
 
 func WithClientTimeout(timeout time.Duration) ClientOption {
@@ -33,23 +35,29 @@ func WithClientChannelSize(size int) ClientOption {
 
 func WithClientRequestHooks(hooks ...ClientRequestHook) ClientOption {
 	return func(o *clientOpts) {
-		for _, hook := range hooks {
-			if hook != nil {
-				o.requestHooks = append(o.requestHooks, hook)
-			}
-		}
+		o.requestHooks = append(o.requestHooks, hooks...)
 	}
 }
 
 func WithClientResponseHooks(hooks ...ClientResponseHook) ClientOption {
 	return func(o *clientOpts) {
-		for _, hook := range hooks {
-			o.responseHooks = append(o.responseHooks, hook)
-		}
+		o.responseHooks = append(o.responseHooks, hooks...)
 	}
 }
 
-func WithClientStreamInterceptors(interceptors ...StreamInterceptor) ClientOption {
+func WithClientRPCInterceptors(interceptors ...RPCInterceptorFactory) ClientOption {
+	return func(o *clientOpts) {
+		o.rpcInterceptors = append(o.rpcInterceptors, interceptors...)
+	}
+}
+
+func WithClientMultiRPCInterceptors(interceptors ...MultiRPCInterceptorFactory) ClientOption {
+	return func(o *clientOpts) {
+		o.multiRPCInterceptors = append(o.multiRPCInterceptors, interceptors...)
+	}
+}
+
+func WithClientStreamInterceptors(interceptors ...StreamInterceptorFactory) ClientOption {
 	return func(o *clientOpts) {
 		o.streamInterceptors = append(o.streamInterceptors, interceptors...)
 	}

@@ -136,7 +136,6 @@ func RequestSingle[ResponseType proto.Message](
 	opts ...RequestOption,
 ) (response ResponseType, err error) {
 
-	o := getRequestOpts(c.clientOpts, opts...)
 	info := RPCInfo{
 		Method: rpc,
 		Topic:  topic,
@@ -154,76 +153,81 @@ func RequestSingle[ResponseType proto.Message](
 		hook(ctx, request, info)
 	}
 
-	v, err := anypb.New(request)
-	if err != nil {
-		err = NewError(MalformedRequest, err)
-		return
-	}
+	call := func(ctx context.Context, request proto.Message, opts ...RequestOption) (response proto.Message, err error) {
+		o := getRequestOpts(c.clientOpts, opts...)
 
-	requestID := newRequestID()
-	now := time.Now()
-	req := &internal.Request{
-		RequestId: requestID,
-		ClientId:  c.id,
-		SentAt:    now.UnixNano(),
-		Expiry:    now.Add(o.timeout).UnixNano(),
-		Multi:     false,
-		Request:   v,
-	}
-
-	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
-	resChan := make(chan *internal.Response, 1)
-
-	c.mu.Lock()
-	c.claimRequests[requestID] = claimChan
-	c.responseChannels[requestID] = resChan
-	c.mu.Unlock()
-
-	defer func() {
-		c.mu.Lock()
-		delete(c.claimRequests, requestID)
-		delete(c.responseChannels, requestID)
-		c.mu.Unlock()
-	}()
-
-	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		err = NewError(Internal, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, o.timeout)
-	defer cancel()
-
-	serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
-	if err != nil {
-		return
-	}
-	if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
-		RequestId: requestID,
-		ServerId:  serverID,
-	}); err != nil {
-		err = NewError(Internal, err)
-		return
-	}
-
-	select {
-	case res := <-resChan:
-		if res.Error != "" {
-			err = newErrorFromResponse(res.Code, res.Error)
-		} else {
-			var r proto.Message
-			r, err = res.Response.UnmarshalNew()
-			if err != nil {
-				err = NewError(MalformedResponse, err)
-			} else {
-				response = r.(ResponseType)
-			}
+		v, err := anypb.New(request)
+		if err != nil {
+			err = NewError(MalformedRequest, err)
+			return
 		}
 
-	case <-ctx.Done():
-		err = ErrRequestTimedOut
+		requestID := newRequestID()
+		now := time.Now()
+		req := &internal.Request{
+			RequestId: requestID,
+			ClientId:  c.id,
+			SentAt:    now.UnixNano(),
+			Expiry:    now.Add(o.timeout).UnixNano(),
+			Multi:     false,
+			Request:   v,
+		}
+
+		claimChan := make(chan *internal.ClaimRequest, c.channelSize)
+		resChan := make(chan *internal.Response, 1)
+
+		c.mu.Lock()
+		c.claimRequests[requestID] = claimChan
+		c.responseChannels[requestID] = resChan
+		c.mu.Unlock()
+
+		defer func() {
+			c.mu.Lock()
+			delete(c.claimRequests, requestID)
+			delete(c.responseChannels, requestID)
+			c.mu.Unlock()
+		}()
+
+		if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
+			err = NewError(Internal, err)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, o.timeout)
+		defer cancel()
+
+		serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
+		if err != nil {
+			return
+		}
+		if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+			RequestId: requestID,
+			ServerId:  serverID,
+		}); err != nil {
+			err = NewError(Internal, err)
+			return
+		}
+
+		select {
+		case res := <-resChan:
+			if res.Error != "" {
+				err = newErrorFromResponse(res.Code, res.Error)
+			} else {
+				response, err = res.Response.UnmarshalNew()
+				if err != nil {
+					err = NewError(MalformedResponse, err)
+				}
+			}
+
+		case <-ctx.Done():
+			err = ErrRequestTimedOut
+		}
+
+		return
 	}
 
+	res, err := chainClientInterceptors[RPCInterceptor](c.rpcInterceptors, info, call)(ctx, request, opts...)
+	response, _ = res.(ResponseType)
 	return
 }
 
@@ -286,85 +290,29 @@ func RequestMulti[ResponseType proto.Message](
 	opts ...RequestOption,
 ) (rChan <-chan *Response[ResponseType], err error) {
 
-	o := getRequestOpts(c.clientOpts, opts...)
 	info := RPCInfo{
 		Method: rpc,
 		Topic:  topic,
 	}
 
-	// call response hooks on internal failure
-	defer func() {
-		if err != nil {
-			for _, hook := range c.responseHooks {
-				hook(ctx, request, info, nil, err)
-			}
-		}
-	}()
+	responseChannel := make(chan *Response[ResponseType], c.channelSize)
+	call := &multiRPC[ResponseType]{
+		c:         c,
+		requestID: newRequestID(),
+		resChan:   responseChannel,
+		info:      info,
+	}
+	call.interceptor = chainClientInterceptors[MultiRPCInterceptor](c.multiRPCInterceptors, info, &multiRPCInterceptorRoot[ResponseType]{call})
 
 	// request hooks
 	for _, hook := range c.requestHooks {
 		hook(ctx, request, info)
 	}
 
-	v, err := anypb.New(request)
-	if err != nil {
-		err = NewError(MalformedRequest, err)
-		return
-	}
-
-	requestID := newRequestID()
-	now := time.Now()
-	req := &internal.Request{
-		RequestId: requestID,
-		ClientId:  c.id,
-		SentAt:    now.UnixNano(),
-		Expiry:    now.Add(o.timeout).UnixNano(),
-		Multi:     true,
-		Request:   v,
-	}
-
-	resChan := make(chan *internal.Response, c.channelSize)
-
-	c.mu.Lock()
-	c.responseChannels[requestID] = resChan
-	c.mu.Unlock()
-
-	responseChannel := make(chan *Response[ResponseType], c.channelSize)
-	go func() {
-		timer := time.NewTimer(o.timeout)
-		for {
-			select {
-			case res := <-resChan:
-				r := &Response[ResponseType]{}
-				if res.Error != "" {
-					r.Err = newErrorFromResponse(res.Code, res.Error)
-				} else {
-					v, err := res.Response.UnmarshalNew()
-					if err != nil {
-						r.Err = NewError(MalformedResponse, err)
-					} else {
-						r.Result = v.(ResponseType)
-					}
-				}
-
-				// response hooks
-				for _, hook := range c.responseHooks {
-					hook(ctx, request, info, r.Result, r.Err)
-				}
-				responseChannel <- r
-
-			case <-timer.C:
-				c.mu.Lock()
-				delete(c.responseChannels, requestID)
-				c.mu.Unlock()
-				close(responseChannel)
-				return
-			}
+	if err = call.interceptor.Send(ctx, request, opts...); err != nil {
+		for _, hook := range c.responseHooks {
+			hook(ctx, request, info, nil, err)
 		}
-	}()
-
-	if err = c.bus.Publish(ctx, getRPCChannel(c.serviceName, rpc, topic), req); err != nil {
-		err = NewError(Internal, err)
 		return
 	}
 
@@ -465,16 +413,15 @@ func OpenStream[SendType, RecvType proto.Message](
 			timeout: c.timeout,
 		},
 		adapter: &clientStream{
-			c:     c,
-			rpc:   rpc,
-			topic: topic,
+			c:    c,
+			info: info,
 		},
 		recvChan: make(chan RecvType, c.channelSize),
 		streamID: streamID,
 		acks:     map[string]chan struct{}{requestID: ackChan},
 	}
 	stream.ctx, stream.cancelCtx = context.WithCancel(ctx)
-	stream.handler = chainStreamInterceptors(c.streamInterceptors, info, &streamHandler[SendType, RecvType]{stream})
+	stream.interceptor = chainClientInterceptors[StreamInterceptor](c.streamInterceptors, info, &streamInterceptorRoot[SendType, RecvType]{stream})
 
 	go runClientStream(c, stream, recvChan)
 
