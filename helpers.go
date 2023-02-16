@@ -25,10 +25,10 @@ var channelChar = &unicode.RangeTable{
 		{0x005f, 0x005f, 1}, // _
 		{0x0061, 0x007a, 1}, // a-z
 	},
-	LatinOffset: 5,
+	LatinOffset: 4,
 }
 
-func appendEscaped(buf []byte, s string) []byte {
+func appendSanitizedChannelPart(buf []byte, s string) []byte {
 	for _, r := range s {
 		if unicode.Is(channelChar, r) {
 			buf = append(buf, byte(r))
@@ -53,18 +53,18 @@ func formatChannel(prefix0, prefix1 string, topics []string, suffix string) stri
 		l += len(t)
 	}
 	buf := make([]byte, 0, 4*l/3)
-	buf = appendEscaped(buf, prefix0)
+	buf = appendSanitizedChannelPart(buf, prefix0)
 	if prefix1 != "" {
 		buf = append(buf, `|`...)
-		buf = appendEscaped(buf, prefix1)
+		buf = appendSanitizedChannelPart(buf, prefix1)
 	}
 	for _, s := range topics {
 		buf = append(buf, `|`...)
-		buf = appendEscaped(buf, s)
+		buf = appendSanitizedChannelPart(buf, s)
 	}
 	if suffix != "" {
 		buf = append(buf, `|`...)
-		buf = appendEscaped(buf, suffix)
+		buf = appendSanitizedChannelPart(buf, suffix)
 	}
 	return string(buf)
 }
