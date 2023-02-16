@@ -50,6 +50,7 @@ func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, op
 		Expiry:    now.Add(o.timeout).UnixNano(),
 		Multi:     true,
 		Request:   v,
+		Metadata:  OutgoingContextMetadata(ctx),
 	}
 
 	irChan := make(chan *internal.Response, m.c.channelSize)

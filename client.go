@@ -172,6 +172,7 @@ func RequestSingle[ResponseType proto.Message](
 			Expiry:    now.Add(o.timeout).UnixNano(),
 			Multi:     false,
 			Request:   v,
+			Metadata:  OutgoingContextMetadata(ctx),
 		}
 
 		claimChan := make(chan *internal.ClaimRequest, c.channelSize)
@@ -375,7 +376,8 @@ func OpenStream[SendType, RecvType proto.Message](
 		Expiry:    now.Add(o.timeout).UnixNano(),
 		Body: &internal.Stream_Open{
 			Open: &internal.StreamOpen{
-				NodeId: c.id,
+				NodeId:   c.id,
+				Metadata: OutgoingContextMetadata(ctx),
 			},
 		},
 	}

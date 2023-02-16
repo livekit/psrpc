@@ -128,7 +128,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	h.handling.Inc()
 	defer h.handling.Dec()
 
-	ctx := context.Background()
+	head := &Header{
+		RemoteID: ir.ClientId,
+		SentAt:   time.UnixMilli(ir.SentAt),
+		Metadata: ir.Metadata,
+	}
+	ctx := NewContextWithIncomingHeader(context.Background(), head)
 	r, err := ir.Request.UnmarshalNew()
 	if err != nil {
 		var res ResponseType

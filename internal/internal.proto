@@ -12,6 +12,7 @@ message Request {
   int64 expiry = 4;
   bool multi = 5;
   google.protobuf.Any request = 6;
+  map<string, string> metadata = 7;
 }
 
 message Response {
@@ -49,6 +50,7 @@ message Stream {
 
 message StreamOpen {
   string node_id = 1;
+  map<string, string> metadata = 7;
 }
 
 message StreamMessage {

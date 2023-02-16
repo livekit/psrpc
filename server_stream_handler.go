@@ -141,7 +141,12 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		Topic:  h.topic,
 	}
 
-	ctx := context.Background()
+	head := &Header{
+		RemoteID: open.NodeId,
+		SentAt:   time.UnixMilli(is.SentAt),
+		Metadata: open.Metadata,
+	}
+	ctx := NewContextWithIncomingHeader(context.Background(), head)
 	octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
 	defer cancel()
 
