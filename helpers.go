@@ -18,9 +18,19 @@ func newStreamID() string {
 
 const lowerhex = "0123456789abcdef"
 
+var channelChar = &unicode.RangeTable{
+	R16: []unicode.Range16{
+		{0x0030, 0x0039, 1}, // 0-9
+		{0x0041, 0x005a, 1}, // A-Z
+		{0x005f, 0x005f, 1}, // _
+		{0x0061, 0x007a, 1}, // a-z
+	},
+	LatinOffset: 5,
+}
+
 func appendEscaped(buf []byte, s string) []byte {
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' {
+		if unicode.Is(channelChar, r) {
 			buf = append(buf, byte(r))
 		} else if r < 0x10000 {
 			buf = append(buf, `u+`...)
