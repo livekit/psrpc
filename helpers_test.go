@@ -40,4 +40,6 @@ func TestChannelFormatters(t *testing.T) {
 	require.Equal(t, "foo|bar|STR", getStreamChannel("foo", "bar"))
 	require.Equal(t, "foo|bar|a|b|c|STR", getStreamServerChannel("foo", "bar", []string{"a", "b", "c"}))
 	require.Equal(t, "foo|bar|STR", getStreamServerChannel("foo", "bar", nil))
+
+	require.Equal(t, "u+0001f680_foo|u+0001f6f0u+fe0f_bar|o\xf6|END", formatChannel("🚀_foo", "🛰️_bar", []string{"软件"}, "END"))
 }
