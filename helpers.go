@@ -47,26 +47,26 @@ func appendSanitizedChannelPart(buf []byte, s string) []byte {
 	return buf
 }
 
-func formatChannel(prefix0, prefix1 string, topics []string, suffix string) string {
-	l := len(prefix0) + len(prefix1) + len(suffix)
-	for _, t := range topics {
-		l += len(t)
+func appendChannelParts[T any](buf []byte, parts ...T) []byte {
+	var prefix bool
+	for _, t := range parts {
+		if prefix {
+			buf = append(buf, '|')
+		}
+		l := len(buf)
+		switch v := any(t).(type) {
+		case string:
+			buf = appendSanitizedChannelPart(buf, v)
+		case []string:
+			buf = appendChannelParts(buf, v...)
+		}
+		prefix = len(buf) > l
 	}
-	buf := make([]byte, 0, 4*l/3)
-	buf = appendSanitizedChannelPart(buf, prefix0)
-	if prefix1 != "" {
-		buf = append(buf, `|`...)
-		buf = appendSanitizedChannelPart(buf, prefix1)
-	}
-	for _, s := range topics {
-		buf = append(buf, `|`...)
-		buf = appendSanitizedChannelPart(buf, s)
-	}
-	if suffix != "" {
-		buf = append(buf, `|`...)
-		buf = appendSanitizedChannelPart(buf, suffix)
-	}
-	return string(buf)
+	return buf
+}
+
+func formatChannel(parts ...any) string {
+	return string(appendChannelParts(nil, parts...))
 }
 
 func getRPCChannel(serviceName, rpc string, topic []string) string {
@@ -74,15 +74,15 @@ func getRPCChannel(serviceName, rpc string, topic []string) string {
 }
 
 func getHandlerKey(rpc string, topic []string) string {
-	return formatChannel(rpc, "", topic, "")
+	return formatChannel(rpc, topic)
 }
 
 func getResponseChannel(serviceName, clientID string) string {
-	return formatChannel(serviceName, clientID, nil, "RES")
+	return formatChannel(serviceName, clientID, "RES")
 }
 
 func getClaimRequestChannel(serviceName, clientID string) string {
-	return formatChannel(serviceName, clientID, nil, "CLAIM")
+	return formatChannel(serviceName, clientID, "CLAIM")
 }
 
 func getClaimResponseChannel(serviceName, rpc string, topic []string) string {
@@ -90,7 +90,7 @@ func getClaimResponseChannel(serviceName, rpc string, topic []string) string {
 }
 
 func getStreamChannel(serviceName, nodeID string) string {
-	return formatChannel(serviceName, nodeID, nil, "STR")
+	return formatChannel(serviceName, nodeID, "STR")
 }
 
 func getStreamServerChannel(serviceName, rpc string, topic []string) string {
