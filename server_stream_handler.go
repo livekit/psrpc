@@ -194,6 +194,16 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	is *internal.Stream,
 ) (bool, error) {
 
+	var affinity float32
+	if h.affinityFunc != nil {
+		affinity = h.affinityFunc()
+		if affinity < 0 {
+			return false, nil
+		}
+	} else {
+		affinity = 1
+	}
+
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
 
 	h.mu.Lock()
@@ -205,13 +215,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 		delete(h.claims, is.RequestId)
 		h.mu.Unlock()
 	}()
-
-	var affinity float32
-	if h.affinityFunc != nil {
-		affinity = h.affinityFunc()
-	} else {
-		affinity = 1
-	}
 
 	err := s.bus.Publish(ctx, getClaimRequestChannel(s.serviceName, is.GetOpen().NodeId), &internal.ClaimRequest{
 		RequestId: is.RequestId,
