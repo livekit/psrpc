@@ -17,7 +17,7 @@ func NewNatsMessageBus(nc *nats.Conn) MessageBus {
 	}
 }
 
-func (n *natsMessageBus) Publish(ctx context.Context, channel string, msg proto.Message) error {
+func (n *natsMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
@@ -26,7 +26,7 @@ func (n *natsMessageBus) Publish(ctx context.Context, channel string, msg proto.
 	return n.nc.Publish(channel, b)
 }
 
-func (n *natsMessageBus) Subscribe(ctx context.Context, channel string, size int) (subInternal, error) {
+func (n *natsMessageBus) Subscribe(_ context.Context, channel string, size int) (subInternal, error) {
 	msgChan := make(chan *nats.Msg, size)
 	sub, err := n.nc.ChanSubscribe(channel, msgChan)
 	if err != nil {
@@ -39,7 +39,7 @@ func (n *natsMessageBus) Subscribe(ctx context.Context, channel string, size int
 	}, nil
 }
 
-func (n *natsMessageBus) SubscribeQueue(ctx context.Context, channel string, size int) (subInternal, error) {
+func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel string, size int) (subInternal, error) {
 	msgChan := make(chan *nats.Msg, size)
 	sub, err := n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
 	if err != nil {
