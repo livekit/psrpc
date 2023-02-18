@@ -304,7 +304,7 @@ res, err := myClient.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(selectionOpt
 
 ## Error handling
 
-PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap any other error using the `psrpc.NewError` funtion:
+PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap any other error using the `psrpc.NewError` function:
 
 ```go
 func NewError(code ErrorCode, err error) Error
@@ -375,7 +375,7 @@ and so on until the service implementation receives the request and produces a r
 type RPCInterceptor func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
 ```
 
-`RPCInterceptor` are created by by implementing `RPCInterceptorFactory` and passing the factory to new clients using `WithClientRPCInterceptors`.
+`RPCInterceptor` are created by implementing `RPCInterceptorFactory` and passing the factory to new clients using `WithClientRPCInterceptors`.
 
 ```go
 type RPCInterceptorFactory func(info RPCInfo, next RPCInterceptor) RPCInterceptor

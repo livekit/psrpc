@@ -104,9 +104,9 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 
 	stream, err := cA.ExchangeUpdates(ctx)
 	require.NoError(t, err)
-	stream.Send(&my_service.MyClientMessage{})
-	stream.Send(&my_service.MyClientMessage{})
-	stream.Close(nil)
+	require.NoError(t, stream.Send(&my_service.MyClientMessage{}))
+	require.NoError(t, stream.Send(&my_service.MyClientMessage{}))
+	require.NoError(t, stream.Close(nil))
 
 	// let the service goroutine run
 	runtime.Gosched()

@@ -2,7 +2,6 @@ package psrpc
 
 import (
 	"context"
-	"sync"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -91,22 +90,12 @@ func toSubscription[MessageType proto.Message](sub subInternal, size int) Subscr
 	}
 }
 
-type nilSubscription[MessageType any] struct {
-	closeOnce sync.Once
-	c         chan MessageType
-}
+type nilSubscription[MessageType any] struct{}
 
-func (s *nilSubscription[MessageType]) Channel() <-chan MessageType {
-	return s.c
-}
-
-func (s *nilSubscription[MessageType]) Close() error {
-	s.closeOnce.Do(func() { close(s.c) })
+func (s nilSubscription[MessageType]) Channel() <-chan MessageType {
 	return nil
 }
 
-func SubscribeNil[MessageType proto.Message]() Subscription[MessageType] {
-	return &nilSubscription[MessageType]{
-		c: make(chan MessageType),
-	}
+func (s nilSubscription[MessageType]) Close() error {
+	return nil
 }

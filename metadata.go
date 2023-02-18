@@ -60,11 +60,11 @@ func OutgoingContextMetadata(ctx context.Context) Metadata {
 	if !ok {
 		return nil
 	}
-	copy := maps.Clone(md.md)
+	clone := maps.Clone(md.md)
 	for _, a := range md.added {
 		for i := 1; i < len(a); i += 2 {
-			copy[a[i-1]] = a[i]
+			clone[a[i-1]] = a[i]
 		}
 	}
-	return copy
+	return clone
 }

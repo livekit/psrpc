@@ -16,7 +16,7 @@ func newStreamID() string {
 	return "STR_" + shortuuid.New()[:12]
 }
 
-const lowerhex = "0123456789abcdef"
+const lowerHex = "0123456789abcdef"
 
 var channelChar = &unicode.RangeTable{
 	R16: []unicode.Range16{
@@ -35,12 +35,12 @@ func appendSanitizedChannelPart(buf []byte, s string) []byte {
 		} else if r < 0x10000 {
 			buf = append(buf, `u+`...)
 			for s := 12; s >= 0; s -= 4 {
-				buf = append(buf, lowerhex[r>>uint(s)&0xF])
+				buf = append(buf, lowerHex[r>>uint(s)&0xF])
 			}
 		} else {
 			buf = append(buf, `U+`...)
 			for s := 28; s >= 0; s -= 4 {
-				buf = append(buf, lowerhex[r>>uint(s)&0xF])
+				buf = append(buf, lowerHex[r>>uint(s)&0xF])
 			}
 		}
 	}

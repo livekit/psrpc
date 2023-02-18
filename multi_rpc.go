@@ -4,9 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/livekit/psrpc/internal"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/livekit/psrpc/internal"
 )
 
 type multiRPCInterceptorRoot[ResponseType proto.Message] struct {
