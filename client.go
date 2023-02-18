@@ -234,7 +234,9 @@ func RequestSingle[ResponseType proto.Message](
 	}
 
 	res, err := chainClientInterceptors[RPCInterceptor](c.rpcInterceptors, info, call)(ctx, request, opts...)
-	response, _ = res.(ResponseType)
+	if res != nil {
+		response, _ = res.(ResponseType)
+	}
 	return
 }
 
