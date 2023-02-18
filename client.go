@@ -59,7 +59,7 @@ func NewRPCClient(serviceName, clientID string, bus MessageBus, opts ...ClientOp
 			return nil, err
 		}
 	} else {
-		streams = SubscribeNil[*internal.Stream]()
+		streams = nilSubscription[*internal.Stream]{}
 	}
 
 	go func() {
@@ -198,7 +198,7 @@ func RequestSingle[ResponseType proto.Message](
 		ctx, cancel := context.WithTimeout(ctx, o.timeout)
 		defer cancel()
 
-		serverID, err := selectServer(ctx, claimChan, o.selectionOpts)
+		serverID, err := selectServer(ctx, claimChan, resChan, o.selectionOpts)
 		if err != nil {
 			return
 		}
@@ -240,7 +240,13 @@ func RequestSingle[ResponseType proto.Message](
 	return
 }
 
-func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, opts SelectionOpts) (string, error) {
+func selectServer(
+	ctx context.Context,
+	claimChan chan *internal.ClaimRequest,
+	resChan chan *internal.Response,
+	opts SelectionOpts,
+) (string, error) {
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -252,18 +258,21 @@ func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, op
 	best := float32(0)
 	shorted := false
 	claims := 0
+	var resErr error
 
 	for {
 		select {
 		case <-ctx.Done():
-			if best == 0 {
-				if claims == 0 {
-					return "", ErrNoResponse
-				}
-				return "", NewErrorf(Unavailable, "no servers available (received %d responses)", claims)
-			} else {
+			if best > 0 {
 				return serverID, nil
 			}
+			if resErr != nil {
+				return "", resErr
+			}
+			if claims == 0 {
+				return "", ErrNoResponse
+			}
+			return "", NewErrorf(Unavailable, "no servers available (received %d responses)", claims)
 
 		case claim := <-claimChan:
 			claims++
@@ -280,6 +289,12 @@ func selectServer(ctx context.Context, claimChan chan *internal.ClaimRequest, op
 					shorted = true
 					time.AfterFunc(opts.ShortCircuitTimeout, cancel)
 				}
+			}
+
+		case res := <-resChan:
+			// will only happen with malformed requests
+			if res.Error != "" {
+				resErr = NewErrorf(ErrorCode(res.Code), res.Error)
 			}
 		}
 	}
@@ -405,7 +420,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		return nil, NewError(Internal, err)
 	}
 
-	serverID, err := selectServer(octx, claimChan, o.selectionOpts)
+	serverID, err := selectServer(octx, claimChan, nil, o.selectionOpts)
 	if err != nil {
 		return nil, err
 	}

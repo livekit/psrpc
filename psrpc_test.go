@@ -245,7 +245,7 @@ func testAffinity(t *testing.T, opts SelectionOpts, expectedID string) {
 			Affinity:  0.9,
 		}
 	}()
-	serverID, err := selectServer(context.Background(), c, opts)
+	serverID, err := selectServer(context.Background(), c, nil, opts)
 	require.NoError(t, err)
 	require.Equal(t, expectedID, serverID)
 }
