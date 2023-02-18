@@ -77,7 +77,10 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 			}, func(context.Context, proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})
-			return res.(ResponseType), err
+			if err != nil {
+				return nil, err
+			}
+			return res.(ResponseType), nil
 		}
 	}
 
