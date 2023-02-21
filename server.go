@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -144,11 +145,9 @@ func (s *RPCServer) Close(force bool) {
 	case <-s.shutdown:
 	default:
 		close(s.shutdown)
-		handlers := make([]rpcHandler, 0)
+
 		s.mu.RLock()
-		for _, h := range s.handlers {
-			handlers = append(handlers, h)
-		}
+		handlers := maps.Values(s.handlers)
 		s.mu.RUnlock()
 
 		var wg sync.WaitGroup

@@ -16,6 +16,7 @@ var (
 	ErrRequestCanceled = NewError(Canceled, errors.New("request canceled"))
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
+	ErrServerGoingAway = NewError(Unavailable, errors.New("server going away"))
 	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
 	ErrSlowConsumer    = NewError(Unavailable, errors.New("stream message discarded by slow consumer"))
 )
