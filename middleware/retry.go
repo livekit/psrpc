@@ -59,7 +59,6 @@ func WithStreamRetries(opt RetryOptions) psrpc.ClientOption {
 
 func NewRetryStreamInterceptorFactory(opt RetryOptions) psrpc.StreamInterceptorFactory {
 	return func(info psrpc.RPCInfo, next psrpc.StreamInterceptor) psrpc.StreamInterceptor {
-
 		return &streamRetryInterceptor{
 			StreamInterceptor: next,
 			opt:               opt,
