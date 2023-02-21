@@ -39,7 +39,6 @@ func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
 
 func NewRetryRPCInterceptorFactory(opt RetryOptions) psrpc.RPCInterceptorFactory {
 	return func(info psrpc.RPCInfo, next psrpc.RPCInterceptor) psrpc.RPCInterceptor {
-
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
 			retry(opt, func(timeout time.Duration) error {
 				nextOpts := make([]psrpc.RequestOption, len(opts)+1)
