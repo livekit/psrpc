@@ -17,7 +17,11 @@ type RetryOptions struct {
 }
 
 func isPermanentFailure(err error) bool {
-	return !(errors.Is(err, psrpc.ErrNoResponse) || errors.Is(err, psrpc.ErrRequestTimedOut))
+	var perr psrpc.Error
+	if !errors.As(err, &perr) {
+		return true
+	}
+	return perr.Code() != psrpc.DeadlineExceeded
 }
 
 func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
@@ -30,7 +34,7 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 		}
 		select {
 		case <-done:
-			return err
+			return psrpc.ErrRequestCanceled
 		default:
 		}
 
@@ -46,10 +50,10 @@ func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
 func NewRPCRetryInterceptorFactory(opt RetryOptions) psrpc.RPCInterceptorFactory {
 	return func(info psrpc.RPCInfo, next psrpc.RPCInterceptor) psrpc.RPCInterceptor {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
-			retry(opt, ctx.Done(), func(timeout time.Duration) error {
+			err = retry(opt, ctx.Done(), func(timeout time.Duration) error {
 				nextOpts := make([]psrpc.RequestOption, len(opts)+1)
 				copy(nextOpts, opts)
-				opts[len(opts)] = psrpc.WithRequestTimeout(timeout)
+				nextOpts[len(opts)] = psrpc.WithRequestTimeout(timeout)
 
 				res, err = next(ctx, req, nextOpts...)
 				return err
@@ -81,7 +85,7 @@ func (s *streamRetryInterceptor) Send(msg proto.Message, opts ...psrpc.StreamOpt
 	return retry(s.opt, nil, func(timeout time.Duration) error {
 		nextOpts := make([]psrpc.StreamOption, len(opts)+1)
 		copy(nextOpts, opts)
-		opts[len(opts)] = psrpc.WithTimeout(timeout)
+		nextOpts[len(opts)] = psrpc.WithTimeout(timeout)
 
 		return s.StreamInterceptor.Send(msg, nextOpts...)
 	})
