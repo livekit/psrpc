@@ -40,10 +40,10 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 }
 
 func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
-	return psrpc.WithClientRPCInterceptors(NewRetryRPCInterceptorFactory(opt))
+	return psrpc.WithClientRPCInterceptors(NewRPCRetryInterceptorFactory(opt))
 }
 
-func NewRetryRPCInterceptorFactory(opt RetryOptions) psrpc.RPCInterceptorFactory {
+func NewRPCRetryInterceptorFactory(opt RetryOptions) psrpc.RPCInterceptorFactory {
 	return func(info psrpc.RPCInfo, next psrpc.RPCInterceptor) psrpc.RPCInterceptor {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
 			retry(opt, ctx.Done(), func(timeout time.Duration) error {
@@ -60,10 +60,10 @@ func NewRetryRPCInterceptorFactory(opt RetryOptions) psrpc.RPCInterceptorFactory
 }
 
 func WithStreamRetries(opt RetryOptions) psrpc.ClientOption {
-	return psrpc.WithClientStreamInterceptors(NewRetryStreamInterceptorFactory(opt))
+	return psrpc.WithClientStreamInterceptors(NewStreamRetryInterceptorFactory(opt))
 }
 
-func NewRetryStreamInterceptorFactory(opt RetryOptions) psrpc.StreamInterceptorFactory {
+func NewStreamRetryInterceptorFactory(opt RetryOptions) psrpc.StreamInterceptorFactory {
 	return func(info psrpc.RPCInfo, next psrpc.StreamInterceptor) psrpc.StreamInterceptor {
 		return &streamRetryInterceptor{
 			StreamInterceptor: next,
