@@ -252,7 +252,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) close(force bool) {
 			wg.Add(1)
 			s := s
 			go func() {
-				_ = s.Close(ErrServerGoingAway)
+				_ = s.Close(ErrStreamEOF)
 				wg.Done()
 			}()
 		}
