@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"math/rand"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -109,7 +108,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.NoError(t, stream.Close(nil))
 
 	// let the service goroutine run
-	runtime.Gosched()
+	time.Sleep(time.Millisecond * 100)
 
 	sA.Lock()
 	sB.Lock()
