@@ -11,25 +11,30 @@ import (
 )
 
 type RetryOptions struct {
-	MaxAttempts int
-	Timeout     time.Duration
-	Backoff     time.Duration
+	MaxAttempts   int
+	Timeout       time.Duration
+	Backoff       time.Duration
+	IsRecoverable func(err error) bool
 }
 
-func isPermanentFailure(err error) bool {
+func isTimeout(err error) bool {
 	var perr psrpc.Error
 	if !errors.As(err, &perr) {
 		return true
 	}
-	return perr.Code() != psrpc.DeadlineExceeded
+	return perr.Code() == psrpc.DeadlineExceeded
 }
 
 func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
 	attempt := 1
 	timeout := opt.Timeout
+	if opt.IsRecoverable == nil {
+		opt.IsRecoverable = isTimeout
+	}
+
 	for {
 		err := fn(timeout)
-		if err == nil || isPermanentFailure(err) || attempt == opt.MaxAttempts {
+		if err == nil || !opt.IsRecoverable(err) || attempt == opt.MaxAttempts {
 			return err
 		}
 		select {
