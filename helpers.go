@@ -65,8 +65,22 @@ func appendChannelParts[T any](buf []byte, parts ...T) []byte {
 	return buf
 }
 
+func channelPartsLen[T any](parts ...T) int {
+	var n int
+	for _, t := range parts {
+		switch v := any(t).(type) {
+		case string:
+			n += len(v) + 1
+		case []string:
+			n += channelPartsLen(v...)
+		}
+	}
+	return n
+}
+
 func formatChannel(parts ...any) string {
-	return string(appendChannelParts(nil, parts...))
+	buf := make([]byte, 0, 4*channelPartsLen(parts...)/3)
+	return string(appendChannelParts(buf, parts...))
 }
 
 func getRPCChannel(serviceName, rpc string, topic []string) string {

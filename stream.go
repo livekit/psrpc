@@ -70,7 +70,6 @@ func (s *serverStream[RequestType, ResponseType]) close(streamID string) {
 	s.h.mu.Lock()
 	delete(s.h.streams, streamID)
 	s.h.mu.Unlock()
-	s.h.handling.Dec()
 }
 
 type streamInterceptorRoot[SendType, RecvType proto.Message] struct {

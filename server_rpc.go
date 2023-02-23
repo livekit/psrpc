@@ -15,10 +15,6 @@ import (
 
 type AffinityFunc[RequestType proto.Message] func(RequestType) float32
 
-type rpcHandler interface {
-	close()
-}
-
 type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
 	mu           sync.RWMutex
 	rpc          string
@@ -31,6 +27,7 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 	handling     atomic.Int32
 	complete     chan struct{}
 	onCompleted  func()
+	closeOnce    sync.Once
 }
 
 func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
@@ -199,7 +196,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		return false, err
 	}
 
-	timeout := time.Duration(ir.Expiry - time.Now().UnixNano())
+	timeout := time.NewTimer(time.Duration(ir.Expiry - time.Now().UnixNano()))
+	defer timeout.Stop()
+
 	select {
 	case claim := <-claimResponseChan:
 		if claim.ServerId == s.id {
@@ -208,7 +207,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 			return false, nil
 		}
 
-	case <-time.After(timeout):
+	case <-timeout.C:
 		return false, nil
 	}
 }
@@ -249,12 +248,15 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 	return s.bus.Publish(ctx, getResponseChannel(s.serviceName, ir.ClientId), res)
 }
 
-func (h *rpcHandlerImpl[RequestType, ResponseType]) close() {
-	_ = h.requestSub.Close()
-	for h.handling.Load() > 0 {
-		time.Sleep(time.Millisecond * 100)
-	}
-	_ = h.claimSub.Close()
-	close(h.complete)
-	h.onCompleted()
+func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
+	h.closeOnce.Do(func() {
+		_ = h.requestSub.Close()
+		for !force && h.handling.Load() > 0 {
+			time.Sleep(time.Millisecond * 100)
+		}
+		_ = h.claimSub.Close()
+		h.onCompleted()
+		close(h.complete)
+	})
+	<-h.complete
 }

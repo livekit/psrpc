@@ -3,6 +3,7 @@ package psrpc
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ var (
 	ErrRequestCanceled = NewError(Canceled, errors.New("request canceled"))
 	ErrRequestTimedOut = NewError(DeadlineExceeded, errors.New("request timed out"))
 	ErrNoResponse      = NewError(Unavailable, errors.New("no response from servers"))
+	ErrStreamEOF       = NewError(Unavailable, io.EOF)
 	ErrStreamClosed    = NewError(Canceled, errors.New("stream closed"))
 	ErrSlowConsumer    = NewError(Unavailable, errors.New("stream message discarded by slow consumer"))
 )

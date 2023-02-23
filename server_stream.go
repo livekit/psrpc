@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc/internal"
@@ -23,10 +24,10 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	claims       map[string]chan *internal.ClaimResponse
 	affinityFunc StreamAffinityFunc
 	handler      func(ServerStream[SendType, RecvType]) error
-	handling     atomic.Int32
 	draining     atomic.Bool
 	complete     chan struct{}
 	onCompleted  func()
+	closeOnce    sync.Once
 }
 
 func newStreamRPCHandler[RecvType, SendType proto.Message](
@@ -134,8 +135,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	is *internal.Stream,
 	open *internal.StreamOpen,
 ) error {
-	h.handling.Inc()
-
 	info := RPCInfo{
 		Method: h.rpc,
 		Topic:  h.topic,
@@ -152,7 +151,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 
 	claimed, err := h.claimRequest(s, octx, is)
 	if !claimed {
-		h.handling.Dec()
 		return err
 	}
 
@@ -241,13 +239,29 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	}
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) close() {
-	h.draining.Store(true)
-	for h.handling.Load() > 0 {
-		time.Sleep(time.Millisecond * 100)
-	}
-	_ = h.streamSub.Close()
-	_ = h.claimSub.Close()
-	close(h.complete)
-	h.onCompleted()
+func (h *streamRPCHandlerImpl[RecvType, SendType]) close(force bool) {
+	h.closeOnce.Do(func() {
+		h.draining.Store(true)
+
+		h.mu.Lock()
+		streams := maps.Values(h.streams)
+		h.mu.Unlock()
+
+		var wg sync.WaitGroup
+		for _, s := range streams {
+			wg.Add(1)
+			s := s
+			go func() {
+				_ = s.Close(ErrStreamEOF)
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+
+		_ = h.streamSub.Close()
+		_ = h.claimSub.Close()
+		h.onCompleted()
+		close(h.complete)
+	})
+	<-h.complete
 }
