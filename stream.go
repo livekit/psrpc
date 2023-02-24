@@ -228,7 +228,7 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 
 	o := getStreamOpts(s.streamOpts, opts...)
 
-	b, err := proto.Marshal(msg)
+	b, a, err := serializePayload(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -260,6 +260,7 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 		Expiry:    deadline.UnixNano(),
 		Body: &internal.Stream_Message{
 			Message: &internal.StreamMessage{
+				Message:    a,
 				RawMessage: b,
 			},
 		},

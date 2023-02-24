@@ -234,11 +234,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Code = string(Unknown)
 		}
 	} else if response != nil {
-		b, err := proto.Marshal(response)
+		b, a, err := serializePayload(response)
 		if err != nil {
 			res.Error = err.Error()
 			res.Code = string(MalformedResponse)
 		} else {
+			res.Response = a
 			res.RawResponse = b
 		}
 	}

@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -39,10 +38,7 @@ func TestRawSerialization(t *testing.T) {
 		Multi:     true,
 	}
 
-	b, err := proto.Marshal(msg)
-	require.NoError(t, err)
-
-	a, err := anypb.New(msg)
+	b, a, err := serializePayload(msg)
 	require.NoError(t, err)
 
 	msg0, err := deserializePayload[*internal.Request](b, nil)
@@ -52,6 +48,10 @@ func TestRawSerialization(t *testing.T) {
 	msg1, err := deserializePayload[*internal.Request](nil, a)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, msg1), "expected deserialized anypb payload to match source")
+
+	msg2, err := deserializePayload[*internal.Request](b, a)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg2), "expected deserialized mixed payload to match source")
 }
 
 func TestChannelFormatters(t *testing.T) {

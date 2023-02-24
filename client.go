@@ -158,7 +158,7 @@ func RequestSingle[ResponseType proto.Message](
 	call := func(ctx context.Context, request proto.Message, opts ...RequestOption) (response proto.Message, err error) {
 		o := getRequestOpts(c.clientOpts, opts...)
 
-		b, err := proto.Marshal(request)
+		b, a, err := serializePayload(request)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
 			return
@@ -172,6 +172,7 @@ func RequestSingle[ResponseType proto.Message](
 			SentAt:     now.UnixNano(),
 			Expiry:     now.Add(o.timeout).UnixNano(),
 			Multi:      false,
+			Request:    a,
 			RawRequest: b,
 			Metadata:   OutgoingContextMetadata(ctx),
 		}

@@ -135,6 +135,18 @@ func deserialize(b []byte) (proto.Message, error) {
 	return a.UnmarshalNew()
 }
 
+func serializePayload(m proto.Message) ([]byte, *anypb.Any, error) {
+	b, err := proto.Marshal(m)
+	if err != nil {
+		return nil, nil, err
+	}
+	a := &anypb.Any{
+		TypeUrl: string(m.ProtoReflect().Descriptor().FullName()),
+		Value:   b,
+	}
+	return b, a, nil
+}
+
 func deserializePayload[T proto.Message](buf []byte, any *anypb.Any) (T, error) {
 	if any != nil {
 		buf = any.Value
