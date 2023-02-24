@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -159,7 +158,7 @@ func RequestSingle[ResponseType proto.Message](
 	call := func(ctx context.Context, request proto.Message, opts ...RequestOption) (response proto.Message, err error) {
 		o := getRequestOpts(c.clientOpts, opts...)
 
-		v, err := anypb.New(request)
+		b, err := proto.Marshal(request)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
 			return
@@ -168,13 +167,13 @@ func RequestSingle[ResponseType proto.Message](
 		requestID := newRequestID()
 		now := time.Now()
 		req := &internal.Request{
-			RequestId: requestID,
-			ClientId:  c.id,
-			SentAt:    now.UnixNano(),
-			Expiry:    now.Add(o.timeout).UnixNano(),
-			Multi:     false,
-			Request:   v,
-			Metadata:  OutgoingContextMetadata(ctx),
+			RequestId:  requestID,
+			ClientId:   c.id,
+			SentAt:     now.UnixNano(),
+			Expiry:     now.Add(o.timeout).UnixNano(),
+			Multi:      false,
+			RawRequest: b,
+			Metadata:   OutgoingContextMetadata(ctx),
 		}
 
 		claimChan := make(chan *internal.ClaimRequest, c.channelSize)
@@ -217,7 +216,7 @@ func RequestSingle[ResponseType proto.Message](
 			if res.Error != "" {
 				err = newErrorFromResponse(res.Code, res.Error)
 			} else {
-				response, err = res.Response.UnmarshalNew()
+				response, err = deserializePayload[ResponseType](res.RawResponse, res.Response)
 				if err != nil {
 					err = NewError(MalformedResponse, err)
 				}

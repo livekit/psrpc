@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -37,7 +36,7 @@ type multiRPC[ResponseType proto.Message] struct {
 func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, opts ...RequestOption) (err error) {
 	o := getRequestOpts(m.c.clientOpts, opts...)
 
-	v, err := anypb.New(msg)
+	b, err := proto.Marshal(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -45,13 +44,13 @@ func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, op
 
 	now := time.Now()
 	req := &internal.Request{
-		RequestId: m.requestID,
-		ClientId:  m.c.id,
-		SentAt:    now.UnixNano(),
-		Expiry:    now.Add(o.timeout).UnixNano(),
-		Multi:     true,
-		Request:   v,
-		Metadata:  OutgoingContextMetadata(ctx),
+		RequestId:  m.requestID,
+		ClientId:   m.c.id,
+		SentAt:     now.UnixNano(),
+		Expiry:     now.Add(o.timeout).UnixNano(),
+		Multi:      true,
+		RawRequest: b,
+		Metadata:   OutgoingContextMetadata(ctx),
 	}
 
 	irChan := make(chan *internal.Response, m.c.channelSize)
@@ -73,12 +72,12 @@ func (m *multiRPC[ResponseType]) handleResponses(ctx context.Context, o reqOpts,
 	for {
 		select {
 		case res := <-irChan:
-			var v proto.Message
+			var v ResponseType
 			var err error
 			if res.Error != "" {
 				err = newErrorFromResponse(res.Code, res.Error)
 			} else {
-				v, err = res.Response.UnmarshalNew()
+				v, err = deserializePayload[ResponseType](res.RawResponse, res.Response)
 				if err != nil {
 					err = NewError(MalformedResponse, err)
 				}

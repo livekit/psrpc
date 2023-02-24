@@ -134,3 +134,12 @@ func deserialize(b []byte) (proto.Message, error) {
 
 	return a.UnmarshalNew()
 }
+
+func deserializePayload[T proto.Message](buf []byte, any *anypb.Any) (T, error) {
+	if any != nil {
+		buf = any.Value
+	}
+	var p T
+	v := p.ProtoReflect().New().Interface().(T)
+	return v, proto.Unmarshal(buf, v)
+}

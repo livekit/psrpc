@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -121,7 +120,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			return ErrStreamClosed
 		}
 
-		v, err := b.Message.Message.UnmarshalNew()
+		v, err := deserializePayload[RecvType](b.Message.RawMessage, b.Message.Message)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
 			_ = s.interceptor.Close(err)
@@ -229,7 +228,7 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 
 	o := getStreamOpts(s.streamOpts, opts...)
 
-	v, err := anypb.New(msg)
+	b, err := proto.Marshal(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -261,7 +260,7 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 		Expiry:    deadline.UnixNano(),
 		Body: &internal.Stream_Message{
 			Message: &internal.StreamMessage{
-				Message: v,
+				RawMessage: b,
 			},
 		},
 	})
