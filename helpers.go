@@ -137,7 +137,7 @@ func deserialize(b []byte) (proto.Message, error) {
 
 func serializePayload(m proto.Message) ([]byte, *anypb.Any, error) {
 	a, err := anypb.New(m)
-	return a.Value, a, err
+	return a.GetValue(), a, err
 }
 
 func deserializePayload[T proto.Message](buf []byte, any *anypb.Any) (T, error) {
