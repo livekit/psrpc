@@ -52,6 +52,10 @@ func TestRawSerialization(t *testing.T) {
 	msg2, err := deserializePayload[*internal.Request](b, a)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, msg2), "expected deserialized mixed payload to match source")
+
+	msg3, err := a.UnmarshalNew()
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg3), "expected anypb decoded payload to match source")
 }
 
 func TestChannelFormatters(t *testing.T) {
