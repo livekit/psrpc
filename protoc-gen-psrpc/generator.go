@@ -692,7 +692,7 @@ func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Op
 }
 
 func (t *psrpc) formatRequireClaim(opts *options.Options) string {
-	return fmt.Sprintf("%t", !opts.Multi && !opts.GetTopicParams().GetGloballyUnique())
+	return fmt.Sprintf("%t", !opts.Multi && !opts.GetTopicParams().GetSingleServer())
 }
 
 type topic struct {
