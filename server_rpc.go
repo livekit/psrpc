@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -143,14 +142,13 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		Metadata: ir.Metadata,
 	}
 	ctx := NewContextWithIncomingHeader(context.Background(), head)
-	r, err := ir.Request.UnmarshalNew()
+	req, err := deserializePayload[RequestType](ir.RawRequest, ir.Request)
 	if err != nil {
 		var res ResponseType
 		err = NewError(MalformedRequest, err)
 		_ = h.sendResponse(s, ctx, ir, res, err)
 		return err
 	}
-	req := r.(RequestType)
 
 	if h.requireClaim {
 		claimed, err := h.claimRequest(s, ctx, ir, req)
@@ -244,12 +242,13 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Code = string(Unknown)
 		}
 	} else if response != nil {
-		v, err := anypb.New(response)
+		b, a, err := serializePayload(response)
 		if err != nil {
 			res.Error = err.Error()
 			res.Code = string(MalformedResponse)
 		} else {
-			res.Response = v
+			res.Response = a
+			res.RawResponse = b
 		}
 	}
 

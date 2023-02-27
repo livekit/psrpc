@@ -13,6 +13,7 @@ message Request {
   bool multi = 5;
   google.protobuf.Any request = 6;
   map<string, string> metadata = 7;
+  bytes raw_request = 8;
 }
 
 message Response {
@@ -22,6 +23,7 @@ message Response {
   google.protobuf.Any response = 4;
   string error = 5;
   string code = 6;
+  bytes raw_response = 7;
 }
 
 message ClaimRequest {
@@ -55,6 +57,7 @@ message StreamOpen {
 
 message StreamMessage {
   google.protobuf.Any message = 1;
+  bytes raw_message = 2;
 }
 
 message StreamAck {}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc/internal"
 )
@@ -27,6 +28,34 @@ func TestSerialization(t *testing.T) {
 	require.Equal(t, m.(*internal.Request).ClientId, msg.ClientId)
 	require.Equal(t, m.(*internal.Request).SentAt, msg.SentAt)
 	require.Equal(t, m.(*internal.Request).Multi, msg.Multi)
+}
+
+func TestRawSerialization(t *testing.T) {
+	msg := &internal.Request{
+		RequestId: "reid",
+		ClientId:  "clid",
+		SentAt:    time.Now().UnixNano(),
+		Multi:     true,
+	}
+
+	b, a, err := serializePayload(msg)
+	require.NoError(t, err)
+
+	msg0, err := deserializePayload[*internal.Request](b, nil)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg0), "expected deserialized raw payload to match source")
+
+	msg1, err := deserializePayload[*internal.Request](nil, a)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg1), "expected deserialized anypb payload to match source")
+
+	msg2, err := deserializePayload[*internal.Request](b, a)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg2), "expected deserialized mixed payload to match source")
+
+	msg3, err := a.UnmarshalNew()
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, msg3), "expected anypb decoded payload to match source")
 }
 
 func TestChannelFormatters(t *testing.T) {
