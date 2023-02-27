@@ -23,6 +23,7 @@ type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
 	streams      map[string]*streamImpl[SendType, RecvType]
 	claims       map[string]chan *internal.ClaimResponse
 	affinityFunc StreamAffinityFunc
+	requireClaim bool
 	handler      func(ServerStream[SendType, RecvType]) error
 	draining     atomic.Bool
 	complete     chan struct{}
@@ -37,6 +38,7 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 	svcImpl func(ServerStream[SendType, RecvType]) error,
 	interceptor ServerInterceptor,
 	affinityFunc StreamAffinityFunc,
+	requireClaim bool,
 ) (*streamRPCHandlerImpl[RecvType, SendType], error) {
 
 	ctx := context.Background()
@@ -47,12 +49,17 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 		return nil, err
 	}
 
-	claimSub, err := Subscribe[*internal.ClaimResponse](
-		ctx, s.bus, getClaimResponseChannel(s.serviceName, rpc, topic), s.channelSize,
-	)
-	if err != nil {
-		_ = streamSub.Close()
-		return nil, err
+	var claimSub Subscription[*internal.ClaimResponse]
+	if requireClaim {
+		claimSub, err = Subscribe[*internal.ClaimResponse](
+			ctx, s.bus, getClaimResponseChannel(s.serviceName, rpc, topic), s.channelSize,
+		)
+		if err != nil {
+			_ = streamSub.Close()
+			return nil, err
+		}
+	} else {
+		claimSub = nilSubscription[*internal.ClaimResponse]{}
 	}
 
 	h := &streamRPCHandlerImpl[RecvType, SendType]{
@@ -63,6 +70,7 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 		streams:      make(map[string]*streamImpl[SendType, RecvType]),
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
+		requireClaim: requireClaim,
 		handler:      svcImpl,
 		complete:     make(chan struct{}),
 	}
@@ -149,9 +157,11 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
 	defer cancel()
 
-	claimed, err := h.claimRequest(s, octx, is)
-	if !claimed {
-		return err
+	if h.requireClaim {
+		claimed, err := h.claimRequest(s, octx, is)
+		if !claimed {
+			return err
+		}
 	}
 
 	stream := &streamImpl[SendType, RecvType]{
@@ -179,7 +189,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		return err
 	}
 
-	err = h.handler(stream)
+	err := h.handler(stream)
 	if !stream.Hijacked() {
 		_ = stream.Close(err)
 	}

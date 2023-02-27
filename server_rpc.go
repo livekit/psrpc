@@ -23,6 +23,7 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 	claimSub     Subscription[*internal.ClaimResponse]
 	claims       map[string]chan *internal.ClaimResponse
 	affinityFunc AffinityFunc[RequestType]
+	requireClaim bool
 	handler      func(context.Context, RequestType) (ResponseType, error)
 	handling     atomic.Int32
 	complete     chan struct{}
@@ -37,6 +38,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	interceptor ServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],
+	requireClaim bool,
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
 	ctx := context.Background()
@@ -47,12 +49,17 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		return nil, err
 	}
 
-	claimSub, err := Subscribe[*internal.ClaimResponse](
-		ctx, s.bus, getClaimResponseChannel(s.serviceName, rpc, topic), s.channelSize,
-	)
-	if err != nil {
-		_ = requestSub.Close()
-		return nil, err
+	var claimSub Subscription[*internal.ClaimResponse]
+	if requireClaim {
+		claimSub, err = Subscribe[*internal.ClaimResponse](
+			ctx, s.bus, getClaimResponseChannel(s.serviceName, rpc, topic), s.channelSize,
+		)
+		if err != nil {
+			_ = requestSub.Close()
+			return nil, err
+		}
+	} else {
+		claimSub = nilSubscription[*internal.ClaimResponse]{}
 	}
 
 	h := &rpcHandlerImpl[RequestType, ResponseType]{
@@ -62,6 +69,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		claimSub:     claimSub,
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
+		requireClaim: requireClaim,
 		complete:     make(chan struct{}),
 	}
 	if interceptor == nil {
@@ -144,7 +152,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	}
 	req := r.(RequestType)
 
-	if !ir.Multi {
+	if h.requireClaim {
 		claimed, err := h.claimRequest(s, ctx, ir, req)
 		if err != nil {
 			return err

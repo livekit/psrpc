@@ -496,14 +496,18 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `)`)
 		} else if opts.Stream {
-			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, opts...)`)
+			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, `, t.formatRequireClaim(opts), `, opts...)`)
 		} else {
 			if opts.Multi {
 				t.W(`.RequestMulti[*`)
 			} else {
 				t.W(`.RequestSingle[*`)
 			}
-			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, req, opts...)`)
+			t.W(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice())
+			if !opts.Multi {
+				t.W(`, `, t.formatRequireClaim(opts))
+			}
+			t.P(`, req, opts...)`)
 		}
 		t.P(`}`)
 		t.P()
@@ -585,10 +589,11 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		}
 		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
-			t.P(`, svc.`, methName, `Affinity)`)
+			t.W(`, svc.`, methName, `Affinity`)
 		} else {
-			t.P(`, nil)`)
+			t.W(`, nil`)
 		}
+		t.P(`, `, t.formatRequireClaim(opts), `)`)
 		t.P(`  if err != nil {`)
 		t.P(`    s.Close(false)`)
 		t.P(`    return nil, err`)
@@ -630,10 +635,11 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
 			t.W(`  return `, t.pkgs["psrpc"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
 			if t.getOptions(method).AffinityFunc {
-				t.P(`, s.svc.`, methName, `Affinity)`)
+				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
-				t.P(`, nil)`)
+				t.W(`, nil`)
 			}
+			t.P(`, `, t.formatRequireClaim(opts), `)`)
 			t.P(`}`)
 			t.P()
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Deregister`, methName, `Topic(`, topics.FormatParams(), `) {`)
@@ -683,6 +689,10 @@ func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Op
 	}
 
 	return &options.Options{}
+}
+
+func (t *psrpc) formatRequireClaim(opts *options.Options) string {
+	return fmt.Sprintf("%t", !opts.Multi && !opts.GetTopicParams().GetSingleServer())
 }
 
 type topic struct {

@@ -38,4 +38,7 @@ message TopicParamOptions {
 
   // The topic parameters have associated string-like type parameters
   bool typed = 3;
+
+  // At most one server will be registered for each topic
+  bool single_server = 4;
 }
