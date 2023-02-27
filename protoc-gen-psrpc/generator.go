@@ -496,14 +496,18 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `)`)
 		} else if opts.Stream {
-			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, opts...)`)
+			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, `, t.formatRequireClaim(opts), `, opts...)`)
 		} else {
 			if opts.Multi {
 				t.W(`.RequestMulti[*`)
 			} else {
 				t.W(`.RequestSingle[*`)
 			}
-			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, req, opts...)`)
+			t.W(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice())
+			if !opts.Multi {
+				t.W(`, `, t.formatRequireClaim(opts))
+			}
+			t.P(`, req, opts...)`)
 		}
 		t.P(`}`)
 		t.P()
@@ -687,6 +691,10 @@ func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Op
 	}
 
 	return &options.Options{}
+}
+
+func (t *psrpc) formatRequireClaim(opts *options.Options) string {
+	return fmt.Sprintf("%t", !opts.Multi && !opts.GetTopicParams().GetGloballyUnique())
 }
 
 type topic struct {

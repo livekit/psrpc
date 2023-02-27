@@ -135,6 +135,7 @@ func RequestSingle[ResponseType proto.Message](
 	c *RPCClient,
 	rpc string,
 	topic []string,
+	requireClaim bool,
 	request proto.Message,
 	opts ...RequestOption,
 ) (response ResponseType, err error) {
@@ -200,16 +201,18 @@ func RequestSingle[ResponseType proto.Message](
 		ctx, cancel := context.WithTimeout(ctx, o.timeout)
 		defer cancel()
 
-		serverID, err := selectServer(ctx, claimChan, resChan, o.selectionOpts)
-		if err != nil {
-			return
-		}
-		if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
-			RequestId: requestID,
-			ServerId:  serverID,
-		}); err != nil {
-			err = NewError(Internal, err)
-			return
+		if requireClaim {
+			serverID, err := selectServer(ctx, claimChan, resChan, o.selectionOpts)
+			if err != nil {
+				return nil, err
+			}
+			if err = c.bus.Publish(ctx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+				RequestId: requestID,
+				ServerId:  serverID,
+			}); err != nil {
+				err = NewError(Internal, err)
+				return nil, err
+			}
 		}
 
 		select {
@@ -376,6 +379,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	c *RPCClient,
 	rpc string,
 	topic []string,
+	requireClaim bool,
 	opts ...RequestOption,
 ) (ClientStream[SendType, RecvType], error) {
 
@@ -422,15 +426,17 @@ func OpenStream[SendType, RecvType proto.Message](
 		return nil, NewError(Internal, err)
 	}
 
-	serverID, err := selectServer(octx, claimChan, nil, o.selectionOpts)
-	if err != nil {
-		return nil, err
-	}
-	if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
-		RequestId: requestID,
-		ServerId:  serverID,
-	}); err != nil {
-		return nil, NewError(Internal, err)
+	if requireClaim {
+		serverID, err := selectServer(octx, claimChan, nil, o.selectionOpts)
+		if err != nil {
+			return nil, err
+		}
+		if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+			RequestId: requestID,
+			ServerId:  serverID,
+		}); err != nil {
+			return nil, NewError(Internal, err)
+		}
 	}
 
 	ackChan := make(chan struct{})
@@ -457,7 +463,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		return stream, nil
 
 	case <-octx.Done():
-		err = ctx.Err()
+		err := ctx.Err()
 		if errors.Is(err, context.Canceled) {
 			err = ErrRequestCanceled
 		} else if errors.Is(err, context.DeadlineExceeded) {

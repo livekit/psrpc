@@ -88,7 +88,7 @@ func testRPC(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 	requestID := newRequestID()
 	res, err := RequestSingle[*internal.Response](
-		ctx, client, rpc, nil, &internal.Request{RequestId: requestID},
+		ctx, client, rpc, nil, true, &internal.Request{RequestId: requestID},
 	)
 
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func testStream(t *testing.T, bus MessageBus) {
 
 	ctx := context.Background()
 	stream, err := OpenStream[*internal.Response, *internal.Response](
-		ctx, client, rpc, nil,
+		ctx, client, rpc, nil, true,
 	)
 	require.NoError(t, err)
 
