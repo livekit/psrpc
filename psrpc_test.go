@@ -72,6 +72,7 @@ func testRPC(t *testing.T, bus MessageBus) {
 	counter := 0
 	errCount := 0
 	rpc := "add_one"
+	multi_rpc := "add_one_multi"
 	addOne := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		counter++
 		return &internal.Response{RequestId: req.RequestId}, nil
@@ -79,9 +80,9 @@ func testRPC(t *testing.T, bus MessageBus) {
 	returnError := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		return nil, retErr
 	}
-	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil, true)
 	require.NoError(t, err)
-	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil, true)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -94,12 +95,16 @@ func testRPC(t *testing.T, bus MessageBus) {
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
-	err = RegisterHandler[*internal.Request, *internal.Response](serverC, rpc, nil, returnError, nil)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, multi_rpc, nil, addOne, nil, false)
+	require.NoError(t, err)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, multi_rpc, nil, addOne, nil, false)
+	require.NoError(t, err)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverC, multi_rpc, nil, returnError, nil, false)
 	require.NoError(t, err)
 
 	requestID = newRequestID()
 	resChan, err := RequestMulti[*internal.Response](
-		ctx, client, rpc, nil, &internal.Request{RequestId: requestID},
+		ctx, client, multi_rpc, nil, &internal.Request{RequestId: requestID},
 	)
 	require.NoError(t, err)
 
@@ -150,7 +155,7 @@ func testStream(t *testing.T, bus MessageBus) {
 		}
 		return nil
 	}
-	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
+	err = RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil, true)
 	require.NoError(t, err)
 
 	ctx := context.Background()

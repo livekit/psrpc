@@ -38,4 +38,7 @@ message TopicParamOptions {
 
   // The topic parameters have associated string-like type parameters
   bool typed = 3;
+
+  // At most one handler will be registered for each unique topic
+  bool globally_unique = 4;
 }

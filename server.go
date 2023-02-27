@@ -46,6 +46,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	topic []string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	affinityFunc AffinityFunc[RequestType],
+	requireClaim bool,
 ) error {
 	select {
 	case <-s.shutdown:
@@ -62,7 +63,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	}
 
 	// create handler
-	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc)
+	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc, requireClaim)
 	if err != nil {
 		return err
 	}
@@ -89,6 +90,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	topic []string,
 	svcImpl func(ServerStream[ResponseType, RequestType]) error,
 	affinityFunc StreamAffinityFunc,
+	requireClaim bool,
 ) error {
 	select {
 	case <-s.shutdown:
@@ -105,7 +107,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	}
 
 	// create handler
-	h, err := newStreamRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc)
+	h, err := newStreamRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc, requireClaim)
 	if err != nil {
 		return err
 	}

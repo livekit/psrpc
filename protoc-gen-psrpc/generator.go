@@ -585,10 +585,12 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		}
 		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
-			t.P(`, svc.`, methName, `Affinity)`)
+			t.W(`, svc.`, methName, `Affinity`)
 		} else {
-			t.P(`, nil)`)
+			t.W(`, nil`)
 		}
+		requireClaim := !opts.Multi && !opts.GetTopicParams().GetGloballyUnique()
+		t.P(`, `, fmt.Sprintf("%t", requireClaim), `)`)
 		t.P(`  if err != nil {`)
 		t.P(`    s.Close(false)`)
 		t.P(`    return nil, err`)
@@ -630,10 +632,12 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
 			t.W(`  return `, t.pkgs["psrpc"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
 			if t.getOptions(method).AffinityFunc {
-				t.P(`, s.svc.`, methName, `Affinity)`)
+				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
-				t.P(`, nil)`)
+				t.W(`, nil`)
 			}
+			requireClaim := !opts.Multi && !opts.GetTopicParams().GetGloballyUnique()
+			t.P(`, `, fmt.Sprintf("%t", requireClaim), `)`)
 			t.P(`}`)
 			t.P()
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Deregister`, methName, `Topic(`, topics.FormatParams(), `) {`)
