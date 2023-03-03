@@ -463,7 +463,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		return stream, nil
 
 	case <-octx.Done():
-		err := ctx.Err()
+		err := octx.Err()
 		if errors.Is(err, context.Canceled) {
 			err = ErrRequestCanceled
 		} else if errors.Is(err, context.DeadlineExceeded) {
