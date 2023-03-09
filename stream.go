@@ -143,7 +143,6 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			s.err = newErrorFromResponse(b.Close.Code, b.Close.Error)
 			s.mu.Unlock()
 
-			s.waitForPending()
 			s.adapter.close(s.streamID)
 			s.cancelCtx()
 			close(s.recvChan)
