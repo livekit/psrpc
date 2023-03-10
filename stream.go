@@ -120,6 +120,9 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 			return ErrStreamClosed
 		}
 
+		s.pending.Inc()
+		defer s.pending.Dec()
+
 		v, err := deserializePayload[RecvType](b.Message.RawMessage, b.Message.Message)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
