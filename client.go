@@ -406,7 +406,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	}
 
 	claimChan := make(chan *internal.ClaimRequest, c.channelSize)
-	recvChan := make(chan *internal.Stream, 1)
+	recvChan := make(chan *internal.Stream, c.channelSize)
 
 	c.mu.Lock()
 	c.claimRequests[requestID] = claimChan
@@ -415,7 +415,7 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	defer func() {
 		c.mu.Lock()
-		delete(c.claimRequests, streamID)
+		delete(c.claimRequests, requestID)
 		c.mu.Unlock()
 	}()
 
