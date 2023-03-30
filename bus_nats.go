@@ -66,5 +66,7 @@ func (n *natsSubscription) read() ([]byte, bool) {
 }
 
 func (n *natsSubscription) Close() error {
-	return n.sub.Unsubscribe()
+	err := n.sub.Unsubscribe()
+	close(n.msgChan)
+	return err
 }
