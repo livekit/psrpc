@@ -17,6 +17,7 @@ func TestMessageBus(t *testing.T) {
 		bus := NewLocalMessageBus()
 		testSubscribe(t, bus)
 		testSubscribeQueue(t, bus)
+		testSubscribeClose(t, bus)
 	})
 
 	t.Run("Redis", func(t *testing.T) {
@@ -24,6 +25,7 @@ func TestMessageBus(t *testing.T) {
 		bus := NewRedisMessageBus(rc)
 		testSubscribe(t, bus)
 		testSubscribeQueue(t, bus)
+		testSubscribeClose(t, bus)
 	})
 
 	t.Run("Nats", func(t *testing.T) {
@@ -31,6 +33,7 @@ func TestMessageBus(t *testing.T) {
 		bus := NewNatsMessageBus(nc)
 		testSubscribe(t, bus)
 		testSubscribeQueue(t, bus)
+		testSubscribeClose(t, bus)
 	})
 }
 
@@ -90,4 +93,22 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 	}
 
 	require.Equal(t, 1, received)
+}
+
+func testSubscribeClose(t *testing.T, bus MessageBus) {
+	ctx := context.Background()
+
+	channel := newID()
+	sub, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	require.NoError(t, err)
+
+	sub.Close()
+	time.Sleep(time.Millisecond * 100)
+
+	select {
+	case _, ok := <-sub.Channel():
+		require.False(t, ok)
+	default:
+		require.FailNow(t, "closed subscription channel should not block")
+	}
 }
