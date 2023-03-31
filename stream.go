@@ -275,6 +275,8 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 	case <-ackChan:
 	case <-ctx.Done():
 		err = ErrRequestTimedOut
+	case <-s.ctx.Done():
+		err = s.Err()
 	}
 
 	return
