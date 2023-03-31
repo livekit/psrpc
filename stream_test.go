@@ -6,9 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/atomic"
-
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/livekit/psrpc/internal"
 )
