@@ -48,6 +48,14 @@ func WithServerStreamInterceptors(interceptors ...StreamInterceptorFactory) Serv
 	}
 }
 
+func WithServerOptions(opts ...ServerOption) ServerOption {
+	return func(o *serverOpts) {
+		for _, opt := range opts {
+			opt(o)
+		}
+	}
+}
+
 func getServerOpts(opts ...ServerOption) serverOpts {
 	o := &serverOpts{
 		timeout:     DefaultServerTimeout,

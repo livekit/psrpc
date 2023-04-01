@@ -140,8 +140,9 @@ func RequestSingle[ResponseType proto.Message](
 ) (response ResponseType, err error) {
 
 	info := RPCInfo{
-		Method: rpc,
-		Topic:  topic,
+		Service: c.serviceName,
+		Method:  rpc,
+		Topic:   topic,
 	}
 
 	// response hooks
@@ -320,8 +321,10 @@ func RequestMulti[ResponseType proto.Message](
 ) (rChan <-chan *Response[ResponseType], err error) {
 
 	info := RPCInfo{
-		Method: rpc,
-		Topic:  topic,
+		Service: c.serviceName,
+		Method:  rpc,
+		Topic:   topic,
+		Multi:   true,
 	}
 
 	responseChannel := make(chan *Response[ResponseType], c.channelSize)
@@ -385,8 +388,9 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	o := getRequestOpts(c.clientOpts, opts...)
 	info := RPCInfo{
-		Method: rpc,
-		Topic:  topic,
+		Service: c.serviceName,
+		Method:  rpc,
+		Topic:   topic,
 	}
 
 	streamID := newStreamID()
