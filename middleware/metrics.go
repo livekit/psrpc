@@ -11,22 +11,22 @@ import (
 
 type MetricRole int
 
-func (r MetricRole) String() string {
-	switch r {
-	case ClientRole:
-		return "CLIENT"
-	case ServerRole:
-		return "SERVER"
-	default:
-		return "INVALID"
-	}
-}
-
 const (
 	_ MetricRole = iota
 	ClientRole
 	ServerRole
 )
+
+func (r MetricRole) String() string {
+	switch r {
+	case ClientRole:
+		return "client"
+	case ServerRole:
+		return "server"
+	default:
+		return "invalid"
+	}
+}
 
 type MetricsObserver interface {
 	OnUnaryRequest(role MetricRole, info psrpc.RPCInfo, duration time.Duration, err error)
@@ -35,23 +35,6 @@ type MetricsObserver interface {
 	OnStreamRecv(role MetricRole, info psrpc.RPCInfo, err error)
 	OnStreamOpen(role MetricRole, info psrpc.RPCInfo)
 	OnStreamClose(role MetricRole, info psrpc.RPCInfo)
-}
-
-var _ MetricsObserver = NOOPMetricsObserver{}
-
-type NOOPMetricsObserver struct{}
-
-func (NOOPMetricsObserver) OnUnaryRequest(role MetricRole, info psrpc.RPCInfo, duration time.Duration, err error) {
-}
-func (NOOPMetricsObserver) OnMultiRequest(role MetricRole, info psrpc.RPCInfo, duration time.Duration, responseCount int, errorCount int) {
-}
-func (NOOPMetricsObserver) OnStreamSend(role MetricRole, info psrpc.RPCInfo, duration time.Duration, err error) {
-}
-func (NOOPMetricsObserver) OnStreamRecv(role MetricRole, info psrpc.RPCInfo, err error) {
-}
-func (NOOPMetricsObserver) OnStreamOpen(role MetricRole, info psrpc.RPCInfo) {
-}
-func (NOOPMetricsObserver) OnStreamClose(role MetricRole, info psrpc.RPCInfo) {
 }
 
 func WithClientMetrics(observer MetricsObserver) psrpc.ClientOption {
