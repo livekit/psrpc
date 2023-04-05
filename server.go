@@ -47,6 +47,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	affinityFunc AffinityFunc[RequestType],
 	requireClaim bool,
+	multi bool,
 ) error {
 	select {
 	case <-s.shutdown:
@@ -63,7 +64,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	}
 
 	// create handler
-	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc, requireClaim)
+	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.chainedInterceptor, affinityFunc, requireClaim, multi)
 	if err != nil {
 		return err
 	}

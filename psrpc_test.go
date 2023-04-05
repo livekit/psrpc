@@ -80,9 +80,9 @@ func testRPC(t *testing.T, bus MessageBus) {
 	returnError := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		return nil, retErr
 	}
-	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil, true)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil, true, false)
 	require.NoError(t, err)
-	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil, true)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil, true, false)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -95,11 +95,11 @@ func testRPC(t *testing.T, bus MessageBus) {
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
-	err = RegisterHandler[*internal.Request, *internal.Response](serverA, multi_rpc, nil, addOne, nil, false)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverA, multi_rpc, nil, addOne, nil, false, true)
 	require.NoError(t, err)
-	err = RegisterHandler[*internal.Request, *internal.Response](serverB, multi_rpc, nil, addOne, nil, false)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverB, multi_rpc, nil, addOne, nil, false, true)
 	require.NoError(t, err)
-	err = RegisterHandler[*internal.Request, *internal.Response](serverC, multi_rpc, nil, returnError, nil, false)
+	err = RegisterHandler[*internal.Request, *internal.Response](serverC, multi_rpc, nil, returnError, nil, false, true)
 	require.NoError(t, err)
 
 	requestID = newRequestID()

@@ -38,6 +38,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	interceptor ServerInterceptor,
 	affinityFunc AffinityFunc[RequestType],
 	requireClaim bool,
+	multi bool,
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
 	ctx := context.Background()
@@ -77,8 +78,10 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
 			var response ResponseType
 			res, err := interceptor(ctx, req, RPCInfo{
-				Method: h.rpc,
-				Topic:  h.topic,
+				Service: s.serviceName,
+				Method:  h.rpc,
+				Topic:   h.topic,
+				Multi:   multi,
 			}, func(context.Context, proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})

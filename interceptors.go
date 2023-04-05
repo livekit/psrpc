@@ -40,8 +40,10 @@ type StreamInterceptor interface {
 type StreamInterceptorFactory func(info RPCInfo, next StreamInterceptor) StreamInterceptor
 
 type RPCInfo struct {
-	Method string
-	Topic  []string
+	Service string
+	Method  string
+	Topic   []string
+	Multi   bool
 }
 
 // Recover from server panics. Should always be the last interceptor

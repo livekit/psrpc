@@ -63,6 +63,14 @@ func WithClientStreamInterceptors(interceptors ...StreamInterceptorFactory) Clie
 	}
 }
 
+func WithClientOptions(opts ...ClientOption) ClientOption {
+	return func(o *clientOpts) {
+		for _, opt := range opts {
+			opt(o)
+		}
+	}
+}
+
 func withStreams() ClientOption {
 	return func(o *clientOpts) {
 		o.enableStreams = true

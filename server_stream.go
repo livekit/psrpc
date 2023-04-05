@@ -144,8 +144,9 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	open *internal.StreamOpen,
 ) error {
 	info := RPCInfo{
-		Method: h.rpc,
-		Topic:  h.topic,
+		Service: s.serviceName,
+		Method:  h.rpc,
+		Topic:   h.topic,
 	}
 
 	head := &Header{

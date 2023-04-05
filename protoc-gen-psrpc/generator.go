@@ -593,7 +593,11 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		} else {
 			t.W(`, nil`)
 		}
-		t.P(`, `, t.formatRequireClaim(opts), `)`)
+		t.W(`, `, t.formatRequireClaim(opts))
+		if !opts.Stream {
+			t.W(`, `, fmt.Sprintf("%t", opts.Multi))
+		}
+		t.P(`)`)
 		t.P(`  if err != nil {`)
 		t.P(`    s.Close(false)`)
 		t.P(`    return nil, err`)
@@ -639,7 +643,11 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			} else {
 				t.W(`, nil`)
 			}
-			t.P(`, `, t.formatRequireClaim(opts), `)`)
+			t.W(`, `, t.formatRequireClaim(opts))
+			if !opts.Stream {
+				t.W(`, `, fmt.Sprintf("%t", opts.Multi))
+			}
+			t.P(`)`)
 			t.P(`}`)
 			t.P()
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Deregister`, methName, `Topic(`, topics.FormatParams(), `) {`)
