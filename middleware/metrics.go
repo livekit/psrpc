@@ -114,7 +114,7 @@ func (s *streamMetricsInterceptor) Send(msg proto.Message, opts ...psrpc.StreamO
 
 func (s *streamMetricsInterceptor) Close(cause error) error {
 	s.observer.OnStreamClose(s.role, s.info)
-	return cause
+	return s.StreamInterceptor.Close(cause)
 }
 
 func newMultiRPCMetricsInterceptorFactory(observer MetricsObserver) psrpc.MultiRPCInterceptorFactory {
