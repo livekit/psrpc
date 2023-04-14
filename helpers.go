@@ -1,19 +1,48 @@
 package psrpc
 
 import (
+	"math/rand"
+	"time"
 	"unicode"
 
-	"github.com/lithammer/shortuuid/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+var idRNG = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func readIDChars(b []byte) {
+	var n int
+	for {
+		r := idRNG.Int63()
+		for i := 0; i < 10; i++ {
+			if int(r&0x3f) < len(alphabet) {
+				b[n] = alphabet[r&0x3f]
+				n++
+				if n == len(b) {
+					return
+				}
+			}
+			r >>= 6
+		}
+	}
+}
+
+func formatID(prefix string) string {
+	b := make([]byte, 16)
+	copy(b, prefix)
+	readIDChars(b[4:])
+	return string(b)
+}
+
 func newRequestID() string {
-	return "REQ_" + shortuuid.New()[:12]
+	return formatID("REQ_")
 }
 
 func newStreamID() string {
-	return "STR_" + shortuuid.New()[:12]
+	return formatID("STR_")
 }
 
 const lowerHex = "0123456789abcdef"
