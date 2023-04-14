@@ -2,6 +2,7 @@ package psrpc
 
 import (
 	"math/rand"
+	"time"
 	"unicode"
 
 	"google.golang.org/protobuf/proto"
@@ -10,10 +11,12 @@ import (
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+var idRNG = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 func readIDChars(b []byte) {
 	var n int
 	for {
-		r := rand.Int63()
+		r := idRNG.Int63()
 		for i := 0; i < 10; i++ {
 			if int(r&0x3f) < len(alphabet) {
 				b[n] = alphabet[r&0x3f]
