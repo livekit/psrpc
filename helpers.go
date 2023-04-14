@@ -15,8 +15,8 @@ func writeIDChars(b []byte) {
 	for {
 		r := rand.Int63()
 		for i := 0; i < 10; i++ {
-			if int(r&0x1f) < len(alphabet) {
-				b[n] = alphabet[r&0x1f]
+			if int(r&0x3f) < len(alphabet) {
+				b[n] = alphabet[r&0x3f]
 				n++
 				if n == len(b) {
 					return
