@@ -423,28 +423,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		c.mu.Unlock()
 	}()
 
-	octx, cancel := context.WithTimeout(ctx, o.timeout)
-	defer cancel()
-
-	if err := c.bus.Publish(octx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
-		return nil, NewError(Internal, err)
-	}
-
-	if requireClaim {
-		serverID, err := selectServer(octx, claimChan, nil, o.selectionOpts)
-		if err != nil {
-			return nil, err
-		}
-		if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
-			RequestId: requestID,
-			ServerId:  serverID,
-		}); err != nil {
-			return nil, NewError(Internal, err)
-		}
-	}
-
 	ackChan := make(chan struct{})
-
 	stream := &streamImpl[SendType, RecvType]{
 		streamOpts: streamOpts{
 			timeout: c.timeout,
@@ -461,6 +440,29 @@ func OpenStream[SendType, RecvType proto.Message](
 	stream.interceptor = chainClientInterceptors[StreamInterceptor](c.streamInterceptors, info, &streamInterceptorRoot[SendType, RecvType]{stream})
 
 	go runClientStream(c, stream, recvChan)
+
+	octx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+
+	if err := c.bus.Publish(octx, getStreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+		_ = stream.Close(err)
+		return nil, NewError(Internal, err)
+	}
+
+	if requireClaim {
+		serverID, err := selectServer(octx, claimChan, nil, o.selectionOpts)
+		if err != nil {
+			_ = stream.Close(err)
+			return nil, err
+		}
+		if err = c.bus.Publish(octx, getClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+			RequestId: requestID,
+			ServerId:  serverID,
+		}); err != nil {
+			_ = stream.Close(err)
+			return nil, NewError(Internal, err)
+		}
+	}
 
 	select {
 	case <-ackChan:
