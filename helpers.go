@@ -10,7 +10,7 @@ import (
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-func writeIDChars(b []byte) {
+func readIDChars(b []byte) {
 	var n int
 	for {
 		r := rand.Int63()
@@ -30,7 +30,7 @@ func writeIDChars(b []byte) {
 func formatID(prefix string) string {
 	b := make([]byte, 16)
 	copy(b, prefix)
-	writeIDChars(b[4:])
+	readIDChars(b[4:])
 	return string(b)
 }
 
