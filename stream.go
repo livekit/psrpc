@@ -126,7 +126,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		v, err := deserializePayload[RecvType](b.Message.RawMessage, b.Message.Message)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
-			_ = s.interceptor.Close(err)
+			go s.interceptor.Close(err)
 			return err
 		}
 
