@@ -2,6 +2,7 @@ package psrpc
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 	"unicode"
 
@@ -9,9 +10,26 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+type lockedRandSource struct {
+	mu  sync.Mutex
+	src rand.Source
+}
 
-var idRNG = rand.New(rand.NewSource(time.Now().UnixNano()))
+func (s *lockedRandSource) Int63() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.src.Int63()
+}
+
+func (s *lockedRandSource) Seed(seed int64) {
+	s.mu.Lock()
+	s.src.Seed(seed)
+	s.mu.Unlock()
+}
+
+var idRNG = rand.New(&lockedRandSource{src: rand.NewSource(time.Now().UnixNano())})
+
+const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 func readIDChars(b []byte) {
 	var n int
