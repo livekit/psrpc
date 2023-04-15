@@ -34,7 +34,6 @@ const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 func readIDChars(b []byte) {
 	var n int
 	for {
-		rand.Int63()
 		r := idRNG.Int63()
 		for i := 0; i < 10; i++ {
 			if int(r&0x3f) < len(alphabet) {
