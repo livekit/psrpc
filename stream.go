@@ -123,7 +123,7 @@ func (s *streamImpl[SendType, RecvType]) handleStream(is *internal.Stream) error
 		s.pending.Inc()
 		defer s.pending.Dec()
 
-		v, err := deserializePayload[RecvType](b.Message.RawMessage, b.Message.Message)
+		v, err := deserializePayload[RecvType](b.Message.RawMessage)
 		if err != nil {
 			err = NewError(MalformedRequest, err)
 			go s.interceptor.Close(err)
@@ -230,7 +230,7 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 
 	o := getStreamOpts(s.streamOpts, opts...)
 
-	b, a, err := serializePayload(msg)
+	b, err := serializePayload(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -262,7 +262,6 @@ func (s *streamImpl[SendType, RecvType]) send(msg proto.Message, opts ...StreamO
 		Expiry:    deadline.UnixNano(),
 		Body: &internal.Stream_Message{
 			Message: &internal.StreamMessage{
-				Message:    a,
 				RawMessage: b,
 			},
 		},

@@ -145,7 +145,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		Metadata: ir.Metadata,
 	}
 	ctx := NewContextWithIncomingHeader(context.Background(), head)
-	req, err := deserializePayload[RequestType](ir.RawRequest, ir.Request)
+	req, err := deserializePayload[RequestType](ir.RawRequest)
 	if err != nil {
 		var res ResponseType
 		err = NewError(MalformedRequest, err)
@@ -245,12 +245,11 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Code = string(Unknown)
 		}
 	} else if response != nil {
-		b, a, err := serializePayload(response)
+		b, err := serializePayload(response)
 		if err != nil {
 			res.Error = err.Error()
 			res.Code = string(MalformedResponse)
 		} else {
-			res.Response = a
 			res.RawResponse = b
 		}
 	}
