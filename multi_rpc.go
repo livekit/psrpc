@@ -36,7 +36,7 @@ type multiRPC[ResponseType proto.Message] struct {
 func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, opts ...RequestOption) (err error) {
 	o := getRequestOpts(m.c.clientOpts, opts...)
 
-	b, a, err := serializePayload(msg)
+	b, err := serializePayload(msg)
 	if err != nil {
 		err = NewError(MalformedRequest, err)
 		return
@@ -49,7 +49,6 @@ func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, op
 		SentAt:     now.UnixNano(),
 		Expiry:     now.Add(o.timeout).UnixNano(),
 		Multi:      true,
-		Request:    a,
 		RawRequest: b,
 		Metadata:   OutgoingContextMetadata(ctx),
 	}
@@ -78,7 +77,7 @@ func (m *multiRPC[ResponseType]) handleResponses(ctx context.Context, o reqOpts,
 			if res.Error != "" {
 				err = newErrorFromResponse(res.Code, res.Error)
 			} else {
-				v, err = deserializePayload[ResponseType](res.RawResponse, res.Response)
+				v, err = deserializePayload[ResponseType](res.RawResponse)
 				if err != nil {
 					err = NewError(MalformedResponse, err)
 				}
