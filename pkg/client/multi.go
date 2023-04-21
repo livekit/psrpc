@@ -10,44 +10,71 @@ import (
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/channels"
+	"github.com/livekit/psrpc/internal/interceptors"
+	"github.com/livekit/psrpc/internal/rand"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
-type multiRPC[ResponseType proto.Message] struct {
-	c         *RPCClient
-	resChan   chan<- *psrpc.Response[ResponseType]
-	handler   psrpc.ClientMultiRPCHandler
-	requestID string
-	info      psrpc.RPCInfo
-}
+func RequestMulti[ResponseType proto.Message](
+	ctx context.Context,
+	c *RPCClient,
+	rpc string,
+	topic []string,
+	request proto.Message,
+	opts ...psrpc.RequestOption,
+) (rChan <-chan *psrpc.Response[ResponseType], err error) {
 
-type multiRPCInterceptorRoot[ResponseType proto.Message] struct {
-	*multiRPC[ResponseType]
-}
+	info := psrpc.RPCInfo{
+		Service: c.serviceName,
+		Method:  rpc,
+		Topic:   topic,
+		Multi:   true,
+	}
 
-func (m *multiRPCInterceptorRoot[ResponseType]) Send(ctx context.Context, msg proto.Message, opts ...psrpc.RequestOption) error {
-	return m.send(ctx, msg, opts...)
-}
+	// request hooks
+	for _, hook := range c.RequestHooks {
+		hook(ctx, request, info)
+	}
 
-func (m *multiRPCInterceptorRoot[ResponseType]) Recv(msg proto.Message, err error) {
-	m.recv(msg, err)
-}
+	resChan := make(chan *psrpc.Response[ResponseType], c.ChannelSize)
+	m := &multiRPC[ResponseType]{
+		c:         c,
+		requestID: rand.NewRequestID(),
+		info:      info,
+		resChan:   resChan,
+	}
+	m.handler = interceptors.ChainClientInterceptors[psrpc.ClientMultiRPCHandler](
+		c.MultiRPCInterceptors, info, m,
+	)
 
-func (m *multiRPCInterceptorRoot[ResponseType]) Close() {
-	m.close()
-}
-
-func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, opts ...psrpc.RequestOption) (err error) {
-	o := getRequestOpts(m.c.ClientOpts, opts...)
-
-	b, err := bus.SerializePayload(msg)
-	if err != nil {
-		err = psrpc.NewError(psrpc.MalformedRequest, err)
+	if err = m.handler.Send(ctx, request, opts...); err != nil {
+		for _, hook := range c.ResponseHooks {
+			hook(ctx, request, info, nil, err)
+		}
 		return
 	}
 
+	return resChan, nil
+}
+
+type multiRPC[ResponseType proto.Message] struct {
+	c         *RPCClient
+	requestID string
+	info      psrpc.RPCInfo
+	handler   psrpc.ClientMultiRPCHandler
+	resChan   chan<- *psrpc.Response[ResponseType]
+}
+
+func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) error {
+	o := getRequestOpts(m.c.ClientOpts, opts...)
+
+	b, err := bus.SerializePayload(req)
+	if err != nil {
+		return psrpc.NewError(psrpc.MalformedRequest, err)
+	}
+
 	now := time.Now()
-	req := &internal.Request{
+	ir := &internal.Request{
 		RequestId:  m.requestID,
 		ClientId:   m.c.id,
 		SentAt:     now.UnixNano(),
@@ -57,25 +84,31 @@ func (m *multiRPC[ResponseType]) send(ctx context.Context, msg proto.Message, op
 		Metadata:   metadata.OutgoingContextMetadata(ctx),
 	}
 
-	irChan := make(chan *internal.Response, m.c.ChannelSize)
+	resChan := make(chan *internal.Response, m.c.ChannelSize)
 
 	m.c.mu.Lock()
-	m.c.responseChannels[m.requestID] = irChan
+	m.c.responseChannels[m.requestID] = resChan
 	m.c.mu.Unlock()
 
-	go m.handleResponses(ctx, o, msg, irChan)
+	go m.handleResponses(ctx, req, resChan, o)
 
-	if err = m.c.bus.Publish(ctx, channels.RPCChannel(m.c.serviceName, m.info.Method, m.info.Topic), req); err != nil {
-		err = psrpc.NewError(psrpc.Internal, err)
+	if err = m.c.bus.Publish(ctx, channels.RPCChannel(m.c.serviceName, m.info.Method, m.info.Topic), ir); err != nil {
+		return psrpc.NewError(psrpc.Internal, err)
 	}
-	return
+
+	return nil
 }
 
-func (m *multiRPC[ResponseType]) handleResponses(ctx context.Context, o psrpc.RequestOpts, msg proto.Message, irChan chan *internal.Response) {
-	timer := time.NewTimer(o.Timeout)
+func (m *multiRPC[ResponseType]) handleResponses(
+	ctx context.Context,
+	req proto.Message,
+	resChan chan *internal.Response,
+	opts psrpc.RequestOpts,
+) {
+	timer := time.NewTimer(opts.Timeout)
 	for {
 		select {
-		case res := <-irChan:
+		case res := <-resChan:
 			var v ResponseType
 			var err error
 			if res.Error != "" {
@@ -89,7 +122,7 @@ func (m *multiRPC[ResponseType]) handleResponses(ctx context.Context, o psrpc.Re
 
 			// response hooks
 			for _, hook := range m.c.ResponseHooks {
-				hook(ctx, msg, m.info, v, err)
+				hook(ctx, req, m.info, v, err)
 			}
 			m.handler.Recv(v, err)
 
@@ -100,14 +133,14 @@ func (m *multiRPC[ResponseType]) handleResponses(ctx context.Context, o psrpc.Re
 	}
 }
 
-func (m *multiRPC[ResponseType]) recv(msg proto.Message, err error) {
-	res := &psrpc.Response[ResponseType]{}
-	res.Result, _ = msg.(ResponseType)
-	res.Err = err
-	m.resChan <- res
+func (m *multiRPC[ResponseType]) Recv(msg proto.Message, err error) {
+	m.resChan <- &psrpc.Response[ResponseType]{
+		Result: msg.(ResponseType),
+		Err:    err,
+	}
 }
 
-func (m *multiRPC[ResponseType]) close() {
+func (m *multiRPC[ResponseType]) Close() {
 	m.c.mu.Lock()
 	delete(m.c.responseChannels, m.requestID)
 	m.c.mu.Unlock()

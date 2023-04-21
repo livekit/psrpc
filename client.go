@@ -47,7 +47,7 @@ func WithClientRequestHooks(hooks ...ClientRequestHook) ClientOption {
 
 // Response hooks are called just before responses are returned
 // For multi-requests, response hooks are called on every response, and block while executing
-type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, resp proto.Message, err error)
+type ClientResponseHook func(ctx context.Context, req proto.Message, info RPCInfo, res proto.Message, err error)
 
 func WithClientResponseHooks(hooks ...ClientResponseHook) ClientOption {
 	return func(o *ClientOpts) {

@@ -63,7 +63,7 @@ func newClientRPCMetricsInterceptor(observer MetricsObserver) psrpc.ClientRPCInt
 }
 
 func newServerRPCMetricsInterceptor(observer MetricsObserver) psrpc.ServerRPCInterceptor {
-	return func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (resp proto.Message, err error) {
+	return func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (res proto.Message, err error) {
 		start := time.Now()
 		defer func() {
 			if info.Multi {
