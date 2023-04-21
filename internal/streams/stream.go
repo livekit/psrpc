@@ -20,6 +20,7 @@ import (
 
 type Stream[SendType, RecvType proto.Message] interface {
 	psrpc.ServerStream[SendType, RecvType]
+
 	Ack(context.Context, *internal.Stream) error
 	HandleStream(is *internal.Stream) error
 	Hijacked() bool
@@ -32,6 +33,9 @@ type StreamAdapter interface {
 
 type stream[SendType, RecvType proto.Message] struct {
 	*streamBase[SendType, RecvType]
+
+	handler  psrpc.StreamHandler
+	hijacked bool
 }
 
 type streamBase[SendType, RecvType proto.Message] struct {
@@ -43,14 +47,12 @@ type streamBase[SendType, RecvType proto.Message] struct {
 	streamID string
 
 	adapter  StreamAdapter
-	handler  psrpc.StreamHandler
 	recvChan chan RecvType
 
-	hijacked bool
-	pending  atomic.Int32
-	acks     map[string]chan struct{}
-	closed   core.Fuse
-	err      error
+	pending atomic.Int32
+	acks    map[string]chan struct{}
+	closed  core.Fuse
+	err     error
 }
 
 func NewStream[SendType, RecvType proto.Message](
@@ -64,8 +66,11 @@ func NewStream[SendType, RecvType proto.Message](
 	acks map[string]chan struct{},
 ) Stream[SendType, RecvType] {
 
-	s := &streamBase[SendType, RecvType]{
+	ctx, cancel := context.WithCancel(ctx)
+	base := &streamBase[SendType, RecvType]{
 		StreamOpts: psrpc.StreamOpts{Timeout: timeout},
+		ctx:        ctx,
+		cancel:     cancel,
 		streamID:   streamID,
 		adapter:    adapter,
 		recvChan:   recvChan,
@@ -73,15 +78,19 @@ func NewStream[SendType, RecvType proto.Message](
 		closed:     core.NewFuse(),
 	}
 
-	s.ctx, s.cancel = context.WithCancel(ctx)
-	s.handler = interceptors.ChainClientInterceptors[psrpc.StreamHandler](
-		streamInterceptors, info, &stream[SendType, RecvType]{s},
-	)
-
-	return s
+	return &stream[SendType, RecvType]{
+		streamBase: base,
+		handler: interceptors.ChainClientInterceptors[psrpc.StreamHandler](
+			streamInterceptors, info, base,
+		),
+	}
 }
 
-func (s *streamBase[SendType, RecvType]) HandleStream(is *internal.Stream) error {
+func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
+	if s.closed.IsBroken() {
+		return psrpc.ErrStreamClosed
+	}
+
 	switch b := is.Body.(type) {
 	case *internal.Stream_Ack:
 		s.mu.Lock()
@@ -94,10 +103,6 @@ func (s *streamBase[SendType, RecvType]) HandleStream(is *internal.Stream) error
 		}
 
 	case *internal.Stream_Message:
-		if s.closed.IsBroken() {
-			return psrpc.ErrStreamClosed
-		}
-
 		s.pending.Inc()
 		defer s.pending.Dec()
 
@@ -137,15 +142,15 @@ func (s *streamBase[SendType, RecvType]) HandleStream(is *internal.Stream) error
 	return nil
 }
 
-func (s *streamBase[SendType, RecvType]) Context() context.Context {
+func (s *stream[SendType, RecvType]) Context() context.Context {
 	return s.ctx
 }
 
-func (s *streamBase[SendType, RecvType]) Channel() <-chan RecvType {
+func (s *stream[SendType, RecvType]) Channel() <-chan RecvType {
 	return s.recvChan
 }
 
-func (s *streamBase[SendType, RecvType]) Ack(ctx context.Context, is *internal.Stream) error {
+func (s *stream[SendType, RecvType]) Ack(ctx context.Context, is *internal.Stream) error {
 	return s.adapter.Send(ctx, &internal.Stream{
 		StreamId:  is.StreamId,
 		RequestId: is.RequestId,
@@ -157,11 +162,11 @@ func (s *streamBase[SendType, RecvType]) Ack(ctx context.Context, is *internal.S
 	})
 }
 
-func (h *stream[SendType, RecvType]) Recv(msg proto.Message) error {
-	return h.recv(msg)
+func (s *stream[SendType, RecvType]) Recv(msg proto.Message) error {
+	return s.handler.Recv(msg)
 }
 
-func (s *streamBase[SendType, RecvType]) recv(msg proto.Message) error {
+func (s *streamBase[SendType, RecvType]) Recv(msg proto.Message) error {
 	select {
 	case s.recvChan <- msg.(RecvType):
 	default:
@@ -170,15 +175,11 @@ func (s *streamBase[SendType, RecvType]) recv(msg proto.Message) error {
 	return nil
 }
 
-func (s *streamBase[SendType, RecvType]) Send(request SendType, opts ...psrpc.StreamOption) (err error) {
+func (s *stream[SendType, RecvType]) Send(request SendType, opts ...psrpc.StreamOption) (err error) {
 	return s.handler.Send(request, opts...)
 }
 
-func (h *stream[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.StreamOption) error {
-	return h.send(msg, opts...)
-}
-
-func (s *streamBase[SendType, RecvType]) send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
+func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
 	s.pending.Inc()
 	defer s.pending.Dec()
 
@@ -235,27 +236,23 @@ func (s *streamBase[SendType, RecvType]) send(msg proto.Message, opts ...psrpc.S
 	return
 }
 
-func (s *streamBase[SendType, RecvType]) Hijack() {
+func (s *stream[SendType, RecvType]) Hijack() {
 	s.mu.Lock()
 	s.hijacked = true
 	s.mu.Unlock()
 }
 
-func (s *streamBase[SendType, RecvType]) Hijacked() bool {
+func (s *stream[SendType, RecvType]) Hijacked() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.hijacked
 }
 
-func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
+func (s *stream[RequestType, ResponseType]) Close(cause error) error {
 	return s.handler.Close(cause)
 }
 
-func (h *stream[SendType, RecvType]) Close(cause error) error {
-	return h.close(cause)
-}
-
-func (s *streamBase[RequestType, ResponseType]) close(cause error) error {
+func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 	var err error = psrpc.ErrStreamClosed
 
 	s.closed.Once(func() {

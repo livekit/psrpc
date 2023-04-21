@@ -35,7 +35,7 @@ func TestStream(t *testing.T) {
 		wg.Done()
 	}()
 	go func() {
-		for s.(*streamBase[*internal.Request, *internal.Response]).pending.Load() == 0 {
+		for s.(*stream[*internal.Request, *internal.Response]).pending.Load() == 0 {
 			time.Sleep(time.Millisecond)
 		}
 		require.NoError(t, s.HandleStream(&internal.Stream{

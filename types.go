@@ -16,10 +16,10 @@ type Response[ResponseType proto.Message] struct {
 }
 
 type Stream[SendType, RecvType proto.Message] interface {
+	Context() context.Context
 	Channel() <-chan RecvType
 	Send(msg SendType, opts ...StreamOption) error
 	Close(cause error) error
-	Context() context.Context
 	Err() error
 }
 
