@@ -9,9 +9,9 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
 	"github.com/livekit/psrpc/internal/interceptors"
 	"github.com/livekit/psrpc/internal/rand"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
@@ -24,32 +24,27 @@ func RequestMulti[ResponseType proto.Message](
 	opts ...psrpc.RequestOption,
 ) (rChan <-chan *psrpc.Response[ResponseType], err error) {
 
-	info := psrpc.RPCInfo{
-		Service: c.serviceName,
-		Method:  rpc,
-		Topic:   topic,
-		Multi:   true,
-	}
+	i := c.GetInfo(rpc, topic)
 
 	// request hooks
 	for _, hook := range c.RequestHooks {
-		hook(ctx, request, info)
+		hook(ctx, request, i.RPCInfo)
 	}
 
 	resChan := make(chan *psrpc.Response[ResponseType], c.ChannelSize)
 	m := &multiRPC[ResponseType]{
 		c:         c,
+		i:         i,
 		requestID: rand.NewRequestID(),
-		info:      info,
 		resChan:   resChan,
 	}
 	m.handler = interceptors.ChainClientInterceptors[psrpc.ClientMultiRPCHandler](
-		c.MultiRPCInterceptors, info, m,
+		c.MultiRPCInterceptors, i, m,
 	)
 
 	if err = m.handler.Send(ctx, request, opts...); err != nil {
 		for _, hook := range c.ResponseHooks {
-			hook(ctx, request, info, nil, err)
+			hook(ctx, request, i.RPCInfo, nil, err)
 		}
 		return
 	}
@@ -59,14 +54,14 @@ func RequestMulti[ResponseType proto.Message](
 
 type multiRPC[ResponseType proto.Message] struct {
 	c         *RPCClient
+	i         *info.RequestInfo
 	requestID string
-	info      psrpc.RPCInfo
 	handler   psrpc.ClientMultiRPCHandler
 	resChan   chan<- *psrpc.Response[ResponseType]
 }
 
 func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) error {
-	o := getRequestOpts(m.c.ClientOpts, opts...)
+	o := getRequestOpts(m.i, m.c.ClientOpts, opts...)
 
 	b, err := bus.SerializePayload(req)
 	if err != nil {
@@ -76,7 +71,7 @@ func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, op
 	now := time.Now()
 	ir := &internal.Request{
 		RequestId:  m.requestID,
-		ClientId:   m.c.id,
+		ClientId:   m.c.ID,
 		SentAt:     now.UnixNano(),
 		Expiry:     now.Add(o.Timeout).UnixNano(),
 		Multi:      true,
@@ -92,7 +87,7 @@ func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, op
 
 	go m.handleResponses(ctx, req, resChan, o)
 
-	if err = m.c.bus.Publish(ctx, channels.RPCChannel(m.c.serviceName, m.info.Method, m.info.Topic), ir); err != nil {
+	if err = m.c.bus.Publish(ctx, m.i.GetRPCChannel(), ir); err != nil {
 		return psrpc.NewError(psrpc.Internal, err)
 	}
 
@@ -122,7 +117,7 @@ func (m *multiRPC[ResponseType]) handleResponses(
 
 			// response hooks
 			for _, hook := range m.c.ResponseHooks {
-				hook(ctx, req, m.info, v, err)
+				hook(ctx, req, m.i.RPCInfo, v, err)
 			}
 
 			m.handler.Recv(v, err)

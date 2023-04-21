@@ -8,7 +8,9 @@ import (
 )
 
 const (
-	DefaultClientTimeout = time.Second * 3
+	DefaultClientTimeout        = time.Second * 3
+	DefaultAffinityTimeout      = time.Second
+	DefaultAffinityShortCircuit = time.Millisecond * 200
 )
 
 type ClientOption func(*ClientOpts)

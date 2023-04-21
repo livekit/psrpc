@@ -10,9 +10,9 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
 	"github.com/livekit/psrpc/internal/interceptors"
 	"github.com/livekit/psrpc/internal/rand"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
@@ -21,33 +21,26 @@ func RequestSingle[ResponseType proto.Message](
 	c *RPCClient,
 	rpc string,
 	topic []string,
-	requireClaim bool,
 	request proto.Message,
 	opts ...psrpc.RequestOption,
 ) (response ResponseType, err error) {
 
-	info := psrpc.RPCInfo{
-		Service: c.serviceName,
-		Method:  rpc,
-		Topic:   topic,
-	}
+	i := c.GetInfo(rpc, topic)
 
 	// response hooks
 	defer func() {
 		for _, hook := range c.ResponseHooks {
-			hook(ctx, request, info, response, err)
+			hook(ctx, request, i.RPCInfo, response, err)
 		}
 	}()
 
 	// request hooks
 	for _, hook := range c.RequestHooks {
-		hook(ctx, request, info)
+		hook(ctx, request, i.RPCInfo)
 	}
 
 	handler := interceptors.ChainClientInterceptors[psrpc.ClientRPCHandler](
-		c.RpcInterceptors,
-		info,
-		newRPC[ResponseType](c, rpc, topic, requireClaim),
+		c.RpcInterceptors, i, newRPC[ResponseType](c, i),
 	)
 
 	res, err := handler(ctx, request, opts...)
@@ -58,13 +51,9 @@ func RequestSingle[ResponseType proto.Message](
 	return
 }
 
-func newRPC[ResponseType proto.Message](
-	c *RPCClient, rpc string,
-	topic []string,
-	requireClaim bool,
-) psrpc.ClientRPCHandler {
+func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc.ClientRPCHandler {
 	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
-		o := getRequestOpts(c.ClientOpts, opts...)
+		o := getRequestOpts(i, c.ClientOpts, opts...)
 
 		b, err := bus.SerializePayload(request)
 		if err != nil {
@@ -76,7 +65,7 @@ func newRPC[ResponseType proto.Message](
 		now := time.Now()
 		req := &internal.Request{
 			RequestId:  requestID,
-			ClientId:   c.id,
+			ClientId:   c.ID,
 			SentAt:     now.UnixNano(),
 			Expiry:     now.Add(o.Timeout).UnixNano(),
 			Multi:      false,
@@ -99,7 +88,7 @@ func newRPC[ResponseType proto.Message](
 			c.mu.Unlock()
 		}()
 
-		if err = c.bus.Publish(ctx, channels.RPCChannel(c.serviceName, rpc, topic), req); err != nil {
+		if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
 			err = psrpc.NewError(psrpc.Internal, err)
 			return
 		}
@@ -107,12 +96,12 @@ func newRPC[ResponseType proto.Message](
 		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 
-		if requireClaim {
+		if i.RequireClaim {
 			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
 			if err != nil {
 				return nil, err
 			}
-			if err = c.bus.Publish(ctx, channels.ClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+			if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 				RequestId: requestID,
 				ServerId:  serverID,
 			}); err != nil {

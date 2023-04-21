@@ -9,10 +9,10 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/channels"
 	"github.com/livekit/psrpc/internal/logger"
 	"github.com/livekit/psrpc/internal/rand"
 	"github.com/livekit/psrpc/internal/streams"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
@@ -21,16 +21,11 @@ func OpenStream[SendType, RecvType proto.Message](
 	c *RPCClient,
 	rpc string,
 	topic []string,
-	requireClaim bool,
 	opts ...psrpc.RequestOption,
 ) (psrpc.ClientStream[SendType, RecvType], error) {
 
-	o := getRequestOpts(c.ClientOpts, opts...)
-	info := psrpc.RPCInfo{
-		Service: c.serviceName,
-		Method:  rpc,
-		Topic:   topic,
-	}
+	i := c.GetInfo(rpc, topic)
+	o := getRequestOpts(i, c.ClientOpts, opts...)
 
 	streamID := rand.NewStreamID()
 	requestID := rand.NewRequestID()
@@ -42,7 +37,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		Expiry:    now.Add(o.Timeout).UnixNano(),
 		Body: &internal.Stream_Open{
 			Open: &internal.StreamOpen{
-				NodeId:   c.id,
+				NodeId:   c.ID,
 				Metadata: metadata.OutgoingContextMetadata(ctx),
 			},
 		},
@@ -65,10 +60,10 @@ func OpenStream[SendType, RecvType proto.Message](
 	ackChan := make(chan struct{})
 	stream := streams.NewStream[SendType, RecvType](
 		ctx,
-		c.Timeout,
+		i,
 		streamID,
-		&clientStream{c: c, info: info},
-		info,
+		c.Timeout,
+		&clientStream{c: c, i: i},
 		c.StreamInterceptors,
 		make(chan RecvType, c.ChannelSize),
 		map[string]chan struct{}{requestID: ackChan},
@@ -79,18 +74,18 @@ func OpenStream[SendType, RecvType proto.Message](
 	octx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 
-	if err := c.bus.Publish(octx, channels.StreamServerChannel(c.serviceName, rpc, topic), req); err != nil {
+	if err := c.bus.Publish(octx, i.GetStreamServerChannel(), req); err != nil {
 		_ = stream.Close(err)
 		return nil, psrpc.NewError(psrpc.Internal, err)
 	}
 
-	if requireClaim {
+	if i.RequireClaim {
 		serverID, err := selectServer(octx, claimChan, nil, o.SelectionOpts)
 		if err != nil {
 			_ = stream.Close(err)
 			return nil, err
 		}
-		if err = c.bus.Publish(octx, channels.ClaimResponseChannel(c.serviceName, rpc, topic), &internal.ClaimResponse{
+		if err = c.bus.Publish(octx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 			RequestId: requestID,
 			ServerId:  serverID,
 		}); err != nil {
@@ -144,12 +139,12 @@ func runClientStream[SendType, RecvType proto.Message](
 }
 
 type clientStream struct {
-	c    *RPCClient
-	info psrpc.RPCInfo
+	c *RPCClient
+	i *info.RequestInfo
 }
 
 func (s *clientStream) Send(ctx context.Context, msg *internal.Stream) (err error) {
-	if err = s.c.bus.Publish(ctx, channels.StreamServerChannel(s.c.serviceName, s.info.Method, s.info.Topic), msg); err != nil {
+	if err = s.c.bus.Publish(ctx, s.i.GetStreamServerChannel(), msg); err != nil {
 		err = psrpc.NewError(psrpc.Internal, err)
 	}
 	return

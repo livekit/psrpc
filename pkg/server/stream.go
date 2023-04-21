@@ -12,53 +12,51 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
 	"github.com/livekit/psrpc/internal/logger"
 	"github.com/livekit/psrpc/internal/streams"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
 type StreamAffinityFunc func() float32
 
 type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
-	mu           sync.RWMutex
-	rpc          string
-	topic        []string
-	streamSub    bus.Subscription[*internal.Stream]
-	claimSub     bus.Subscription[*internal.ClaimResponse]
-	streams      map[string]streams.Stream[SendType, RecvType]
-	claims       map[string]chan *internal.ClaimResponse
-	affinityFunc StreamAffinityFunc
-	requireClaim bool
+	i *info.RequestInfo
+
 	handler      func(psrpc.ServerStream[SendType, RecvType]) error
-	draining     atomic.Bool
-	complete     chan struct{}
-	onCompleted  func()
-	closeOnce    sync.Once
+	affinityFunc StreamAffinityFunc
+
+	mu          sync.RWMutex
+	streamSub   bus.Subscription[*internal.Stream]
+	claimSub    bus.Subscription[*internal.ClaimResponse]
+	streams     map[string]streams.Stream[SendType, RecvType]
+	claims      map[string]chan *internal.ClaimResponse
+	draining    atomic.Bool
+	closeOnce   sync.Once
+	complete    chan struct{}
+	onCompleted func()
 }
 
 func newStreamRPCHandler[RecvType, SendType proto.Message](
 	s *RPCServer,
-	rpc string,
-	topic []string,
+	i *info.RequestInfo,
 	svcImpl func(psrpc.ServerStream[SendType, RecvType]) error,
-	interceptor psrpc.ServerRPCInterceptor,
+	interceptor psrpc.StreamInterceptor,
 	affinityFunc StreamAffinityFunc,
-	requireClaim bool,
 ) (*streamRPCHandlerImpl[RecvType, SendType], error) {
 
 	ctx := context.Background()
 	streamSub, err := bus.Subscribe[*internal.Stream](
-		ctx, s.bus, channels.StreamServerChannel(s.serviceName, rpc, topic), s.ChannelSize,
+		ctx, s.bus, i.GetStreamServerChannel(), s.ChannelSize,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	var claimSub bus.Subscription[*internal.ClaimResponse]
-	if requireClaim {
+	if i.RequireClaim {
 		claimSub, err = bus.Subscribe[*internal.ClaimResponse](
-			ctx, s.bus, channels.ClaimResponseChannel(s.serviceName, rpc, topic), s.ChannelSize,
+			ctx, s.bus, i.GetClaimResponseChannel(), s.ChannelSize,
 		)
 		if err != nil {
 			_ = streamSub.Close()
@@ -68,15 +66,14 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 		claimSub = bus.EmptySubscription[*internal.ClaimResponse]{}
 	}
 
+	// TODO
 	h := &streamRPCHandlerImpl[RecvType, SendType]{
-		rpc:          rpc,
-		topic:        topic,
+		i:            i,
 		streamSub:    streamSub,
 		claimSub:     claimSub,
 		streams:      make(map[string]streams.Stream[SendType, RecvType]),
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
-		requireClaim: requireClaim,
 		handler:      svcImpl,
 		complete:     make(chan struct{}),
 	}
@@ -149,12 +146,6 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	is *internal.Stream,
 	open *internal.StreamOpen,
 ) error {
-	info := psrpc.RPCInfo{
-		Service: s.serviceName,
-		Method:  h.rpc,
-		Topic:   h.topic,
-	}
-
 	head := &metadata.Header{
 		RemoteID: open.NodeId,
 		SentAt:   time.UnixMilli(is.SentAt),
@@ -164,7 +155,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	octx, cancel := context.WithDeadline(ctx, time.Unix(0, is.Expiry))
 	defer cancel()
 
-	if h.requireClaim {
+	if h.i.RequireClaim {
 		claimed, err := h.claimRequest(s, octx, is)
 		if !claimed {
 			return err
@@ -173,14 +164,14 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 
 	stream := streams.NewStream[SendType, RecvType](
 		ctx,
-		s.Timeout,
+		h.i,
 		is.StreamId,
+		s.Timeout,
 		&serverStream[RecvType, SendType]{
 			h:      h,
 			s:      s,
 			nodeID: open.NodeId,
 		},
-		info,
 		s.StreamInterceptors,
 		make(chan RecvType, s.ChannelSize),
 		make(map[string]chan struct{}),
@@ -230,9 +221,9 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 		h.mu.Unlock()
 	}()
 
-	err := s.bus.Publish(ctx, channels.ClaimRequestChannel(s.serviceName, is.GetOpen().NodeId), &internal.ClaimRequest{
+	err := s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, is.GetOpen().NodeId), &internal.ClaimRequest{
 		RequestId: is.RequestId,
-		ServerId:  s.id,
+		ServerId:  s.ID,
 		Affinity:  affinity,
 	})
 	if err != nil {
@@ -244,7 +235,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 
 	select {
 	case claim := <-claimResponseChan:
-		if claim.ServerId == s.id {
+		if claim.ServerId == s.ID {
 			return true, nil
 		} else {
 			return false, nil
@@ -289,7 +280,7 @@ type serverStream[SendType, RecvType proto.Message] struct {
 }
 
 func (s *serverStream[RequestType, ResponseType]) Send(ctx context.Context, msg *internal.Stream) (err error) {
-	if err = s.s.bus.Publish(ctx, channels.StreamChannel(s.s.serviceName, s.nodeID), msg); err != nil {
+	if err = s.s.bus.Publish(ctx, info.GetStreamChannel(s.s.Name, s.nodeID), msg); err != nil {
 		err = psrpc.NewError(psrpc.Internal, err)
 	}
 	return

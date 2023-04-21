@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 func withStreams() psrpc.ClientOption {
@@ -22,15 +23,25 @@ func getClientOpts(opts ...psrpc.ClientOption) psrpc.ClientOpts {
 	return *o
 }
 
-func getRequestOpts(options psrpc.ClientOpts, opts ...psrpc.RequestOption) psrpc.RequestOpts {
+func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc.RequestOption) psrpc.RequestOpts {
 	o := &psrpc.RequestOpts{
 		Timeout: options.Timeout,
-		SelectionOpts: psrpc.SelectionOpts{
-			AcceptFirstAvailable: true,
-		},
 	}
+
+	if i.AffinityEnabled {
+		o.SelectionOpts = psrpc.SelectionOpts{
+			AffinityTimeout:     psrpc.DefaultAffinityTimeout,
+			ShortCircuitTimeout: psrpc.DefaultAffinityShortCircuit,
+		}
+	} else {
+		o.SelectionOpts = psrpc.SelectionOpts{
+			AcceptFirstAvailable: true,
+		}
+	}
+
 	for _, opt := range opts {
 		opt(o)
 	}
+
 	return *o
 }

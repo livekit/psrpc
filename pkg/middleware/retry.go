@@ -22,7 +22,7 @@ func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
 }
 
 func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
-	return func(info psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
+	return func(rpcInfo psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
 			err = retry(opt, ctx.Done(), func(timeout time.Duration) error {
 				nextOpts := opts
@@ -76,7 +76,7 @@ func WithStreamRetries(opt RetryOptions) psrpc.ClientOption {
 }
 
 func NewStreamRetryInterceptor(opt RetryOptions) psrpc.StreamInterceptor {
-	return func(info psrpc.RPCInfo, next psrpc.StreamHandler) psrpc.StreamHandler {
+	return func(rpcInfo psrpc.RPCInfo, next psrpc.StreamHandler) psrpc.StreamHandler {
 		return &streamRetryInterceptor{
 			StreamHandler: next,
 			opt:           opt,

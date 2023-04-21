@@ -85,6 +85,7 @@ func (t *psrpc) Generate(in *plugin.CodeGeneratorRequest) *plugin.CodeGeneratorR
 	// Register names of packages that we import.
 	t.registerPackageName("client")
 	t.registerPackageName("context")
+	t.registerPackageName("info")
 	t.registerPackageName("psrpc")
 	t.registerPackageName("server")
 	t.registerPackageName("version")
@@ -261,6 +262,7 @@ func (t *psrpc) generateImports(file *descriptor.FileDescriptorProto) {
 	// dependency imports
 	t.P(`  "github.com/livekit/psrpc"`)
 	t.P(`  "github.com/livekit/psrpc/pkg/client"`)
+	t.P(`  "github.com/livekit/psrpc/pkg/info"`)
 	t.P(`  "github.com/livekit/psrpc/pkg/server"`)
 	t.P(`  "github.com/livekit/psrpc/version"`)
 	t.P(`)`)
@@ -447,13 +449,31 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 
 	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
 	t.P(`func `, newClientFunc, servTopics.FormatTypeParamConstraints(), `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client`, servTopics.FormatTypeParams(), `, error) {`)
+	t.P(`  sd := &`, t.pkgs["info"], `.ServiceDefinition{`)
+	t.P(`    Name: "`, servName, `",`)
+	t.P(`    ID:   clientID,`)
+	t.P(`  }`)
+	t.P()
+
+	for _, method := range service.Method {
+		opts := t.getOptions(method)
+
+		methName := methodNameCamelCased(method)
+		t.P(`  sd.RegisterMethod("`, methName, `", `,
+			fmt.Sprint(opts.AffinityFunc), `, `,
+			fmt.Sprint(opts.Multi), `, `,
+			t.formatRequireClaim(opts), `)`,
+		)
+	}
+
 	clientConstructor := `NewRPCClient`
 	for _, method := range service.Method {
 		if t.getOptions(method).Stream {
 			clientConstructor = `NewRPCClientWithStreams`
 		}
 	}
-	t.P(`  rpcClient, err := `, t.pkgs["client"], `.`, clientConstructor, `("`, servName, `", clientID, bus, opts...)`)
+	t.P()
+	t.P(`  rpcClient, err := `, t.pkgs["client"], `.`, clientConstructor, `(sd, bus, opts...)`)
 	t.P(`  if err != nil {`)
 	t.P(`    return nil, err`)
 	t.P(`  }`)
@@ -503,7 +523,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `)`)
 		} else if opts.Stream {
-			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, `, t.formatRequireClaim(opts), `, opts...)`)
+			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, opts...)`)
 		} else {
 			if opts.Multi {
 				t.W(`.RequestMulti[*`)
@@ -511,9 +531,6 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 				t.W(`.RequestSingle[*`)
 			}
 			t.W(outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice())
-			if !opts.Multi {
-				t.W(`, `, t.formatRequireClaim(opts))
-			}
 			t.P(`, req, opts...)`)
 		}
 		t.P(`}`)
@@ -574,12 +591,25 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	t.P(`// New`, servName, `Server builds a RPCServer that will route requests`)
 	t.P(`// to the corresponding method in the provided svc implementation.`)
 	t.P(`func New`, servName, `Server`, servTopics.FormatTypeParamConstraints(), `(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server`, servTopics.FormatTypeParams(), `, error) {`)
-	t.P(`  s := `, t.pkgs["server"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
+	t.P(`  sd := &`, t.pkgs["info"], `.ServiceDefinition{`)
+	t.P(`    Name: "`, servName, `",`)
+	t.P(`    ID:   serverID,`)
+	t.P(`  }`)
+	t.P()
+	t.P(`  s := `, t.pkgs["server"], `.NewRPCServer(sd, bus, opts...)`)
 	t.P()
 
 	errVar := false
 	for _, method := range service.Method {
 		opts := t.getOptions(method)
+
+		methName := methodNameCamelCased(method)
+		t.P(`  sd.RegisterMethod("`, methName, `", `,
+			fmt.Sprint(opts.AffinityFunc), `, `,
+			fmt.Sprint(opts.Multi), `, `,
+			t.formatRequireClaim(opts), `)`,
+		)
+
 		if opts.Subscription || opts.Topics {
 			continue
 		}
@@ -589,7 +619,6 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			errVar = true
 		}
 
-		methName := methodNameCamelCased(method)
 		registerFuncName := "RegisterHandler"
 		if opts.Stream {
 			registerFuncName = "RegisterStreamHandler"
@@ -599,10 +628,6 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			t.W(`, svc.`, methName, `Affinity`)
 		} else {
 			t.W(`, nil`)
-		}
-		t.W(`, `, t.formatRequireClaim(opts))
-		if !opts.Stream {
-			t.W(`, `, fmt.Sprintf("%t", opts.Multi))
 		}
 		t.P(`)`)
 		t.P(`  if err != nil {`)
@@ -649,10 +674,6 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
 				t.W(`, nil`)
-			}
-			t.W(`, `, t.formatRequireClaim(opts))
-			if !opts.Stream {
-				t.W(`, `, fmt.Sprintf("%t", opts.Multi))
 			}
 			t.P(`)`)
 			t.P(`}`)

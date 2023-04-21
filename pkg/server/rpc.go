@@ -12,52 +12,49 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
 	"github.com/livekit/psrpc/internal/logger"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
 type AffinityFunc[RequestType proto.Message] func(RequestType) float32
 
 type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
-	mu           sync.RWMutex
-	rpc          string
-	topic        []string
-	requestSub   bus.Subscription[*internal.Request]
-	claimSub     bus.Subscription[*internal.ClaimResponse]
-	claims       map[string]chan *internal.ClaimResponse
-	affinityFunc AffinityFunc[RequestType]
-	requireClaim bool
+	i *info.RequestInfo
+
 	handler      func(context.Context, RequestType) (ResponseType, error)
-	handling     atomic.Int32
-	complete     chan struct{}
-	onCompleted  func()
-	closeOnce    sync.Once
+	affinityFunc AffinityFunc[RequestType]
+
+	mu          sync.RWMutex
+	requestSub  bus.Subscription[*internal.Request]
+	claimSub    bus.Subscription[*internal.ClaimResponse]
+	claims      map[string]chan *internal.ClaimResponse
+	handling    atomic.Int32
+	closeOnce   sync.Once
+	complete    chan struct{}
+	onCompleted func()
 }
 
 func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	s *RPCServer,
-	rpc string,
-	topic []string,
+	i *info.RequestInfo,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	interceptor psrpc.ServerRPCInterceptor,
 	affinityFunc AffinityFunc[RequestType],
-	requireClaim bool,
-	multi bool,
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
 	ctx := context.Background()
 	requestSub, err := bus.Subscribe[*internal.Request](
-		ctx, s.bus, channels.RPCChannel(s.serviceName, rpc, topic), s.ChannelSize,
+		ctx, s.bus, i.GetRPCChannel(), s.ChannelSize,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	var claimSub bus.Subscription[*internal.ClaimResponse]
-	if requireClaim {
+	if i.RequireClaim {
 		claimSub, err = bus.Subscribe[*internal.ClaimResponse](
-			ctx, s.bus, channels.ClaimResponseChannel(s.serviceName, rpc, topic), s.ChannelSize,
+			ctx, s.bus, i.GetClaimResponseChannel(), s.ChannelSize,
 		)
 		if err != nil {
 			_ = requestSub.Close()
@@ -68,13 +65,11 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	}
 
 	h := &rpcHandlerImpl[RequestType, ResponseType]{
-		rpc:          rpc,
-		topic:        topic,
+		i:            i,
 		requestSub:   requestSub,
 		claimSub:     claimSub,
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
-		requireClaim: requireClaim,
 		complete:     make(chan struct{}),
 	}
 
@@ -83,12 +78,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	} else {
 		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
 			var response ResponseType
-			res, err := interceptor(ctx, req, psrpc.RPCInfo{
-				Service: s.serviceName,
-				Method:  h.rpc,
-				Topic:   h.topic,
-				Multi:   multi,
-			}, func(context.Context, proto.Message) (proto.Message, error) {
+			res, err := interceptor(ctx, req, i.RPCInfo, func(context.Context, proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})
 			if res != nil {
@@ -159,7 +149,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		return err
 	}
 
-	if h.requireClaim {
+	if h.i.RequireClaim {
 		claimed, err := h.claimRequest(s, ctx, ir, req)
 		if err != nil {
 			return err
@@ -202,9 +192,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		h.mu.Unlock()
 	}()
 
-	err := s.bus.Publish(ctx, channels.ClaimRequestChannel(s.serviceName, ir.ClientId), &internal.ClaimRequest{
+	err := s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
 		RequestId: ir.RequestId,
-		ServerId:  s.id,
+		ServerId:  s.ID,
 		Affinity:  affinity,
 	})
 	if err != nil {
@@ -216,7 +206,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	select {
 	case claim := <-claimResponseChan:
-		if claim.ServerId == s.id {
+		if claim.ServerId == s.ID {
 			return true, nil
 		} else {
 			return false, nil
@@ -236,7 +226,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 ) error {
 	res := &internal.Response{
 		RequestId: ir.RequestId,
-		ServerId:  s.id,
+		ServerId:  s.ID,
 		SentAt:    time.Now().UnixNano(),
 	}
 
@@ -260,7 +250,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		}
 	}
 
-	return s.bus.Publish(ctx, channels.ResponseChannel(s.serviceName, ir.ClientId), res)
+	return s.bus.Publish(ctx, info.GetResponseChannel(s.Name, ir.ClientId), res)
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {

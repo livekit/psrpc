@@ -6,13 +6,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/frostbyte73/core"
 	"go.uber.org/atomic"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 type rpcHandler interface {
@@ -20,25 +21,24 @@ type rpcHandler interface {
 }
 
 type RPCServer struct {
+	*info.ServiceDefinition
 	psrpc.ServerOpts
 
-	bus         bus.MessageBus
-	serviceName string
-	id          string
-	mu          sync.RWMutex
-	handlers    map[string]rpcHandler
-	active      atomic.Int32
-	shutdown    chan struct{}
+	bus bus.MessageBus
+
+	mu       sync.RWMutex
+	handlers map[string]rpcHandler
+	active   atomic.Int32
+	shutdown core.Fuse
 }
 
-func NewRPCServer(serviceName, serverID string, b bus.MessageBus, opts ...psrpc.ServerOption) *RPCServer {
+func NewRPCServer(sd *info.ServiceDefinition, b bus.MessageBus, opts ...psrpc.ServerOption) *RPCServer {
 	s := &RPCServer{
-		ServerOpts:  getServerOpts(opts...),
-		bus:         b,
-		serviceName: serviceName,
-		id:          serverID,
-		handlers:    make(map[string]rpcHandler),
-		shutdown:    make(chan struct{}),
+		ServiceDefinition: sd,
+		ServerOpts:        getServerOpts(opts...),
+		bus:               b,
+		handlers:          make(map[string]rpcHandler),
+		shutdown:          core.NewFuse(),
 	}
 
 	return s
@@ -50,16 +50,14 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	topic []string,
 	svcImpl func(context.Context, RequestType) (ResponseType, error),
 	affinityFunc AffinityFunc[RequestType],
-	requireClaim bool,
-	multi bool,
 ) error {
-	select {
-	case <-s.shutdown:
+	if s.shutdown.IsBroken() {
 		return errors.New("RPCServer closed")
-	default:
 	}
 
-	key := channels.HandlerKey(rpc, topic)
+	i := s.GetInfo(rpc, topic)
+
+	key := i.GetHandlerKey()
 	s.mu.RLock()
 	_, ok := s.handlers[key]
 	s.mu.RUnlock()
@@ -68,7 +66,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	}
 
 	// create handler
-	h, err := newRPCHandler(s, rpc, topic, svcImpl, s.ChainedInterceptor, affinityFunc, requireClaim, multi)
+	h, err := newRPCHandler(s, i, svcImpl, s.ChainedInterceptor, affinityFunc)
 	if err != nil {
 		return err
 	}
@@ -95,15 +93,14 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	topic []string,
 	svcImpl func(psrpc.ServerStream[ResponseType, RequestType]) error,
 	affinityFunc StreamAffinityFunc,
-	requireClaim bool,
 ) error {
-	select {
-	case <-s.shutdown:
+	if s.shutdown.IsBroken() {
 		return errors.New("RPCServer closed")
-	default:
 	}
 
-	key := channels.HandlerKey(rpc, topic)
+	i := s.GetInfo(rpc, topic)
+
+	key := i.GetHandlerKey()
 	s.mu.RLock()
 	_, ok := s.handlers[key]
 	s.mu.RUnlock()
@@ -112,7 +109,8 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	}
 
 	// create handler
-	h, err := newStreamRPCHandler(s, rpc, topic, svcImpl, s.ChainedInterceptor, affinityFunc, requireClaim)
+	// TODO
+	h, err := newStreamRPCHandler(s, i, svcImpl, nil, affinityFunc)
 	if err != nil {
 		return err
 	}
@@ -134,7 +132,8 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 }
 
 func (s *RPCServer) DeregisterHandler(rpc string, topic []string) {
-	key := channels.HandlerKey(rpc, topic)
+	i := s.GetInfo(rpc, topic)
+	key := i.GetHandlerKey()
 	s.mu.RLock()
 	h, ok := s.handlers[key]
 	s.mu.RUnlock()
@@ -144,15 +143,12 @@ func (s *RPCServer) DeregisterHandler(rpc string, topic []string) {
 }
 
 func (s *RPCServer) Publish(ctx context.Context, rpc string, topic []string, msg proto.Message) error {
-	return s.bus.Publish(ctx, channels.RPCChannel(s.serviceName, rpc, topic), msg)
+	i := s.GetInfo(rpc, topic)
+	return s.bus.Publish(ctx, i.GetRPCChannel(), msg)
 }
 
 func (s *RPCServer) Close(force bool) {
-	select {
-	case <-s.shutdown:
-	default:
-		close(s.shutdown)
-
+	s.shutdown.Once(func() {
 		s.mu.RLock()
 		handlers := maps.Values(s.handlers)
 		s.mu.RUnlock()
@@ -167,7 +163,8 @@ func (s *RPCServer) Close(force bool) {
 			}()
 		}
 		wg.Wait()
-	}
+	})
+
 	if !force {
 		for s.active.Load() > 0 {
 			time.Sleep(time.Millisecond * 100)

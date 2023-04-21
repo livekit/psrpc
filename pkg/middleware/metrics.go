@@ -29,12 +29,12 @@ func (r MetricRole) String() string {
 }
 
 type MetricsObserver interface {
-	OnUnaryRequest(role MetricRole, info psrpc.RPCInfo, duration time.Duration, err error)
-	OnMultiRequest(role MetricRole, info psrpc.RPCInfo, duration time.Duration, responseCount int, errorCount int)
-	OnStreamSend(role MetricRole, info psrpc.RPCInfo, duration time.Duration, err error)
-	OnStreamRecv(role MetricRole, info psrpc.RPCInfo, err error)
-	OnStreamOpen(role MetricRole, info psrpc.RPCInfo)
-	OnStreamClose(role MetricRole, info psrpc.RPCInfo)
+	OnUnaryRequest(role MetricRole, rpcInfo psrpc.RPCInfo, duration time.Duration, err error)
+	OnMultiRequest(role MetricRole, rpcInfo psrpc.RPCInfo, duration time.Duration, responseCount int, errorCount int)
+	OnStreamSend(role MetricRole, rpcInfo psrpc.RPCInfo, duration time.Duration, err error)
+	OnStreamRecv(role MetricRole, rpcInfo psrpc.RPCInfo, err error)
+	OnStreamOpen(role MetricRole, rpcInfo psrpc.RPCInfo)
+	OnStreamClose(role MetricRole, rpcInfo psrpc.RPCInfo)
 }
 
 func WithClientMetrics(observer MetricsObserver) psrpc.ClientOption {
@@ -53,29 +53,29 @@ func WithServerMetrics(observer MetricsObserver) psrpc.ServerOption {
 }
 
 func newClientRPCMetricsInterceptor(observer MetricsObserver) psrpc.ClientRPCInterceptor {
-	return func(info psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
+	return func(rpcInfo psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
 			start := time.Now()
-			defer func() { observer.OnUnaryRequest(ClientRole, info, time.Since(start), err) }()
+			defer func() { observer.OnUnaryRequest(ClientRole, rpcInfo, time.Since(start), err) }()
 			return next(ctx, req, opts...)
 		}
 	}
 }
 
 func newServerRPCMetricsInterceptor(observer MetricsObserver) psrpc.ServerRPCInterceptor {
-	return func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (res proto.Message, err error) {
+	return func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (res proto.Message, err error) {
 		start := time.Now()
 		defer func() {
-			if info.Multi {
+			if rpcInfo.Multi {
 				var responseCount, errorCount int
 				if err == nil {
 					responseCount++
 				} else {
 					errorCount++
 				}
-				observer.OnMultiRequest(ServerRole, info, time.Since(start), responseCount, errorCount)
+				observer.OnMultiRequest(ServerRole, rpcInfo, time.Since(start), responseCount, errorCount)
 			} else {
-				observer.OnUnaryRequest(ServerRole, info, time.Since(start), err)
+				observer.OnUnaryRequest(ServerRole, rpcInfo, time.Since(start), err)
 			}
 		}()
 		return handler(ctx, req)
@@ -83,13 +83,13 @@ func newServerRPCMetricsInterceptor(observer MetricsObserver) psrpc.ServerRPCInt
 }
 
 func newStreamMetricsInterceptor(observer MetricsObserver, role MetricRole) psrpc.StreamInterceptor {
-	return func(info psrpc.RPCInfo, next psrpc.StreamHandler) psrpc.StreamHandler {
-		observer.OnStreamOpen(role, info)
+	return func(rpcInfo psrpc.RPCInfo, next psrpc.StreamHandler) psrpc.StreamHandler {
+		observer.OnStreamOpen(role, rpcInfo)
 		return &streamMetricsInterceptor{
 			StreamHandler: next,
 			observer:      observer,
 			role:          role,
-			info:          info,
+			info:          rpcInfo,
 		}
 	}
 }

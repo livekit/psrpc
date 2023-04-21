@@ -7,7 +7,6 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
 )
 
 func Join[ResponseType proto.Message](
@@ -16,7 +15,8 @@ func Join[ResponseType proto.Message](
 	rpc string,
 	topic []string,
 ) (bus.Subscription[ResponseType], error) {
-	sub, err := bus.Subscribe[ResponseType](ctx, c.bus, channels.RPCChannel(c.serviceName, rpc, topic), c.ChannelSize)
+	i := c.GetInfo(rpc, topic)
+	sub, err := bus.Subscribe[ResponseType](ctx, c.bus, i.GetRPCChannel(), c.ChannelSize)
 	if err != nil {
 		return nil, psrpc.NewError(psrpc.Internal, err)
 	}
@@ -29,7 +29,8 @@ func JoinQueue[ResponseType proto.Message](
 	rpc string,
 	topic []string,
 ) (bus.Subscription[ResponseType], error) {
-	sub, err := bus.SubscribeQueue[ResponseType](ctx, c.bus, channels.RPCChannel(c.serviceName, rpc, topic), c.ChannelSize)
+	i := c.GetInfo(rpc, topic)
+	sub, err := bus.SubscribeQueue[ResponseType](ctx, c.bus, i.GetRPCChannel(), c.ChannelSize)
 	if err != nil {
 		return nil, psrpc.NewError(psrpc.Internal, err)
 	}

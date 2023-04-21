@@ -12,15 +12,16 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/rand"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 func TestStream(t *testing.T) {
 	s := NewStream[*internal.Request, *internal.Response](
 		context.Background(),
-		time.Second,
+		&info.RequestInfo{},
 		rand.NewStreamID(),
+		psrpc.DefaultClientTimeout,
 		&testStreamAdapter{},
-		psrpc.RPCInfo{},
 		nil,
 		make(chan *internal.Response),
 		make(map[string]chan struct{}),

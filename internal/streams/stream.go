@@ -16,6 +16,7 @@ import (
 	"github.com/livekit/psrpc/internal/interceptors"
 	"github.com/livekit/psrpc/internal/logger"
 	"github.com/livekit/psrpc/internal/rand"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 type Stream[SendType, RecvType proto.Message] interface {
@@ -43,12 +44,12 @@ type streamBase[SendType, RecvType proto.Message] struct {
 
 	ctx      context.Context
 	cancel   context.CancelFunc
-	mu       sync.Mutex
 	streamID string
 
 	adapter  StreamAdapter
 	recvChan chan RecvType
 
+	mu      sync.Mutex
 	pending atomic.Int32
 	acks    map[string]chan struct{}
 	closed  core.Fuse
@@ -57,10 +58,10 @@ type streamBase[SendType, RecvType proto.Message] struct {
 
 func NewStream[SendType, RecvType proto.Message](
 	ctx context.Context,
-	timeout time.Duration,
+	i *info.RequestInfo,
 	streamID string,
+	timeout time.Duration,
 	adapter StreamAdapter,
-	info psrpc.RPCInfo,
 	streamInterceptors []psrpc.StreamInterceptor,
 	recvChan chan RecvType,
 	acks map[string]chan struct{},
@@ -81,7 +82,7 @@ func NewStream[SendType, RecvType proto.Message](
 	return &stream[SendType, RecvType]{
 		streamBase: base,
 		handler: interceptors.ChainClientInterceptors[psrpc.StreamHandler](
-			streamInterceptors, info, base,
+			streamInterceptors, i, base,
 		),
 	}
 }
@@ -227,10 +228,15 @@ func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.S
 
 	select {
 	case <-ackChan:
-	case <-ctx.Done():
-		err = psrpc.ErrRequestTimedOut
 	case <-s.ctx.Done():
 		err = s.Err()
+	case <-ctx.Done():
+		select {
+		case <-s.ctx.Done():
+			err = s.Err()
+		default:
+			err = psrpc.ErrRequestTimedOut
+		}
 	}
 
 	return

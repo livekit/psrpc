@@ -6,15 +6,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 func ChainClientInterceptors[HandlerType any, InterceptorType ~func(psrpc.RPCInfo, HandlerType) HandlerType](
 	interceptors []InterceptorType,
-	info psrpc.RPCInfo,
+	requestInfo *info.RequestInfo,
 	handler HandlerType,
 ) HandlerType {
 	for i := len(interceptors) - 1; i >= 0; i-- {
-		handler = interceptors[i](info, handler)
+		handler = interceptors[i](requestInfo.RPCInfo, handler)
 	}
 	return handler
 }
@@ -26,7 +27,7 @@ func ChainServerInterceptors(interceptors []psrpc.ServerRPCInterceptor) psrpc.Se
 	case 1:
 		return interceptors[0]
 	default:
-		return func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (proto.Message, error) {
+		return func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (proto.Message, error) {
 			// the struct ensures the variables are allocated together, rather than separately, since we
 			// know they should be garbage collected together. This saves 1 allocation and decreases
 			// time/call by about 10% on the microbenchmark.
@@ -36,10 +37,10 @@ func ChainServerInterceptors(interceptors []psrpc.ServerRPCInterceptor) psrpc.Se
 			}
 			state.next = func(ctx context.Context, req proto.Message) (proto.Message, error) {
 				if state.i == len(interceptors)-1 {
-					return interceptors[state.i](ctx, req, info, handler)
+					return interceptors[state.i](ctx, req, rpcInfo, handler)
 				}
 				state.i++
-				return interceptors[state.i-1](ctx, req, info, state.next)
+				return interceptors[state.i-1](ctx, req, rpcInfo, state.next)
 			}
 			return state.next(ctx, req)
 		}

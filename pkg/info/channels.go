@@ -1,6 +1,8 @@
-package channels
+package info
 
-import "unicode"
+import (
+	"unicode"
+)
 
 const lowerHex = "0123456789abcdef"
 
@@ -14,32 +16,32 @@ var channelChar = &unicode.RangeTable{
 	LatinOffset: 4,
 }
 
-func RPCChannel(serviceName, rpc string, topic []string) string {
-	return formatChannel(serviceName, rpc, topic, "REQ")
+func GetClaimRequestChannel(service, clientID string) string {
+	return formatChannel(service, clientID, "CLAIM")
 }
 
-func HandlerKey(rpc string, topic []string) string {
-	return formatChannel(rpc, topic)
+func GetStreamChannel(service, nodeID string) string {
+	return formatChannel(service, nodeID, "STR")
 }
 
-func ResponseChannel(serviceName, clientID string) string {
-	return formatChannel(serviceName, clientID, "RES")
+func GetResponseChannel(service, clientID string) string {
+	return formatChannel(service, clientID, "RES")
 }
 
-func ClaimRequestChannel(serviceName, clientID string) string {
-	return formatChannel(serviceName, clientID, "CLAIM")
+func (i *RequestInfo) GetRPCChannel() string {
+	return formatChannel(i.Service, i.Method, i.Topic, "REQ")
 }
 
-func ClaimResponseChannel(serviceName, rpc string, topic []string) string {
-	return formatChannel(serviceName, rpc, topic, "RCLAIM")
+func (i *RequestInfo) GetHandlerKey() string {
+	return formatChannel(i.Method, i.Topic)
 }
 
-func StreamChannel(serviceName, nodeID string) string {
-	return formatChannel(serviceName, nodeID, "STR")
+func (i *RequestInfo) GetClaimResponseChannel() string {
+	return formatChannel(i.Service, i.Method, i.Topic, "RCLAIM")
 }
 
-func StreamServerChannel(serviceName, rpc string, topic []string) string {
-	return formatChannel(serviceName, rpc, topic, "STR")
+func (i *RequestInfo) GetStreamServerChannel() string {
+	return formatChannel(i.Service, i.Method, i.Topic, "STR")
 }
 
 func formatChannel(parts ...any) string {

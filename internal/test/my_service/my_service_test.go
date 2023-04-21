@@ -40,11 +40,11 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	sB := createServer(t, bus)
 
 	requestCount := 0
-	requestHook := func(ctx context.Context, req proto.Message, info psrpc.RPCInfo) {
+	requestHook := func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo) {
 		requestCount++
 	}
 	responseCount := 0
-	responseHook := func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, res proto.Message, err error) {
+	responseHook := func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo, res proto.Message, err error) {
 		responseCount++
 	}
 	cA := createClient(t, bus, psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
@@ -85,6 +85,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	for i := 0; i < 2; i++ {
 		select {
 		case res := <-respChan:
+			require.NotNil(t, res)
 			require.NoError(t, res.Err)
 		case <-time.After(time.Second * 3):
 			t.Fatalf("timed out")

@@ -9,15 +9,15 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/channels"
+	"github.com/livekit/psrpc/pkg/info"
 )
 
 type RPCClient struct {
+	*info.ServiceDefinition
 	psrpc.ClientOpts
 
-	bus              bus.MessageBus
-	serviceName      string
-	id               string
+	bus bus.MessageBus
+
 	mu               sync.RWMutex
 	claimRequests    map[string]chan *internal.ClaimRequest
 	responseChannels map[string]chan *internal.Response
@@ -25,32 +25,39 @@ type RPCClient struct {
 	closed           core.Fuse
 }
 
-func NewRPCClientWithStreams(serviceName, clientID string, b bus.MessageBus, opts ...psrpc.ClientOption) (*RPCClient, error) {
-	return NewRPCClient(serviceName, clientID, b, append(opts, withStreams())...)
+func NewRPCClientWithStreams(
+	sd *info.ServiceDefinition,
+	b bus.MessageBus,
+	opts ...psrpc.ClientOption,
+) (*RPCClient, error) {
+	return NewRPCClient(sd, b, append(opts, withStreams())...)
 }
 
-func NewRPCClient(serviceName, clientID string, b bus.MessageBus, opts ...psrpc.ClientOption) (*RPCClient, error) {
+func NewRPCClient(
+	sd *info.ServiceDefinition,
+	b bus.MessageBus,
+	opts ...psrpc.ClientOption,
+) (*RPCClient, error) {
 	c := &RPCClient{
-		ClientOpts:       getClientOpts(opts...),
-		bus:              b,
-		serviceName:      serviceName,
-		id:               clientID,
-		claimRequests:    make(map[string]chan *internal.ClaimRequest),
-		responseChannels: make(map[string]chan *internal.Response),
-		streamChannels:   make(map[string]chan *internal.Stream),
-		closed:           core.NewFuse(),
+		ServiceDefinition: sd,
+		ClientOpts:        getClientOpts(opts...),
+		bus:               b,
+		claimRequests:     make(map[string]chan *internal.ClaimRequest),
+		responseChannels:  make(map[string]chan *internal.Response),
+		streamChannels:    make(map[string]chan *internal.Stream),
+		closed:            core.NewFuse(),
 	}
 
 	ctx := context.Background()
 	responses, err := bus.Subscribe[*internal.Response](
-		ctx, c.bus, channels.ResponseChannel(serviceName, clientID), c.ChannelSize,
+		ctx, c.bus, info.GetResponseChannel(c.Name, c.ID), c.ChannelSize,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	claims, err := bus.Subscribe[*internal.ClaimRequest](
-		ctx, c.bus, channels.ClaimRequestChannel(serviceName, clientID), c.ChannelSize,
+		ctx, c.bus, info.GetClaimRequestChannel(c.Name, c.ID), c.ChannelSize,
 	)
 	if err != nil {
 		_ = responses.Close()
@@ -60,7 +67,7 @@ func NewRPCClient(serviceName, clientID string, b bus.MessageBus, opts ...psrpc.
 	var streams bus.Subscription[*internal.Stream]
 	if c.EnableStreams {
 		streams, err = bus.Subscribe[*internal.Stream](
-			ctx, c.bus, channels.StreamChannel(serviceName, clientID), c.ChannelSize,
+			ctx, c.bus, info.GetStreamChannel(c.Name, c.ID), c.ChannelSize,
 		)
 		if err != nil {
 			_ = responses.Close()

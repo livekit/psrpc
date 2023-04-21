@@ -14,7 +14,8 @@ import (
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/rand"
-	client2 "github.com/livekit/psrpc/pkg/client"
+	"github.com/livekit/psrpc/pkg/client"
+	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/server"
 )
 
@@ -57,9 +58,18 @@ func TestRPC(t *testing.T) {
 func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	serviceName := "test"
 
-	serverA := server.NewRPCServer(serviceName, rand.String(), bus)
-	serverB := server.NewRPCServer(serviceName, rand.String(), bus)
-	serverC := server.NewRPCServer(serviceName, rand.String(), bus)
+	serverA := server.NewRPCServer(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
+	serverB := server.NewRPCServer(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
+	serverC := server.NewRPCServer(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
 
 	t.Cleanup(func() {
 		serverA.Close(true)
@@ -67,7 +77,10 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 		serverC.Close(true)
 	})
 
-	c, err := client2.NewRPCClient(serviceName, rand.String(), bus)
+	c, err := client.NewRPCClient(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
 	require.NoError(t, err)
 
 	retErr := psrpc.NewErrorf(psrpc.Internal, "foo")
@@ -83,30 +96,40 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	returnError := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
 		return nil, retErr
 	}
-	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil, true, false)
+
+	serverA.RegisterMethod(rpc, false, false, true)
+	serverB.RegisterMethod(rpc, false, false, true)
+	c.RegisterMethod(rpc, false, false, true)
+
+	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil)
 	require.NoError(t, err)
-	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil, true, false)
+	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	requestID := rand.NewRequestID()
-	res, err := client2.RequestSingle[*internal.Response](
-		ctx, c, rpc, nil, true, &internal.Request{RequestId: requestID},
+	res, err := client.RequestSingle[*internal.Response](
+		ctx, c, rpc, nil, &internal.Request{RequestId: requestID},
 	)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
-	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, multiRpc, nil, addOne, nil, false, true)
+	serverA.RegisterMethod(multiRpc, false, true, false)
+	serverB.RegisterMethod(multiRpc, false, true, false)
+	serverC.RegisterMethod(multiRpc, false, true, false)
+	c.RegisterMethod(multiRpc, false, true, false)
+
+	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, multiRpc, nil, addOne, nil)
 	require.NoError(t, err)
-	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, multiRpc, nil, addOne, nil, false, true)
+	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, multiRpc, nil, addOne, nil)
 	require.NoError(t, err)
-	err = server.RegisterHandler[*internal.Request, *internal.Response](serverC, multiRpc, nil, returnError, nil, false, true)
+	err = server.RegisterHandler[*internal.Request, *internal.Response](serverC, multiRpc, nil, returnError, nil)
 	require.NoError(t, err)
 
 	requestID = rand.NewRequestID()
-	resChan, err := client2.RequestMulti[*internal.Response](
+	resChan, err := client.RequestMulti[*internal.Response](
 		ctx, c, multiRpc, nil, &internal.Request{RequestId: requestID},
 	)
 	require.NoError(t, err)
@@ -134,13 +157,19 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 func testStream(t *testing.T, bus psrpc.MessageBus) {
 	serviceName := "test_stream"
 
-	serverA := server.NewRPCServer(serviceName, rand.String(), bus)
+	serverA := server.NewRPCServer(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
 
 	t.Cleanup(func() {
 		serverA.Close(true)
 	})
 
-	c, err := client2.NewRPCClientWithStreams(serviceName, rand.String(), bus)
+	c, err := client.NewRPCClientWithStreams(&info.ServiceDefinition{
+		Name: serviceName,
+		ID:   rand.String(),
+	}, bus)
 	require.NoError(t, err)
 
 	serverClose := make(chan struct{})
@@ -158,12 +187,16 @@ func testStream(t *testing.T, bus psrpc.MessageBus) {
 		}
 		return nil
 	}
-	err = server.RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil, true)
+
+	serverA.RegisterMethod(rpc, false, false, true)
+	c.RegisterMethod(rpc, false, false, true)
+
+	err = server.RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	stream, err := client2.OpenStream[*internal.Response, *internal.Response](
-		ctx, c, rpc, nil, true,
+	stream, err := client.OpenStream[*internal.Response, *internal.Response](
+		ctx, c, rpc, nil,
 	)
 	require.NoError(t, err)
 
