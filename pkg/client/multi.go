@@ -124,10 +124,12 @@ func (m *multiRPC[ResponseType]) handleResponses(
 			for _, hook := range m.c.ResponseHooks {
 				hook(ctx, req, m.info, v, err)
 			}
+
 			m.handler.Recv(v, err)
 
 		case <-timer.C:
 			m.handler.Close()
+			m.handler = nil
 			return
 		}
 	}

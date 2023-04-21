@@ -44,7 +44,26 @@ func RequestSingle[ResponseType proto.Message](
 		hook(ctx, request, info)
 	}
 
-	call := func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
+	handler := interceptors.ChainClientInterceptors[psrpc.ClientRPCHandler](
+		c.RpcInterceptors,
+		info,
+		newRPC[ResponseType](c, rpc, topic, requireClaim),
+	)
+
+	res, err := handler(ctx, request, opts...)
+	if res != nil {
+		response, _ = res.(ResponseType)
+	}
+
+	return
+}
+
+func newRPC[ResponseType proto.Message](
+	c *RPCClient, rpc string,
+	topic []string,
+	requireClaim bool,
+) psrpc.ClientRPCHandler {
+	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
 		o := getRequestOpts(c.ClientOpts, opts...)
 
 		b, err := bus.SerializePayload(request)
@@ -124,12 +143,6 @@ func RequestSingle[ResponseType proto.Message](
 
 		return
 	}
-
-	res, err := interceptors.ChainClientInterceptors[psrpc.ClientRPCHandler](c.RpcInterceptors, info, call)(ctx, request, opts...)
-	if res != nil {
-		response, _ = res.(ResponseType)
-	}
-	return
 }
 
 func selectServer(
