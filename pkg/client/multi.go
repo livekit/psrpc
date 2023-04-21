@@ -127,7 +127,6 @@ func (m *multiRPC[ResponseType]) handleResponses(
 
 		case <-timer.C:
 			m.handler.Close()
-			m.handler = nil
 			return
 		}
 	}

@@ -88,10 +88,6 @@ func NewStream[SendType, RecvType proto.Message](
 }
 
 func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
-	if s.closed.IsBroken() {
-		return psrpc.ErrStreamClosed
-	}
-
 	switch b := is.Body.(type) {
 	case *internal.Stream_Ack:
 		s.mu.Lock()
@@ -104,6 +100,10 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
+		if s.closed.IsBroken() {
+			return psrpc.ErrStreamClosed
+		}
+
 		s.pending.Inc()
 		defer s.pending.Dec()
 

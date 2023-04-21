@@ -35,22 +35,25 @@ func TestStream(t *testing.T) {
 		err.Store(s.Send(&internal.Request{}))
 		wg.Done()
 	}()
+
+	var handleErr error
 	go func() {
 		for s.(*stream[*internal.Request, *internal.Response]).pending.Load() == 0 {
 			time.Sleep(time.Millisecond)
 		}
-		require.NoError(t, s.HandleStream(&internal.Stream{
+		handleErr = s.HandleStream(&internal.Stream{
 			Body: &internal.Stream_Close{
 				Close: &internal.StreamClose{
 					Error: psrpc.ErrStreamClosed.Error(),
 					Code:  string(psrpc.ErrStreamClosed.Code()),
 				},
 			},
-		}))
+		})
 		wg.Done()
 	}()
 	wg.Wait()
 
+	require.NoError(t, handleErr)
 	require.EqualValues(t, psrpc.ErrStreamClosed, err.Load())
 }
 

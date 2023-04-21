@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lithammer/shortuuid/v3"
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
+	r "github.com/livekit/psrpc/internal/rand"
 )
 
 func TestGeneratedService(t *testing.T) {
@@ -211,14 +211,14 @@ func createServer(t *testing.T, bus psrpc.MessageBus) *MyService {
 	svc := &MyService{
 		counts: make(map[string]int),
 	}
-	server, err := NewMyServiceServer(randString(), svc, bus)
+	server, err := NewMyServiceServer(r.String(), svc, bus)
 	require.NoError(t, err)
 	svc.server = server
 	return svc
 }
 
 func createClient(t *testing.T, bus psrpc.MessageBus, opts ...psrpc.ClientOption) MyServiceClient {
-	client, err := NewMyServiceClient(randString(), bus, opts...)
+	client, err := NewMyServiceClient(r.String(), bus, opts...)
 	require.NoError(t, err)
 	return client
 }
@@ -286,8 +286,4 @@ func (s *MyService) GetRegionStats(_ context.Context, _ *MyRequest) (*MyResponse
 	s.counts["GetRegionStats"]++
 	s.Unlock()
 	return &MyResponse{}, nil
-}
-
-func randString() string {
-	return shortuuid.New()[:12]
 }

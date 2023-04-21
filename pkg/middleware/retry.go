@@ -93,7 +93,7 @@ func (s *streamRetryInterceptor) Send(msg proto.Message, opts ...psrpc.StreamOpt
 	return retry(s.opt, nil, func(timeout time.Duration) error {
 		nextOpts := opts
 		if timeout > 0 {
-			nextOpts := make([]psrpc.StreamOption, len(opts)+1)
+			nextOpts = make([]psrpc.StreamOption, len(opts)+1)
 			copy(nextOpts, opts)
 			nextOpts[len(opts)] = psrpc.WithTimeout(timeout)
 		}

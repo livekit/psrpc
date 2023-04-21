@@ -40,9 +40,9 @@ func String() string {
 }
 
 func formatID(prefix string) string {
-	b := make([]byte, 16)
+	b := make([]byte, len(prefix)+12)
 	copy(b, prefix)
-	readIDChars(b[4:])
+	readIDChars(b[len(prefix):])
 	return string(b)
 }
 
