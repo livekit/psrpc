@@ -3,11 +3,23 @@ package psrpc
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/twitchtv/twirp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+var (
+	ErrRequestCanceled = NewErrorf(Canceled, "request canceled")
+	ErrRequestTimedOut = NewErrorf(DeadlineExceeded, "request timed out")
+	ErrNoResponse      = NewErrorf(Unavailable, "no response from servers")
+	ErrStreamEOF       = NewError(Unavailable, io.EOF)
+	ErrClientClosed    = NewErrorf(Canceled, "client is closed")
+	ErrServerClosed    = NewErrorf(Canceled, "server is closed")
+	ErrStreamClosed    = NewErrorf(Canceled, "stream closed")
+	ErrSlowConsumer    = NewErrorf(Unavailable, "stream message discarded by slow consumer")
 )
 
 type Error interface {
@@ -32,6 +44,17 @@ func NewErrorf(code ErrorCode, msg string, args ...interface{}) Error {
 	return &psrpcError{
 		error: fmt.Errorf(msg, args...),
 		code:  code,
+	}
+}
+
+func NewErrorFromResponse(code, err string) Error {
+	if code == "" {
+		code = string(Unknown)
+	}
+
+	return &psrpcError{
+		error: errors.New(err),
+		code:  ErrorCode(code),
 	}
 }
 
@@ -80,17 +103,6 @@ const (
 type psrpcError struct {
 	error
 	code ErrorCode
-}
-
-func newErrorFromResponse(code, err string) Error {
-	if code == "" {
-		code = string(Unknown)
-	}
-
-	return &psrpcError{
-		error: errors.New(err),
-		code:  ErrorCode(code),
-	}
 }
 
 func (e psrpcError) Code() ErrorCode {

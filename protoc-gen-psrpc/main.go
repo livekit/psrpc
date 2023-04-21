@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/livekit/psrpc/internal/gen"
+	"github.com/livekit/psrpc/protoc-gen-psrpc/internal/gen"
 	"github.com/livekit/psrpc/version"
 )
 

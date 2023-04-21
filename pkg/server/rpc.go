@@ -1,0 +1,267 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc"
+	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/internal/logger"
+	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/metadata"
+)
+
+type AffinityFunc[RequestType proto.Message] func(RequestType) float32
+
+type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
+	i *info.RequestInfo
+
+	handler      func(context.Context, RequestType) (ResponseType, error)
+	affinityFunc AffinityFunc[RequestType]
+
+	mu          sync.RWMutex
+	requestSub  bus.Subscription[*internal.Request]
+	claimSub    bus.Subscription[*internal.ClaimResponse]
+	claims      map[string]chan *internal.ClaimResponse
+	handling    atomic.Int32
+	closeOnce   sync.Once
+	complete    chan struct{}
+	onCompleted func()
+}
+
+func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
+	s *RPCServer,
+	i *info.RequestInfo,
+	svcImpl func(context.Context, RequestType) (ResponseType, error),
+	interceptor psrpc.ServerRPCInterceptor,
+	affinityFunc AffinityFunc[RequestType],
+) (*rpcHandlerImpl[RequestType, ResponseType], error) {
+
+	ctx := context.Background()
+	requestSub, err := bus.Subscribe[*internal.Request](
+		ctx, s.bus, i.GetRPCChannel(), s.ChannelSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var claimSub bus.Subscription[*internal.ClaimResponse]
+	if i.RequireClaim {
+		claimSub, err = bus.Subscribe[*internal.ClaimResponse](
+			ctx, s.bus, i.GetClaimResponseChannel(), s.ChannelSize,
+		)
+		if err != nil {
+			_ = requestSub.Close()
+			return nil, err
+		}
+	} else {
+		claimSub = bus.EmptySubscription[*internal.ClaimResponse]{}
+	}
+
+	h := &rpcHandlerImpl[RequestType, ResponseType]{
+		i:            i,
+		requestSub:   requestSub,
+		claimSub:     claimSub,
+		claims:       make(map[string]chan *internal.ClaimResponse),
+		affinityFunc: affinityFunc,
+		complete:     make(chan struct{}),
+	}
+
+	if interceptor == nil {
+		h.handler = svcImpl
+	} else {
+		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
+			var response ResponseType
+			res, err := interceptor(ctx, req, i.RPCInfo, func(context.Context, proto.Message) (proto.Message, error) {
+				return svcImpl(ctx, req)
+			})
+			if res != nil {
+				response = res.(ResponseType)
+			}
+			return response, err
+		}
+	}
+
+	return h, nil
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
+	go func() {
+		requests := h.requestSub.Channel()
+		claims := h.claimSub.Channel()
+
+		for {
+			select {
+			case <-h.complete:
+				return
+
+			case ir := <-requests:
+				if ir == nil {
+					continue
+				}
+				if time.Now().UnixNano() < ir.Expiry {
+					go func() {
+						if err := h.handleRequest(s, ir); err != nil {
+							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
+						}
+					}()
+				}
+
+			case claim := <-claims:
+				if claim == nil {
+					continue
+				}
+				h.mu.RLock()
+				claimChan, ok := h.claims[claim.RequestId]
+				h.mu.RUnlock()
+				if ok {
+					claimChan <- claim
+				}
+			}
+		}
+	}()
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
+	s *RPCServer,
+	ir *internal.Request,
+) error {
+	h.handling.Inc()
+	defer h.handling.Dec()
+
+	head := &metadata.Header{
+		RemoteID: ir.ClientId,
+		SentAt:   time.UnixMilli(ir.SentAt),
+		Metadata: ir.Metadata,
+	}
+	ctx := metadata.NewContextWithIncomingHeader(context.Background(), head)
+	req, err := bus.DeserializePayload[RequestType](ir.RawRequest)
+	if err != nil {
+		var res ResponseType
+		err = psrpc.NewError(psrpc.MalformedRequest, err)
+		_ = h.sendResponse(s, ctx, ir, res, err)
+		return err
+	}
+
+	if h.i.RequireClaim {
+		claimed, err := h.claimRequest(s, ctx, ir, req)
+		if err != nil {
+			return err
+		} else if !claimed {
+			return nil
+		}
+	}
+
+	// call handler function and return response
+	response, err := h.handler(ctx, req)
+	return h.sendResponse(s, ctx, ir, response, err)
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
+	s *RPCServer,
+	ctx context.Context,
+	ir *internal.Request,
+	req RequestType,
+) (bool, error) {
+
+	var affinity float32
+	if h.affinityFunc != nil {
+		affinity = h.affinityFunc(req)
+		if affinity < 0 {
+			return false, nil
+		}
+	} else {
+		affinity = 1
+	}
+
+	claimResponseChan := make(chan *internal.ClaimResponse, 1)
+
+	h.mu.Lock()
+	h.claims[ir.RequestId] = claimResponseChan
+	h.mu.Unlock()
+
+	defer func() {
+		h.mu.Lock()
+		delete(h.claims, ir.RequestId)
+		h.mu.Unlock()
+	}()
+
+	err := s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
+		RequestId: ir.RequestId,
+		ServerId:  s.ID,
+		Affinity:  affinity,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	timeout := time.NewTimer(time.Duration(ir.Expiry - time.Now().UnixNano()))
+	defer timeout.Stop()
+
+	select {
+	case claim := <-claimResponseChan:
+		if claim.ServerId == s.ID {
+			return true, nil
+		} else {
+			return false, nil
+		}
+
+	case <-timeout.C:
+		return false, nil
+	}
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
+	s *RPCServer,
+	ctx context.Context,
+	ir *internal.Request,
+	response proto.Message,
+	err error,
+) error {
+	res := &internal.Response{
+		RequestId: ir.RequestId,
+		ServerId:  s.ID,
+		SentAt:    time.Now().UnixNano(),
+	}
+
+	if err != nil {
+		var e psrpc.Error
+
+		if errors.As(err, &e) {
+			res.Error = e.Error()
+			res.Code = string(e.Code())
+		} else {
+			res.Error = err.Error()
+			res.Code = string(psrpc.Unknown)
+		}
+	} else if response != nil {
+		b, err := bus.SerializePayload(response)
+		if err != nil {
+			res.Error = err.Error()
+			res.Code = string(psrpc.MalformedResponse)
+		} else {
+			res.RawResponse = b
+		}
+	}
+
+	return s.bus.Publish(ctx, info.GetResponseChannel(s.Name, ir.ClientId), res)
+}
+
+func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
+	h.closeOnce.Do(func() {
+		_ = h.requestSub.Close()
+		for !force && h.handling.Load() > 0 {
+			time.Sleep(time.Millisecond * 100)
+		}
+		_ = h.claimSub.Close()
+		h.onCompleted()
+		close(h.complete)
+	})
+	<-h.complete
+}

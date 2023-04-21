@@ -1,9 +1,11 @@
 package psrpc
 
-import "github.com/go-logr/logr"
+import (
+	"github.com/go-logr/logr"
 
-var logger = logr.Discard()
+	"github.com/livekit/psrpc/internal/logger"
+)
 
 func SetLogger(l logr.Logger) {
-	logger = l
+	logger.SetLogger(l)
 }
