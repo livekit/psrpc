@@ -15,6 +15,10 @@ func Join[ResponseType proto.Message](
 	rpc string,
 	topic []string,
 ) (bus.Subscription[ResponseType], error) {
+	if c.closed.IsBroken() {
+		return nil, psrpc.ErrClientClosed
+	}
+
 	i := c.GetInfo(rpc, topic)
 	sub, err := bus.Subscribe[ResponseType](ctx, c.bus, i.GetRPCChannel(), c.ChannelSize)
 	if err != nil {
@@ -29,6 +33,10 @@ func JoinQueue[ResponseType proto.Message](
 	rpc string,
 	topic []string,
 ) (bus.Subscription[ResponseType], error) {
+	if c.closed.IsBroken() {
+		return nil, psrpc.ErrClientClosed
+	}
+
 	i := c.GetInfo(rpc, topic)
 	sub, err := bus.SubscribeQueue[ResponseType](ctx, c.bus, i.GetRPCChannel(), c.ChannelSize)
 	if err != nil {

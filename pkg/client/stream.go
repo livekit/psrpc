@@ -11,7 +11,7 @@ import (
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/logger"
 	"github.com/livekit/psrpc/internal/rand"
-	"github.com/livekit/psrpc/internal/streams"
+	"github.com/livekit/psrpc/internal/stream"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
@@ -58,7 +58,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	}()
 
 	ackChan := make(chan struct{})
-	stream := streams.NewStream[SendType, RecvType](
+	cs := stream.NewStream[SendType, RecvType](
 		ctx,
 		i,
 		streamID,
@@ -69,34 +69,34 @@ func OpenStream[SendType, RecvType proto.Message](
 		map[string]chan struct{}{requestID: ackChan},
 	)
 
-	go runClientStream(c, stream, recvChan)
+	go runClientStream(c, cs, recvChan)
 
 	octx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 
 	if err := c.bus.Publish(octx, i.GetStreamServerChannel(), req); err != nil {
-		_ = stream.Close(err)
+		_ = cs.Close(err)
 		return nil, psrpc.NewError(psrpc.Internal, err)
 	}
 
 	if i.RequireClaim {
 		serverID, err := selectServer(octx, claimChan, nil, o.SelectionOpts)
 		if err != nil {
-			_ = stream.Close(err)
+			_ = cs.Close(err)
 			return nil, err
 		}
 		if err = c.bus.Publish(octx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 			RequestId: requestID,
 			ServerId:  serverID,
 		}); err != nil {
-			_ = stream.Close(err)
+			_ = cs.Close(err)
 			return nil, psrpc.NewError(psrpc.Internal, err)
 		}
 	}
 
 	select {
 	case <-ackChan:
-		return stream, nil
+		return cs, nil
 
 	case <-octx.Done():
 		err := octx.Err()
@@ -105,14 +105,14 @@ func OpenStream[SendType, RecvType proto.Message](
 		} else if errors.Is(err, context.DeadlineExceeded) {
 			err = psrpc.ErrRequestTimedOut
 		}
-		_ = stream.Close(err)
+		_ = cs.Close(err)
 		return nil, err
 	}
 }
 
 func runClientStream[SendType, RecvType proto.Message](
 	c *RPCClient,
-	stream streams.Stream[SendType, RecvType],
+	stream stream.Stream[SendType, RecvType],
 	recvChan chan *internal.Stream,
 ) {
 	ctx := stream.Context()

@@ -24,6 +24,10 @@ func RequestSingle[ResponseType proto.Message](
 	request proto.Message,
 	opts ...psrpc.RequestOption,
 ) (response ResponseType, err error) {
+	if c.closed.IsBroken() {
+		err = psrpc.ErrClientClosed
+		return
+	}
 
 	i := c.GetInfo(rpc, topic)
 

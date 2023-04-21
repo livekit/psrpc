@@ -89,6 +89,10 @@ func NewRPCClient(
 				return
 
 			case claim := <-claims.Channel():
+				if claim == nil {
+					c.Close()
+					continue
+				}
 				c.mu.RLock()
 				claimChan, ok := c.claimRequests[claim.RequestId]
 				c.mu.RUnlock()
@@ -97,6 +101,10 @@ func NewRPCClient(
 				}
 
 			case res := <-responses.Channel():
+				if res == nil {
+					c.Close()
+					continue
+				}
 				c.mu.RLock()
 				resChan, ok := c.responseChannels[res.RequestId]
 				c.mu.RUnlock()
@@ -105,13 +113,16 @@ func NewRPCClient(
 				}
 
 			case msg := <-streams.Channel():
+				if msg == nil {
+					c.Close()
+					continue
+				}
 				c.mu.RLock()
 				streamChan, ok := c.streamChannels[msg.StreamId]
 				c.mu.RUnlock()
 				if ok {
 					streamChan <- msg
 				}
-
 			}
 		}
 	}()

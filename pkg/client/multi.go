@@ -23,6 +23,9 @@ func RequestMulti[ResponseType proto.Message](
 	request proto.Message,
 	opts ...psrpc.RequestOption,
 ) (rChan <-chan *psrpc.Response[ResponseType], err error) {
+	if c.closed.IsBroken() {
+		return nil, psrpc.ErrClientClosed
+	}
 
 	i := c.GetInfo(rpc, topic)
 

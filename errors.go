@@ -16,6 +16,8 @@ var (
 	ErrRequestTimedOut = NewErrorf(DeadlineExceeded, "request timed out")
 	ErrNoResponse      = NewErrorf(Unavailable, "no response from servers")
 	ErrStreamEOF       = NewError(Unavailable, io.EOF)
+	ErrClientClosed    = NewErrorf(Canceled, "client is closed")
+	ErrServerClosed    = NewErrorf(Canceled, "server is closed")
 	ErrStreamClosed    = NewErrorf(Canceled, "stream closed")
 	ErrSlowConsumer    = NewErrorf(Unavailable, "stream message discarded by slow consumer")
 )

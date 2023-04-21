@@ -52,7 +52,7 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 	affinityFunc AffinityFunc[RequestType],
 ) error {
 	if s.shutdown.IsBroken() {
-		return errors.New("RPCServer closed")
+		return psrpc.ErrServerClosed
 	}
 
 	i := s.GetInfo(rpc, topic)
@@ -95,7 +95,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	affinityFunc StreamAffinityFunc,
 ) error {
 	if s.shutdown.IsBroken() {
-		return errors.New("RPCServer closed")
+		return psrpc.ErrServerClosed
 	}
 
 	i := s.GetInfo(rpc, topic)
@@ -109,8 +109,7 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 	}
 
 	// create handler
-	// TODO
-	h, err := newStreamRPCHandler(s, i, svcImpl, nil, affinityFunc)
+	h, err := newStreamRPCHandler(s, i, svcImpl, affinityFunc)
 	if err != nil {
 		return err
 	}

@@ -13,23 +13,24 @@ import (
 	"github.com/livekit/psrpc/internal"
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/logger"
-	"github.com/livekit/psrpc/internal/streams"
+	"github.com/livekit/psrpc/internal/stream"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
 type StreamAffinityFunc func() float32
 
-type streamRPCHandlerImpl[RecvType, SendType proto.Message] struct {
+type streamHandler[RecvType, SendType proto.Message] struct {
 	i *info.RequestInfo
 
 	handler      func(psrpc.ServerStream[SendType, RecvType]) error
+	interceptors []psrpc.StreamInterceptor
 	affinityFunc StreamAffinityFunc
 
 	mu          sync.RWMutex
 	streamSub   bus.Subscription[*internal.Stream]
 	claimSub    bus.Subscription[*internal.ClaimResponse]
-	streams     map[string]streams.Stream[SendType, RecvType]
+	streams     map[string]stream.Stream[SendType, RecvType]
 	claims      map[string]chan *internal.ClaimResponse
 	draining    atomic.Bool
 	closeOnce   sync.Once
@@ -41,9 +42,8 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 	s *RPCServer,
 	i *info.RequestInfo,
 	svcImpl func(psrpc.ServerStream[SendType, RecvType]) error,
-	interceptor psrpc.StreamInterceptor,
 	affinityFunc StreamAffinityFunc,
-) (*streamRPCHandlerImpl[RecvType, SendType], error) {
+) (*streamHandler[RecvType, SendType], error) {
 
 	ctx := context.Background()
 	streamSub, err := bus.Subscribe[*internal.Stream](
@@ -66,12 +66,11 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 		claimSub = bus.EmptySubscription[*internal.ClaimResponse]{}
 	}
 
-	// TODO
-	h := &streamRPCHandlerImpl[RecvType, SendType]{
+	h := &streamHandler[RecvType, SendType]{
 		i:            i,
 		streamSub:    streamSub,
 		claimSub:     claimSub,
-		streams:      make(map[string]streams.Stream[SendType, RecvType]),
+		streams:      make(map[string]stream.Stream[SendType, RecvType]),
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
 		handler:      svcImpl,
@@ -80,7 +79,7 @@ func newStreamRPCHandler[RecvType, SendType proto.Message](
 	return h, nil
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) run(s *RPCServer) {
+func (h *streamHandler[RecvType, SendType]) run(s *RPCServer) {
 	go func() {
 		requests := h.streamSub.Channel()
 		claims := h.claimSub.Channel()
@@ -115,7 +114,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) run(s *RPCServer) {
 	}()
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
+func (h *streamHandler[RecvType, SendType]) handleRequest(
 	s *RPCServer,
 	is *internal.Stream,
 ) error {
@@ -131,17 +130,17 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleRequest(
 		}()
 	} else {
 		h.mu.Lock()
-		stream, ok := h.streams[is.StreamId]
+		ss, ok := h.streams[is.StreamId]
 		h.mu.Unlock()
 
 		if ok {
-			return stream.HandleStream(is)
+			return ss.HandleStream(is)
 		}
 	}
 	return nil
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
+func (h *streamHandler[RecvType, SendType]) handleOpenRequest(
 	s *RPCServer,
 	is *internal.Stream,
 	open *internal.StreamOpen,
@@ -162,7 +161,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 		}
 	}
 
-	stream := streams.NewStream[SendType, RecvType](
+	ss := stream.NewStream[SendType, RecvType](
 		ctx,
 		h.i,
 		is.StreamId,
@@ -178,22 +177,23 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) handleOpenRequest(
 	)
 
 	h.mu.Lock()
-	h.streams[is.StreamId] = stream
+	h.streams[is.StreamId] = ss
 	h.mu.Unlock()
 
-	if err := stream.Ack(octx, is); err != nil {
-		_ = stream.Close(err)
+	if err := ss.Ack(octx, is); err != nil {
+		_ = ss.Close(err)
 		return err
 	}
 
-	err := h.handler(stream)
-	if !stream.Hijacked() {
-		_ = stream.Close(err)
+	err := h.handler(ss)
+	if !ss.Hijacked() {
+		_ = ss.Close(err)
 	}
+
 	return nil
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
+func (h *streamHandler[RecvType, SendType]) claimRequest(
 	s *RPCServer,
 	ctx context.Context,
 	is *internal.Stream,
@@ -246,7 +246,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) claimRequest(
 	}
 }
 
-func (h *streamRPCHandlerImpl[RecvType, SendType]) close(force bool) {
+func (h *streamHandler[RecvType, SendType]) close(force bool) {
 	h.closeOnce.Do(func() {
 		h.draining.Store(true)
 
@@ -274,7 +274,7 @@ func (h *streamRPCHandlerImpl[RecvType, SendType]) close(force bool) {
 }
 
 type serverStream[SendType, RecvType proto.Message] struct {
-	h      *streamRPCHandlerImpl[SendType, RecvType]
+	h      *streamHandler[SendType, RecvType]
 	s      *RPCServer
 	nodeID string
 }
