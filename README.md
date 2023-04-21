@@ -310,10 +310,11 @@ PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap
 func NewError(code ErrorCode, err error) Error
 ```
 
-The `code` parameter provides more context about the cause of the error. A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39)
-are defined for common error conditions. PSRPC errors are serialized by the PSRPC server implementation, and unmarshalled (with the original error code) on the client.
-By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure, or a client error, such as a bad parameter.
-This can be used as an input to the retry logic, or success rate metrics.
+The `code` parameter provides more context about the cause of the error. 
+A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39) are defined for common error conditions.
+PSRPC errors are serialized by the PSRPC server implementation, and unmarshalled (with the original error code) on the client.
+By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure, 
+or a client error, such as a bad parameter. This can be used as an input to the retry logic, or success rate metrics.
 
 The most appropriate HTTP status code for a given error can be retrieved using the `ToHttp()` method. This status code is generated from the associated error code.
 Similarly, a grpc `status.Error` can be created from a `psrpc.Error` using the `ToGrpc()` method.
@@ -338,90 +339,95 @@ func convertError(err error) {
 }
 ```
 
-This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this means that twirp clients will also receive information about the error
-cause as `twirp.Code`. This makes sure that `psrpc.Error` created by psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook with the full associated context.
+This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this
+means that twirp clients will also receive information about the error cause as `twirp.Code`. This makes sure that 
+`psrpc.Error` created by psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook
+with the full associated context.
 
 `psrpc.Error` implements the `Unwrap()` method, so the original error can be retrieved by users of PSRPC.
 
 ## Interceptors
 
-Interceptors allow writing middleware for RPC clients and servers. Interceptors can be used to run code during the call lifecycle such as logging, recording metrics, tracing, and retrying calls.
-PSRPC defines four interceptor types which allow intercepting requests on the client and server.
+Interceptors allow writing middleware for RPC clients and servers. Interceptors can be used to run code during the call 
+lifecycle such as logging, recording metrics, tracing, and retrying calls. PSRPC defines four interceptor types which 
+allow intercepting requests on the client and server.
 
-### ServerInterceptor
+### ServerRPCInterceptor
 
-`ServerInterceptor` are invoked by the server for calls to unary and multi RPCs.
+`ServerRPCInterceptor` are invoked by the server for calls to unary and multi RPCs.
 
 ```go
-type ServerInterceptor func(ctx context.Context, req proto.Message, info RPCInfo, handler Handler) (proto.Message, error)
+type ServerRPCInterceptor func(ctx context.Context, req proto.Message, info RPCInfo, handler ServerRPCHandler) (proto.Message, error)
+
+type ServerRPCHandler func(context.Context, proto.Message) (proto.Message, error)
 ```
 
-The `info` parameter contains metadata about the method including the name and topic. Calling the `handler` parameter hands off execution to the next interceptor.
+The `info` parameter contains metadata about the method including the name and topic. Calling the `handler` parameter 
+hands off execution to the next interceptor.
 
-`ServerInterceptor` are added to new servers with `WithServerInterceptor`.
+`ServerRPCInterceptor` are added to new servers with `WithServerRPCInterceptors`.
+
+Interceptors run in the order they are added so the first interceptor passed to `WithServerRPCInterceptors` is the first
+to receive a new requests. Calling the `handler` parameter invokes the second interceptor and so on until the service 
+implementation receives the request and produces a response.
+
+### ClientRPCInterceptor
+
+`ClientRPCHandler` are created by clients to process requests to unary RPCs.
 
 ```go
-func WithServerInterceptors(interceptors ...ServerInterceptor) ServerOption
+type ClientRPCInterceptor func(info RPCInfo, handler ClientRPCHandler) ClientRPCHandler
+
+type ClientRPCHandler func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
 ```
 
-Interceptors run in the order they are added so the first interceptor passed to `WithServerInterceptors` is the first to receive a new requests. Calling the `handler` parameter invokes the second interceptor
-and so on until the service implementation receives the request and produces a response.
+`ClientRPCInterceptor` are created by implementing `ClientRPCHandler` and passing the interceptor to new clients 
+using `WithClientRPCInterceptors`.
 
-### RPCInterceptor
+The `handler` parameter received by `ClientRPCInterceptor` should be called by the implementation of `ClientRPCHandler`
+to continue the call lifecycle.
 
-`RPCInterceptor` are created by clients to process requests to unary RPCs.
+### ClientMultiRPCInterceptor
 
-```go
-type RPCInterceptor func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
-```
-
-`RPCInterceptor` are created by implementing `RPCInterceptorFactory` and passing the factory to new clients using `WithClientRPCInterceptors`.
-
-```go
-type RPCInterceptorFactory func(info RPCInfo, next RPCInterceptor) RPCInterceptor
-```
-
-The `next` parameter received by `RPCInterceptorFactory` should be called by the implementation of `RPCInterceptor` to continue the call lifecycle.
-
-### MultiRPCInterceptor
-
-`MultiRPCInterceptor` are created by clients to process requests to multi RPCs. Because `MultiRPCInterceptor` process several responses for the same request implementations can define separate functions
-for each phase of the call lifecycle. The `Send` function is executed on outgoing request parameters. The `Recv` function is executed once for each response when it returns from a servers. `Close` is called when
-the deadline is reached.
+`ClientMultiRPCHandler` are created by clients to process requests to multi RPCs. Because `ClientMultiRPCHandler` 
+process several responses for the same request, implementations must define separate functions for each phase of the call
+lifecycle. The `Send` function is executed on outgoing request parameters. The `Recv` function is executed once for each
+response when it returns from a servers. `Close` is called when the deadline is reached.
 
 ```go
-type MultiRPCInterceptor interface {
-	Send(ctx context.Context, msg proto.Message, opts ...RequestOption) error
-	Recv(msg proto.Message, err error)
-	Close()
+type ClientMultiRPCInterceptor func(info RPCInfo, handler ClientMultiRPCHandler) ClientMultiRPCHandler
+
+type ClientMultiRPCHandler interface {
+    Send(ctx context.Context, msg proto.Message, opts ...RequestOption) error
+    Recv(msg proto.Message, err error)
+    Close()
 }
 ```
 
-`MultiRPCInterceptor` are created by implementing `MultiRPCInterceptorFactory` and passing the factory to new clients using `WithClientMultiRPCInterceptors`.
+`ClientMultiRPCInterceptor` are created by implementing `ClientMultiRPCHandler` and passing the interceptor to new 
+clients using `WithClientMultiRPCInterceptors`.
 
-```go
-type MultiRPCInterceptorFactory func(info RPCInfo, next MultiRPCInterceptor) MultiRPCInterceptor
-```
-
-Each function in a `MultiRPCInterceptor` should call the corresponding function in the interceptor received in the `next` parameter.
+Each function in a `ClientMultiRPCInterceptor` should call the corresponding function in the handler received in 
+the `handler` parameter.
 
 ### StreamInterceptor
 
-`StreamInterceptor` are created by both clients and servers to process streaming RPCs. The `Send` function is executed once for each outgoing message. The `Recv` function is executed once for each incoming
-message. `Close` is called when either the local or remote host close the stream or if the stream receives a malformed message.
+`StreamInterceptor` are created by both clients and servers to process streaming RPCs. The `Send` function is executed 
+once for each outgoing message. The `Recv` function is executed once for each incoming message. `Close` is called when 
+either the local or remote host close the stream or if the stream receives a malformed message.
 
 ```go
-type StreamInterceptor interface {
-	Recv(msg proto.Message) error
-	Send(msg proto.Message, opts ...StreamOption) error
-	Close(cause error) error
+type StreamInterceptor func(info RPCInfo, handler StreamHandler) StreamHandler
+
+type StreamHandler interface {
+    Recv(msg proto.Message) error
+    Send(msg proto.Message, opts ...StreamOption) error
+    Close(cause error) error
 }
 ```
 
-`StreamInterceptor` are created by implementing `StreamInterceptorFactory` and passing the factory to new clients or servers using `WithClientStreamInterceptors` and `WithServerStreamInterceptors`.
+`StreamInterceptor` are created by implementing `StreamHandler` and passing the interceptor to new clients or 
+servers using `WithClientStreamInterceptors` and `WithServerStreamInterceptors`.
 
-```go
-type StreamInterceptorFactory func(info RPCInfo, next StreamInterceptor) StreamInterceptor
-```
-
-Each function in a `StreamInterceptor` should call the corresponding function in the interceptor received in the `next` parameter.
+Each function in a `StreamInterceptor` should call the corresponding function in the handler
+received in the `handler` parameter.

@@ -19,9 +19,9 @@ import (
 	descriptor "google.golang.org/protobuf/types/descriptorpb"
 	plugin "google.golang.org/protobuf/types/pluginpb"
 
-	"github.com/livekit/psrpc/internal/gen"
-	"github.com/livekit/psrpc/internal/gen/stringutils"
-	"github.com/livekit/psrpc/internal/gen/typemap"
+	"github.com/livekit/psrpc/protoc-gen-psrpc/internal/gen"
+	"github.com/livekit/psrpc/protoc-gen-psrpc/internal/gen/stringutils"
+	"github.com/livekit/psrpc/protoc-gen-psrpc/internal/gen/typemap"
 	"github.com/livekit/psrpc/protoc-gen-psrpc/options"
 	"github.com/livekit/psrpc/version"
 )
@@ -83,8 +83,10 @@ func (t *psrpc) Generate(in *plugin.CodeGeneratorRequest) *plugin.CodeGeneratorR
 	t.reg = typemap.New(in.ProtoFile)
 
 	// Register names of packages that we import.
+	t.registerPackageName("client")
 	t.registerPackageName("context")
 	t.registerPackageName("psrpc")
+	t.registerPackageName("server")
 	t.registerPackageName("version")
 
 	// Time to figure out package names of objects defined in protobuf. First,
@@ -247,16 +249,21 @@ func (t *psrpc) generateImports(file *descriptor.FileDescriptorProto) {
 	}
 
 	// stdlib imports
+	t.P(`import (`)
 	for _, service := range file.Service {
 		if len(service.Method) > 0 {
-			t.P(`import `, t.pkgs["context"], ` "context"`)
+			t.P(`  "context"`)
+			t.P()
 			break
 		}
 	}
 
 	// dependency imports
-	t.P(`import `, t.pkgs["psrpc"], ` "github.com/livekit/psrpc"`)
-	t.P(`import `, t.pkgs["version"], ` "github.com/livekit/psrpc/version"`)
+	t.P(`  "github.com/livekit/psrpc"`)
+	t.P(`  "github.com/livekit/psrpc/pkg/client"`)
+	t.P(`  "github.com/livekit/psrpc/pkg/server"`)
+	t.P(`  "github.com/livekit/psrpc/version"`)
+	t.P(`)`)
 
 	// It's legal to import a message and use it as an input or output for a
 	// method. Make sure to import the package of any such message. First, dedupe
@@ -434,7 +441,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 	newClientFunc := "New" + servName + "Client"
 
 	t.P(`type `, structName, servTopics.FormatTypeParamConstraints(), ` struct {`)
-	t.P(`  client *`, t.pkgs["psrpc"], `.RPCClient`)
+	t.P(`  client *`, t.pkgs["client"], `.RPCClient`)
 	t.P(`}`)
 	t.P()
 
@@ -446,7 +453,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			clientConstructor = `NewRPCClientWithStreams`
 		}
 	}
-	t.P(`  rpcClient, err := `, t.pkgs["psrpc"], `.`, clientConstructor, `("`, servName, `", clientID, bus, opts...)`)
+	t.P(`  rpcClient, err := `, t.pkgs["client"], `.`, clientConstructor, `("`, servName, `", clientID, bus, opts...)`)
 	t.P(`  if err != nil {`)
 	t.P(`    return nil, err`)
 	t.P(`  }`)
@@ -487,7 +494,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			}
 		}
 
-		t.W(`  return `, t.pkgs["psrpc"])
+		t.W(`  return `, t.pkgs["client"])
 		if opts.Subscription {
 			if opts.Multi {
 				t.W(`.Join[*`)
@@ -559,7 +566,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	servStruct := serviceStruct(service)
 	t.P(`type `, servStruct, servTopics.FormatTypeParamConstraints(), ` struct {`)
 	t.P(`  svc `, servName, `ServerImpl`)
-	t.P(`  rpc *`, t.pkgs["psrpc"], `.RPCServer`)
+	t.P(`  rpc *`, t.pkgs["server"], `.RPCServer`)
 	t.P(`}`)
 	t.P()
 
@@ -567,7 +574,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	t.P(`// New`, servName, `Server builds a RPCServer that will route requests`)
 	t.P(`// to the corresponding method in the provided svc implementation.`)
 	t.P(`func New`, servName, `Server`, servTopics.FormatTypeParamConstraints(), `(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server`, servTopics.FormatTypeParams(), `, error) {`)
-	t.P(`  s := `, t.pkgs["psrpc"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
+	t.P(`  s := `, t.pkgs["server"], `.NewRPCServer("`, servName, `", serverID, bus, opts...)`)
 	t.P()
 
 	errVar := false
@@ -587,7 +594,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		if opts.Stream {
 			registerFuncName = "RegisterStreamHandler"
 		}
-		t.W(`  err = `, t.pkgs["psrpc"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
+		t.W(`  err = `, t.pkgs["server"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
 		if t.getOptions(method).AffinityFunc {
 			t.W(`, svc.`, methName, `Affinity`)
 		} else {
@@ -637,7 +644,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 				registerFuncName = "RegisterStreamHandler"
 			}
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
-			t.W(`  return `, t.pkgs["psrpc"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
+			t.W(`  return `, t.pkgs["server"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
 			if t.getOptions(method).AffinityFunc {
 				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
@@ -658,10 +665,10 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	}
 
 	for _, group := range t.topicGroupsForService(service) {
-		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) all`, group.typeName, `TopicRegisterers() `, t.pkgs["psrpc"], `.RegistererSlice {`)
-		t.P(`  return `, t.pkgs["psrpc"], `.RegistererSlice{`)
+		t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) all`, group.typeName, `TopicRegisterers() `, t.pkgs["server"], `.RegistererSlice {`)
+		t.P(`  return `, t.pkgs["server"], `.RegistererSlice{`)
 		for _, methName := range group.methNames {
-			t.P(`    `, t.pkgs["psrpc"], `.NewRegisterer(s.Register`, methName, `Topic, s.Deregister`, methName, `Topic),`)
+			t.P(`    `, t.pkgs["server"], `.NewRegisterer(s.Register`, methName, `Topic, s.Deregister`, methName, `Topic),`)
 		}
 		t.P(`  }`)
 		t.P(`}`)

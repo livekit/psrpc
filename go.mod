@@ -3,6 +3,7 @@ module github.com/livekit/psrpc
 go 1.18
 
 require (
+	github.com/frostbyte73/core v0.0.5
 	github.com/go-logr/logr v1.2.3
 	github.com/lithammer/shortuuid/v3 v3.0.7
 	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1
