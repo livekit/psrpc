@@ -228,8 +228,6 @@ func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.S
 
 	select {
 	case <-ackChan:
-	case <-s.ctx.Done():
-		err = s.Err()
 	case <-ctx.Done():
 		select {
 		case <-s.ctx.Done():
