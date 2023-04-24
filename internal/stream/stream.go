@@ -100,12 +100,12 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
+		s.pending.Inc()
+		defer s.pending.Dec()
+
 		if s.closed.IsBroken() {
 			return psrpc.ErrStreamClosed
 		}
-
-		s.pending.Inc()
-		defer s.pending.Dec()
 
 		v, err := bus.DeserializePayload[RecvType](b.Message.RawMessage)
 		if err != nil {
