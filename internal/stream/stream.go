@@ -100,12 +100,12 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
+		s.pending.Inc()
+		defer s.pending.Dec()
+
 		if s.closed.IsBroken() {
 			return psrpc.ErrStreamClosed
 		}
-
-		s.pending.Inc()
-		defer s.pending.Dec()
 
 		v, err := bus.DeserializePayload[RecvType](b.Message.RawMessage)
 		if err != nil {
@@ -228,8 +228,6 @@ func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.S
 
 	select {
 	case <-ackChan:
-	case <-s.ctx.Done():
-		err = s.Err()
 	case <-ctx.Done():
 		select {
 		case <-s.ctx.Done():
