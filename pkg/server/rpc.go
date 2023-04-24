@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -29,7 +28,7 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 	requestSub  bus.Subscription[*internal.Request]
 	claimSub    bus.Subscription[*internal.ClaimResponse]
 	claims      map[string]chan *internal.ClaimResponse
-	handling    atomic.Int32
+	handling    sync.WaitGroup
 	closeOnce   sync.Once
 	complete    chan struct{}
 	onCompleted func()
@@ -132,8 +131,8 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	s *RPCServer,
 	ir *internal.Request,
 ) error {
-	h.handling.Inc()
-	defer h.handling.Dec()
+	h.handling.Add(1)
+	defer h.handling.Done()
 
 	head := &metadata.Header{
 		RemoteID: ir.ClientId,
@@ -256,8 +255,8 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
 	h.closeOnce.Do(func() {
 		_ = h.requestSub.Close()
-		for !force && h.handling.Load() > 0 {
-			time.Sleep(time.Millisecond * 100)
+		if !force {
+			h.handling.Wait()
 		}
 		_ = h.claimSub.Close()
 		h.onCompleted()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
@@ -38,9 +37,7 @@ func TestStream(t *testing.T) {
 
 	var handleErr error
 	go func() {
-		for s.(*stream[*internal.Request, *internal.Response]).pending.Load() == 0 {
-			time.Sleep(time.Millisecond)
-		}
+		s.(*stream[*internal.Request, *internal.Response]).pending.Wait()
 		handleErr = s.HandleStream(&internal.Stream{
 			Body: &internal.Stream_Close{
 				Close: &internal.StreamClose{

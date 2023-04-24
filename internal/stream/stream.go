@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/frostbyte73/core"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -50,7 +49,7 @@ type streamBase[SendType, RecvType proto.Message] struct {
 	recvChan chan RecvType
 
 	mu      sync.Mutex
-	pending atomic.Int32
+	pending sync.WaitGroup
 	acks    map[string]chan struct{}
 	closed  core.Fuse
 	err     error
@@ -100,8 +99,8 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
-		s.pending.Inc()
-		defer s.pending.Dec()
+		s.pending.Add(1)
+		defer s.pending.Done()
 
 		if s.closed.IsBroken() {
 			return psrpc.ErrStreamClosed
@@ -181,8 +180,8 @@ func (s *stream[SendType, RecvType]) Send(request SendType, opts ...psrpc.Stream
 }
 
 func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
-	s.pending.Inc()
-	defer s.pending.Dec()
+	s.pending.Add(1)
+	defer s.pending.Done()
 
 	o := getStreamOpts(s.StreamOpts, opts...)
 
@@ -289,19 +288,13 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 			},
 		})
 
-		s.waitForPending()
+		s.pending.Wait()
 		s.adapter.Close(s.streamID)
 		s.cancel()
 		close(s.recvChan)
 	})
 
 	return err
-}
-
-func (s *streamBase[SendType, RecvType]) waitForPending() {
-	for s.pending.Load() > 0 {
-		time.Sleep(time.Millisecond * 100)
-	}
 }
 
 func (s *streamBase[SendType, RecvType]) Err() error {
