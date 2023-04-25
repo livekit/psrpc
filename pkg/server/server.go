@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/frostbyte73/core"
-	"go.uber.org/atomic"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -28,7 +26,7 @@ type RPCServer struct {
 
 	mu       sync.RWMutex
 	handlers map[string]rpcHandler
-	active   atomic.Int32
+	active   sync.WaitGroup
 	shutdown core.Fuse
 }
 
@@ -71,9 +69,9 @@ func RegisterHandler[RequestType proto.Message, ResponseType proto.Message](
 		return err
 	}
 
-	s.active.Inc()
+	s.active.Add(1)
 	h.onCompleted = func() {
-		s.active.Dec()
+		s.active.Done()
 		s.mu.Lock()
 		delete(s.handlers, key)
 		s.mu.Unlock()
@@ -114,9 +112,9 @@ func RegisterStreamHandler[RequestType proto.Message, ResponseType proto.Message
 		return err
 	}
 
-	s.active.Inc()
+	s.active.Add(1)
 	h.onCompleted = func() {
-		s.active.Dec()
+		s.active.Done()
 		s.mu.Lock()
 		delete(s.handlers, key)
 		s.mu.Unlock()
@@ -165,8 +163,6 @@ func (s *RPCServer) Close(force bool) {
 	})
 
 	if !force {
-		for s.active.Load() > 0 {
-			time.Sleep(time.Millisecond * 100)
-		}
+		s.active.Wait()
 	}
 }
