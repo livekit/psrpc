@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/frostbyte73/core"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -51,7 +51,7 @@ type streamBase[SendType, RecvType proto.Message] struct {
 	mu      sync.Mutex
 	pending sync.WaitGroup
 	acks    map[string]chan struct{}
-	closed  core.Fuse
+	closed  atomic.Bool
 	err     error
 }
 
@@ -75,7 +75,6 @@ func NewStream[SendType, RecvType proto.Message](
 		adapter:    adapter,
 		recvChan:   recvChan,
 		acks:       acks,
-		closed:     core.NewFuse(),
 	}
 
 	return &stream[SendType, RecvType]{
@@ -102,7 +101,7 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		s.pending.Add(1)
 		defer s.pending.Done()
 
-		if s.closed.IsBroken() {
+		if s.closed.Load() {
 			return psrpc.ErrStreamClosed
 		}
 
@@ -128,7 +127,7 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Close:
-		s.closed.Once(func() {
+		if !s.closed.Swap(true) {
 			s.mu.Lock()
 			s.err = psrpc.NewErrorFromResponse(b.Close.Code, b.Close.Error)
 			s.mu.Unlock()
@@ -136,7 +135,7 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 			s.adapter.Close(s.streamID)
 			s.cancel()
 			close(s.recvChan)
-		})
+		}
 	}
 
 	return nil
@@ -258,7 +257,7 @@ func (s *stream[RequestType, ResponseType]) Close(cause error) error {
 func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 	var err error = psrpc.ErrStreamClosed
 
-	s.closed.Once(func() {
+	if !s.closed.Swap(true) {
 		if cause == nil {
 			cause = psrpc.ErrStreamClosed
 		}
@@ -292,7 +291,7 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 		s.adapter.Close(s.streamID)
 		s.cancel()
 		close(s.recvChan)
-	})
+	}
 
 	return err
 }

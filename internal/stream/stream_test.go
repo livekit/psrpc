@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
@@ -66,4 +67,45 @@ func (a *testStreamAdapter) Send(ctx context.Context, msg *internal.Stream) erro
 
 func (a *testStreamAdapter) Close(streamID string) {
 	a.closeCalls.Inc()
+}
+
+func TestClosePanic(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		s := NewStream[*internal.Request, *internal.Response](
+			context.Background(),
+			&info.RequestInfo{},
+			rand.NewStreamID(),
+			psrpc.DefaultClientTimeout,
+			&testStreamAdapter{},
+			nil,
+			make(chan *internal.Response, 1),
+			make(map[string]chan struct{}),
+		)
+
+		ready := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			close(ready)
+			s.Close(nil)
+			wg.Done()
+		}()
+
+		go func() {
+			b, _ := proto.Marshal(&internal.Response{})
+
+			<-ready
+			s.HandleStream(&internal.Stream{
+				Body: &internal.Stream_Message{
+					Message: &internal.StreamMessage{
+						RawMessage: b,
+					},
+				},
+			})
+			wg.Done()
+		}()
+
+		wg.Wait()
+	}
 }
