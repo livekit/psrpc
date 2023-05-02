@@ -33,6 +33,10 @@ type Error interface {
 
 type ErrorCode string
 
+func (e ErrorCode) Error() string {
+	return string(e)
+}
+
 func NewError(code ErrorCode, err error) Error {
 	return &psrpcError{
 		error: err,
@@ -107,10 +111,6 @@ type psrpcError struct {
 
 func (e psrpcError) Code() ErrorCode {
 	return e.code
-}
-
-func (e psrpcError) Unwrap() error {
-	return e.error
 }
 
 func (e psrpcError) ToHttp() int {
