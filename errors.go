@@ -82,6 +82,8 @@ const (
 	InvalidArgument ErrorCode = "invalid_argument"
 	// Entity not found
 	NotFound ErrorCode = "not_found"
+	// Cannot produce and entity matching requested format
+	NotAcceptable ErrorCode = "not_acceptable"
 	// Duplicate creation attempted
 	AlreadyExists ErrorCode = "already_exists"
 	// Caller does not have required permissions
@@ -125,6 +127,8 @@ func (e psrpcError) ToHttp() int {
 		return http.StatusBadRequest
 	case NotFound:
 		return http.StatusNotFound
+	case NotAcceptable:
+		return http.StatusNotAcceptable
 	case AlreadyExists, Aborted:
 		return http.StatusConflict
 	case PermissionDenied:
