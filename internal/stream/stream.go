@@ -97,15 +97,10 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			return s.err
+		if err := s.addPending(); err != nil {
+			return err
 		}
-
-		s.pending.Add(1)
 		defer s.pending.Done()
-		s.mu.Unlock()
 
 		v, err := bus.DeserializePayload[RecvType](b.Message.RawMessage)
 		if err != nil {
@@ -129,15 +124,10 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Close:
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			return s.err
+		cause := psrpc.NewErrorFromResponse(b.Close.Code, b.Close.Error)
+		if err := s.setClosed(cause); err != nil {
+			return err
 		}
-
-		s.closed = true
-		s.err = psrpc.NewErrorFromResponse(b.Close.Code, b.Close.Error)
-		s.mu.Unlock()
 
 		s.adapter.Close(s.streamID)
 		s.cancel()
@@ -185,15 +175,10 @@ func (s *stream[SendType, RecvType]) Send(request SendType, opts ...psrpc.Stream
 }
 
 func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return s.err
+	if err := s.addPending(); err != nil {
+		return err
 	}
-
-	s.pending.Add(1)
 	defer s.pending.Done()
-	s.mu.Unlock()
 
 	o := getStreamOpts(s.StreamOpts, opts...)
 
@@ -272,15 +257,9 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 		cause = psrpc.ErrStreamClosed
 	}
 
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return s.err
+	if err := s.setClosed(cause); err != nil {
+		return err
 	}
-
-	s.closed = true
-	s.err = cause
-	s.mu.Unlock()
 
 	msg := &internal.StreamClose{}
 	var e psrpc.Error
@@ -309,6 +288,27 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 	close(s.recvChan)
 
 	return err
+}
+
+func (s *streamBase[SendType, RecvType]) addPending() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.pending.Add(1)
+	}
+	return s.err
+}
+
+func (s *streamBase[SendType, RecvType]) setClosed(cause error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
+
+	s.closed = true
+	s.err = cause
+	return nil
 }
 
 func (s *streamBase[SendType, RecvType]) Err() error {
