@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -51,7 +50,7 @@ type streamBase[SendType, RecvType proto.Message] struct {
 	mu      sync.Mutex
 	pending sync.WaitGroup
 	acks    map[string]chan struct{}
-	closed  atomic.Bool
+	closed  bool
 	err     error
 }
 
@@ -98,12 +97,15 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Message:
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return s.err
+		}
+
 		s.pending.Add(1)
 		defer s.pending.Done()
-
-		if s.closed.Load() {
-			return psrpc.ErrStreamClosed
-		}
+		s.mu.Unlock()
 
 		v, err := bus.DeserializePayload[RecvType](b.Message.RawMessage)
 		if err != nil {
@@ -127,15 +129,19 @@ func (s *stream[SendType, RecvType]) HandleStream(is *internal.Stream) error {
 		}
 
 	case *internal.Stream_Close:
-		if !s.closed.Swap(true) {
-			s.mu.Lock()
-			s.err = psrpc.NewErrorFromResponse(b.Close.Code, b.Close.Error)
+		s.mu.Lock()
+		if s.closed {
 			s.mu.Unlock()
-
-			s.adapter.Close(s.streamID)
-			s.cancel()
-			close(s.recvChan)
+			return s.err
 		}
+
+		s.closed = true
+		s.err = psrpc.NewErrorFromResponse(b.Close.Code, b.Close.Error)
+		s.mu.Unlock()
+
+		s.adapter.Close(s.streamID)
+		s.cancel()
+		close(s.recvChan)
 	}
 
 	return nil
@@ -179,8 +185,15 @@ func (s *stream[SendType, RecvType]) Send(request SendType, opts ...psrpc.Stream
 }
 
 func (s *streamBase[SendType, RecvType]) Send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return s.err
+	}
+
 	s.pending.Add(1)
 	defer s.pending.Done()
+	s.mu.Unlock()
 
 	o := getStreamOpts(s.StreamOpts, opts...)
 
@@ -255,43 +268,45 @@ func (s *stream[RequestType, ResponseType]) Close(cause error) error {
 }
 
 func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
-	var err error = psrpc.ErrStreamClosed
-
-	if !s.closed.Swap(true) {
-		if cause == nil {
-			cause = psrpc.ErrStreamClosed
-		}
-
-		s.mu.Lock()
-		s.err = cause
-		s.mu.Unlock()
-
-		msg := &internal.StreamClose{}
-		var e psrpc.Error
-		if errors.As(cause, &e) {
-			msg.Error = e.Error()
-			msg.Code = string(e.Code())
-		} else {
-			msg.Error = cause.Error()
-			msg.Code = string(psrpc.Unknown)
-		}
-
-		now := time.Now()
-		err = s.adapter.Send(context.Background(), &internal.Stream{
-			StreamId:  s.streamID,
-			RequestId: rand.NewRequestID(),
-			SentAt:    now.UnixNano(),
-			Expiry:    now.Add(s.Timeout).UnixNano(),
-			Body: &internal.Stream_Close{
-				Close: msg,
-			},
-		})
-
-		s.pending.Wait()
-		s.adapter.Close(s.streamID)
-		s.cancel()
-		close(s.recvChan)
+	if cause == nil {
+		cause = psrpc.ErrStreamClosed
 	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return s.err
+	}
+
+	s.closed = true
+	s.err = cause
+	s.mu.Unlock()
+
+	msg := &internal.StreamClose{}
+	var e psrpc.Error
+	if errors.As(cause, &e) {
+		msg.Error = e.Error()
+		msg.Code = string(e.Code())
+	} else {
+		msg.Error = cause.Error()
+		msg.Code = string(psrpc.Unknown)
+	}
+
+	now := time.Now()
+	err := s.adapter.Send(context.Background(), &internal.Stream{
+		StreamId:  s.streamID,
+		RequestId: rand.NewRequestID(),
+		SentAt:    now.UnixNano(),
+		Expiry:    now.Add(s.Timeout).UnixNano(),
+		Body: &internal.Stream_Close{
+			Close: msg,
+		},
+	})
+
+	s.pending.Wait()
+	s.adapter.Close(s.streamID)
+	s.cancel()
+	close(s.recvChan)
 
 	return err
 }
