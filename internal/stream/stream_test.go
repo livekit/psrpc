@@ -15,7 +15,7 @@ import (
 	"github.com/livekit/psrpc/pkg/info"
 )
 
-func TestStream(t *testing.T) {
+func TestClosePendingSend(t *testing.T) {
 	s := NewStream[*internal.Request, *internal.Response](
 		context.Background(),
 		&info.RequestInfo{},
@@ -28,17 +28,19 @@ func TestStream(t *testing.T) {
 	)
 
 	var err atomic.Value
+	ready := make(chan struct{})
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
+		close(ready)
 		err.Store(s.Send(&internal.Request{}))
 		wg.Done()
 	}()
 
 	var handleErr error
 	go func() {
-		s.(*stream[*internal.Request, *internal.Response]).pending.Wait()
+		<-ready
 		handleErr = s.HandleStream(&internal.Stream{
 			Body: &internal.Stream_Close{
 				Close: &internal.StreamClose{
