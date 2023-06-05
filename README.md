@@ -19,24 +19,28 @@ Supports:
 PSRPC is generated from proto files, and we've added a few custom method options:
 ```protobuf
 message Options {
-  // For RPCs, each client request will receive a response from every server.
-  // For subscriptions, every client will receive every update.
-  bool multi = 1;
-
   // This method is a pub/sub.
-  bool subscription = 2;
+  bool subscription = 1;
 
   // This method uses topics.
-  bool topics = 3;
+  bool topics = 2;
 
-  // Your service will supply an affinity function for handler selection.
-  bool affinity_func = 4;
+  TopicParamOptions topic_params = 3;
 
   // The method uses bidirectional streaming.
-  bool stream = 5;
+  bool stream = 4;
 
-  // Request load balancing is provided by a pub/sub server queue
-  bool queue = 7;
+  oneof routing {
+    // For RPCs, each client request will receive a response from every server.
+    // For subscriptions, every client will receive every update.
+    bool multi = 5;
+
+    // Your service will supply an affinity function for handler selection.
+    bool affinity_func = 6;
+
+    // Requests load balancing is provided by a pub/sub server queue
+    bool queue = 7;
+  }
 }
 
 ```
