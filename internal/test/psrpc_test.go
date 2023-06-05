@@ -97,9 +97,9 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 		return nil, retErr
 	}
 
-	serverA.RegisterMethod(rpc, false, false, true)
-	serverB.RegisterMethod(rpc, false, false, true)
-	c.RegisterMethod(rpc, false, false, true)
+	serverA.RegisterMethod(rpc, false, false, true, false)
+	serverB.RegisterMethod(rpc, false, false, true, false)
+	c.RegisterMethod(rpc, false, false, true, false)
 
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, rpc, nil, addOne, nil)
 	require.NoError(t, err)
@@ -116,10 +116,10 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	require.Equal(t, 1, counter)
 	require.Equal(t, res.RequestId, requestID)
 
-	serverA.RegisterMethod(multiRpc, false, true, false)
-	serverB.RegisterMethod(multiRpc, false, true, false)
-	serverC.RegisterMethod(multiRpc, false, true, false)
-	c.RegisterMethod(multiRpc, false, true, false)
+	serverA.RegisterMethod(multiRpc, false, true, false, false)
+	serverB.RegisterMethod(multiRpc, false, true, false, false)
+	serverC.RegisterMethod(multiRpc, false, true, false, false)
+	c.RegisterMethod(multiRpc, false, true, false, false)
 
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverA, multiRpc, nil, addOne, nil)
 	require.NoError(t, err)
@@ -188,8 +188,8 @@ func testStream(t *testing.T, bus psrpc.MessageBus) {
 		return nil
 	}
 
-	serverA.RegisterMethod(rpc, false, false, true)
-	c.RegisterMethod(rpc, false, false, true)
+	serverA.RegisterMethod(rpc, false, false, true, false)
+	c.RegisterMethod(rpc, false, false, true, false)
 
 	err = server.RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
 	require.NoError(t, err)

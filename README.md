@@ -19,21 +19,28 @@ Supports:
 PSRPC is generated from proto files, and we've added a few custom method options:
 ```protobuf
 message Options {
-  // For RPCs, each client request will receive a response from every server.
-  // For subscriptions, every client will receive every update.
-  bool multi = 1;
-
   // This method is a pub/sub.
-  bool subscription = 2;
+  bool subscription = 1;
 
   // This method uses topics.
-  bool topics = 3;
+  bool topics = 2;
 
-  // Your service will supply an affinity function for handler selection.
-  bool affinity_func = 4;
+  TopicParamOptions topic_params = 3;
 
   // The method uses bidirectional streaming.
-  bool stream = 5;
+  bool stream = 4;
+
+  oneof routing {
+    // For RPCs, each client request will receive a response from every server.
+    // For subscriptions, every client will receive every update.
+    bool multi = 5;
+
+    // Your service will supply an affinity function for handler selection.
+    bool affinity_func = 6;
+
+    // Requests load balancing is provided by a pub/sub server queue
+    bool queue = 7;
+  }
 }
 
 ```
@@ -310,10 +317,10 @@ PSRPC defines an error type (`psrpc.Error`). This error type can be used to wrap
 func NewError(code ErrorCode, err error) Error
 ```
 
-The `code` parameter provides more context about the cause of the error. 
+The `code` parameter provides more context about the cause of the error.
 A [variety of codes](https://github.com/livekit/psrpc/blob/main/errors.go#L39) are defined for common error conditions.
 PSRPC errors are serialized by the PSRPC server implementation, and unmarshalled (with the original error code) on the client.
-By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure, 
+By retrieving the code using the `Code()` method, the client can determine if the error was caused by a server failure,
 or a client error, such as a bad parameter. This can be used as an input to the retry logic, or success rate metrics.
 
 The most appropriate HTTP status code for a given error can be retrieved using the `ToHttp()` method. This status code is generated from the associated error code.
@@ -340,7 +347,7 @@ func convertError(err error) {
 ```
 
 This allows the twirp server implementations to interpret the `prscp.Errors` as native `twirp.Error`. Particularly, this
-means that twirp clients will also receive information about the error cause as `twirp.Code`. This makes sure that 
+means that twirp clients will also receive information about the error cause as `twirp.Code`. This makes sure that
 `psrpc.Error` created by psrpc server can be forwarded through PS and twirp RPC all the way to a twirp client error hook
 with the full associated context.
 
@@ -348,8 +355,8 @@ with the full associated context.
 
 ## Interceptors
 
-Interceptors allow writing middleware for RPC clients and servers. Interceptors can be used to run code during the call 
-lifecycle such as logging, recording metrics, tracing, and retrying calls. PSRPC defines four interceptor types which 
+Interceptors allow writing middleware for RPC clients and servers. Interceptors can be used to run code during the call
+lifecycle such as logging, recording metrics, tracing, and retrying calls. PSRPC defines four interceptor types which
 allow intercepting requests on the client and server.
 
 ### ServerRPCInterceptor
@@ -362,13 +369,13 @@ type ServerRPCInterceptor func(ctx context.Context, req proto.Message, info RPCI
 type ServerRPCHandler func(context.Context, proto.Message) (proto.Message, error)
 ```
 
-The `info` parameter contains metadata about the method including the name and topic. Calling the `handler` parameter 
+The `info` parameter contains metadata about the method including the name and topic. Calling the `handler` parameter
 hands off execution to the next interceptor.
 
 `ServerRPCInterceptor` are added to new servers with `WithServerRPCInterceptors`.
 
 Interceptors run in the order they are added so the first interceptor passed to `WithServerRPCInterceptors` is the first
-to receive a new requests. Calling the `handler` parameter invokes the second interceptor and so on until the service 
+to receive a new requests. Calling the `handler` parameter invokes the second interceptor and so on until the service
 implementation receives the request and produces a response.
 
 ### ClientRPCInterceptor
@@ -381,7 +388,7 @@ type ClientRPCInterceptor func(info RPCInfo, handler ClientRPCHandler) ClientRPC
 type ClientRPCHandler func(ctx context.Context, req proto.Message, opts ...RequestOption) (proto.Message, error)
 ```
 
-`ClientRPCInterceptor` are created by implementing `ClientRPCHandler` and passing the interceptor to new clients 
+`ClientRPCInterceptor` are created by implementing `ClientRPCHandler` and passing the interceptor to new clients
 using `WithClientRPCInterceptors`.
 
 The `handler` parameter received by `ClientRPCInterceptor` should be called by the implementation of `ClientRPCHandler`
@@ -389,7 +396,7 @@ to continue the call lifecycle.
 
 ### ClientMultiRPCInterceptor
 
-`ClientMultiRPCHandler` are created by clients to process requests to multi RPCs. Because `ClientMultiRPCHandler` 
+`ClientMultiRPCHandler` are created by clients to process requests to multi RPCs. Because `ClientMultiRPCHandler`
 process several responses for the same request, implementations must define separate functions for each phase of the call
 lifecycle. The `Send` function is executed on outgoing request parameters. The `Recv` function is executed once for each
 response when it returns from a servers. `Close` is called when the deadline is reached.
@@ -404,16 +411,16 @@ type ClientMultiRPCHandler interface {
 }
 ```
 
-`ClientMultiRPCInterceptor` are created by implementing `ClientMultiRPCHandler` and passing the interceptor to new 
+`ClientMultiRPCInterceptor` are created by implementing `ClientMultiRPCHandler` and passing the interceptor to new
 clients using `WithClientMultiRPCInterceptors`.
 
-Each function in a `ClientMultiRPCInterceptor` should call the corresponding function in the handler received in 
+Each function in a `ClientMultiRPCInterceptor` should call the corresponding function in the handler received in
 the `handler` parameter.
 
 ### StreamInterceptor
 
-`StreamInterceptor` are created by both clients and servers to process streaming RPCs. The `Send` function is executed 
-once for each outgoing message. The `Recv` function is executed once for each incoming message. `Close` is called when 
+`StreamInterceptor` are created by both clients and servers to process streaming RPCs. The `Send` function is executed
+once for each outgoing message. The `Recv` function is executed once for each incoming message. `Close` is called when
 either the local or remote host close the stream or if the stream receives a malformed message.
 
 ```go
@@ -426,7 +433,7 @@ type StreamHandler interface {
 }
 ```
 
-`StreamInterceptor` are created by implementing `StreamHandler` and passing the interceptor to new clients or 
+`StreamInterceptor` are created by implementing `StreamHandler` and passing the interceptor to new clients or
 servers using `WithClientStreamInterceptors` and `WithServerStreamInterceptors`.
 
 Each function in a `StreamInterceptor` should call the corresponding function in the handler
