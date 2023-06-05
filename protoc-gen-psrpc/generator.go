@@ -462,7 +462,8 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		t.P(`  sd.RegisterMethod("`, methName, `", `,
 			fmt.Sprint(opts.AffinityFunc), `, `,
 			fmt.Sprint(opts.Multi), `, `,
-			t.formatRequireClaim(opts), `)`,
+			fmt.Sprint(t.getRequireClaim(opts)), `, `,
+			fmt.Sprint(opts.Queue), `)`,
 		)
 	}
 
@@ -607,7 +608,8 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 		t.P(`  sd.RegisterMethod("`, methName, `", `,
 			fmt.Sprint(opts.AffinityFunc), `, `,
 			fmt.Sprint(opts.Multi), `, `,
-			t.formatRequireClaim(opts), `)`,
+			fmt.Sprint(t.getRequireClaim(opts)), `, `,
+			fmt.Sprint(opts.Queue), `)`,
 		)
 
 		if opts.Subscription || opts.Topics {
@@ -727,8 +729,8 @@ func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Op
 	return &options.Options{}
 }
 
-func (t *psrpc) formatRequireClaim(opts *options.Options) string {
-	return fmt.Sprintf("%t", !opts.Multi && !opts.GetTopicParams().GetSingleServer())
+func (t *psrpc) getRequireClaim(opts *options.Options) bool {
+	return !opts.Multi && !opts.Queue && !opts.GetTopicParams().GetSingleServer()
 }
 
 type topic struct {

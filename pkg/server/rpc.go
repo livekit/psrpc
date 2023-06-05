@@ -43,14 +43,24 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
 	ctx := context.Background()
-	requestSub, err := bus.Subscribe[*internal.Request](
-		ctx, s.bus, i.GetRPCChannel(), s.ChannelSize,
-	)
+
+	var requestSub bus.Subscription[*internal.Request]
+	var claimSub bus.Subscription[*internal.ClaimResponse]
+	var err error
+
+	if i.Queue {
+		requestSub, err = bus.SubscribeQueue[*internal.Request](
+			ctx, s.bus, i.GetRPCChannel(), s.ChannelSize,
+		)
+	} else {
+		requestSub, err = bus.Subscribe[*internal.Request](
+			ctx, s.bus, i.GetRPCChannel(), s.ChannelSize,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	var claimSub bus.Subscription[*internal.ClaimResponse]
 	if i.RequireClaim {
 		claimSub, err = bus.Subscribe[*internal.ClaimResponse](
 			ctx, s.bus, i.GetClaimResponseChannel(), s.ChannelSize,

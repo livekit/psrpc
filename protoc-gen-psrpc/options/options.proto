@@ -27,6 +27,9 @@ message Options {
 
   // The method uses bidirectional streaming.
   bool stream = 6;
+
+  // Requests load balancing is provided by a pub/sub server queue
+  bool queue = 7;
 }
 
 message TopicParamOptions {

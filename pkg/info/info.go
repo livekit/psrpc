@@ -16,19 +16,22 @@ type MethodInfo struct {
 	AffinityEnabled bool
 	Multi           bool
 	RequireClaim    bool
+	Queue           bool
 }
 
 type RequestInfo struct {
 	psrpc.RPCInfo
 	AffinityEnabled bool
 	RequireClaim    bool
+	Queue           bool
 }
 
-func (s *ServiceDefinition) RegisterMethod(name string, affinityEnabled, multi, requireClaim bool) {
+func (s *ServiceDefinition) RegisterMethod(name string, affinityEnabled, multi, requireClaim, queue bool) {
 	s.Methods.Store(name, &MethodInfo{
 		AffinityEnabled: affinityEnabled,
 		Multi:           multi,
 		RequireClaim:    requireClaim,
+		Queue:           queue,
 	})
 }
 
@@ -45,5 +48,6 @@ func (s *ServiceDefinition) GetInfo(rpc string, topic []string) *RequestInfo {
 		},
 		AffinityEnabled: m.AffinityEnabled,
 		RequireClaim:    m.RequireClaim,
+		Queue:           m.Queue,
 	}
 }
