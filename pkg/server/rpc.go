@@ -150,6 +150,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		Metadata: ir.Metadata,
 	}
 	ctx := metadata.NewContextWithIncomingHeader(context.Background(), head)
+	ctx, cancel := context.WithDeadline(ctx, time.UnixMilli(ir.Expiry))
+	defer cancel()
+
 	req, err := bus.DeserializePayload[RequestType](ir.RawRequest)
 	if err != nil {
 		var res ResponseType
