@@ -147,7 +147,7 @@ func (h *streamHandler[RecvType, SendType]) handleOpenRequest(
 ) error {
 	head := &metadata.Header{
 		RemoteID: open.NodeId,
-		SentAt:   time.UnixMilli(is.SentAt),
+		SentAt:   time.Unix(0, is.SentAt),
 		Metadata: open.Metadata,
 	}
 	ctx := metadata.NewContextWithIncomingHeader(context.Background(), head)
