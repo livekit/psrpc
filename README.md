@@ -267,7 +267,8 @@ func NewMyServiceServer(serverID string, svc MyServiceServerImpl, bus psrpc.Mess
 ### AffinityFunc
 
 The server can implement an affinity function for the client to decide which instance should take a SingleRequest.
-A higher affinity score is better, and a score of 0 means the server is not available.
+A higher affinity score is better, a score of 0 means the server is not available, and a score < 0 means the server
+will not respond to the request.
 
 For example, the following could be used to return an affinity based on cpu load:
 ```protobuf
@@ -292,7 +293,8 @@ On the client side, you can also set server selection options with single RPCs.
 
 ```go
 type SelectionOpts struct {
-    MinimumAffinity      float32       // (default 0) minimum affinity for a server to be considered a valid handler
+    MinimumAffinity      float32       // (default 0) minimum affinity for a server to be considered a valid handler 
+    MaxiumAffinity       float32       // (default 0) if > 0, any server returning a max score will be selected immediately  
     AcceptFirstAvailable bool          // (default true)
     AffinityTimeout      time.Duration // (default 0 (none)) server selection deadline
     ShortCircuitTimeout  time.Duration // (default 0 (none)) deadline imposed after receiving first response
@@ -308,6 +310,8 @@ selectionOpts := psrpc.SelectionOpts{
 
 res, err := myClient.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(selectionOpts))
 ```
+
+In this example, a server will require at least 0.5 idle CPU to be selected for this `IntensiveRPC` request.
 
 ## Error handling
 
