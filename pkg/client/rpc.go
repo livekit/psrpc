@@ -176,7 +176,7 @@ func selectServer(
 			claims++
 			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity && claim.Affinity > best) ||
 				(opts.MinimumAffinity <= 0 && claim.Affinity > best) {
-				if opts.AcceptFirstAvailable {
+				if opts.AcceptFirstAvailable || opts.MaximumAffinity > 0 && claim.Affinity >= opts.MaximumAffinity {
 					return claim.ServerId, nil
 				}
 
