@@ -41,7 +41,6 @@ func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc
 	o := &psrpc.RequestOpts{
 		Timeout: options.Timeout,
 	}
-
 	if i.AffinityEnabled {
 		o.SelectionOpts = psrpc.SelectionOpts{
 			AffinityTimeout:     psrpc.DefaultAffinityTimeout,

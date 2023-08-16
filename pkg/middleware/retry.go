@@ -59,7 +59,7 @@ func isTimeout(err error) bool {
 	if !errors.As(err, &e) {
 		return true
 	}
-	return e.Code() == psrpc.DeadlineExceeded
+	return e.Code() == psrpc.DeadlineExceeded || e.Code() == psrpc.Unavailable
 }
 
 func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {

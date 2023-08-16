@@ -442,7 +442,7 @@ func (t *psrpc) generateClientSignature(method *descriptor.MethodDescriptorProto
 		t.P(`) (`, t.pkgs["psrpc"], `.Subscription[*`, outputType, `], error)`)
 	} else if opts.Stream {
 		t.P(`, opts ...`, t.pkgs["psrpc"], `.RequestOption) (`, t.pkgs["psrpc"], `.ClientStream[*`, inputType, `, *`, outputType, `], error)`)
-	} else if opts.GetMulti() {
+	} else if opts.Type == options.Routing_MULTI {
 		t.P(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error)`)
 	} else {
 		t.P(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption) (*`, outputType, `, error)`)
@@ -474,10 +474,10 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 
 		methName := methodNameCamelCased(method)
 		t.P(`  sd.RegisterMethod("`, methName, `", `,
-			fmt.Sprint(opts.GetAffinityFunc()), `, `,
-			fmt.Sprint(opts.GetMulti()), `, `,
+			fmt.Sprint(opts.Type == options.Routing_AFFINITY), `, `,
+			fmt.Sprint(opts.Type == options.Routing_MULTI), `, `,
 			fmt.Sprint(t.getRequireClaim(opts)), `, `,
-			fmt.Sprint(opts.GetQueue()), `)`,
+			fmt.Sprint(opts.Type == options.Routing_QUEUE), `)`,
 		)
 	}
 
@@ -522,7 +522,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 			t.P(`, opts ...`, t.pkgs["psrpc"], `.RequestOption) (`, t.pkgs["psrpc"], `.ClientStream[*`, inputType, `, *`, outputType, `], error) {`)
 		} else {
 			t.W(`, req *`, inputType, `, opts ...`, t.pkgs["psrpc"], `.RequestOption`)
-			if opts.GetMulti() {
+			if opts.Type == options.Routing_MULTI {
 				t.P(`) (<-chan *`, t.pkgs["psrpc"], `.Response[*`, outputType, `], error) {`)
 			} else {
 				t.P(`) (*`, outputType, `, error) {`)
@@ -531,7 +531,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 
 		t.W(`  return `, t.pkgs["client"])
 		if opts.Subscription {
-			if opts.GetMulti() {
+			if opts.Type == options.Routing_MULTI {
 				t.W(`.Join[*`)
 			} else {
 				t.W(`.JoinQueue[*`)
@@ -540,7 +540,7 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		} else if opts.Stream {
 			t.P(`.OpenStream[*`, inputType, `, *`, outputType, `](ctx, c.client, "`, methName, `", `, topics.FormatCastToStringSlice(), `, opts...)`)
 		} else {
-			if opts.GetMulti() {
+			if opts.Type == options.Routing_MULTI {
 				t.W(`.RequestMulti[*`)
 			} else {
 				t.W(`.RequestSingle[*`)
@@ -560,12 +560,12 @@ func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorP
 
 	if opts.Stream {
 		t.P(`  `, methName, `(`, t.pkgs["psrpc"], `.ServerStream[*`, outputType, `, *`, inputType, `]) error`)
-		if opts.GetAffinityFunc() {
+		if opts.Type == options.Routing_AFFINITY {
 			t.P(`  `, methName, `Affinity() float32`)
 		}
 	} else {
 		t.P(`  `, methName, `(`, t.pkgs["context"], `.Context, *`, inputType, `) (*`, outputType, `, error)`)
-		if opts.GetAffinityFunc() {
+		if opts.Type == options.Routing_AFFINITY {
 			t.P(`  `, methName, `Affinity(*`, inputType, `) float32`)
 		}
 	}
@@ -620,10 +620,10 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 
 		methName := methodNameCamelCased(method)
 		t.P(`  sd.RegisterMethod("`, methName, `", `,
-			fmt.Sprint(opts.GetAffinityFunc()), `, `,
-			fmt.Sprint(opts.GetMulti()), `, `,
+			fmt.Sprint(opts.Type == options.Routing_AFFINITY), `, `,
+			fmt.Sprint(opts.Type == options.Routing_MULTI), `, `,
 			fmt.Sprint(t.getRequireClaim(opts)), `, `,
-			fmt.Sprint(opts.GetQueue()), `)`,
+			fmt.Sprint(opts.Type == options.Routing_QUEUE), `)`,
 		)
 
 		if opts.Subscription || opts.Topics {
@@ -640,7 +640,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			registerFuncName = "RegisterStreamHandler"
 		}
 		t.W(`  err = `, t.pkgs["server"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
-		if t.getOptions(method).GetAffinityFunc() {
+		if t.getOptions(method).Type == options.Routing_AFFINITY {
 			t.W(`, svc.`, methName, `Affinity`)
 		} else {
 			t.W(`, nil`)
@@ -686,7 +686,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
 			t.W(`  return `, t.pkgs["server"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
-			if t.getOptions(method).GetAffinityFunc() {
+			if t.getOptions(method).Type == options.Routing_AFFINITY {
 				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
 				t.W(`, nil`)
@@ -731,20 +731,25 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 }
 
 func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Options {
-	if method.Options == nil {
+	if method.Options == nil || !proto.HasExtension(method.Options, options.E_Options) {
 		return &options.Options{}
 	}
 
-	if proto.HasExtension(method.Options, options.E_Options) {
-		ext := proto.GetExtension(method.Options, options.E_Options)
-		return ext.(*options.Options)
+	opts := proto.GetExtension(method.Options, options.E_Options).(*options.Options)
+	switch opts.Routing.(type) {
+	case *options.Options_AffinityFunc:
+		opts.Type = options.Routing_AFFINITY
+	case *options.Options_Multi:
+		opts.Type = options.Routing_MULTI
+	case *options.Options_Queue:
+		opts.Type = options.Routing_QUEUE
 	}
 
-	return &options.Options{}
+	return opts
 }
 
 func (t *psrpc) getRequireClaim(opts *options.Options) bool {
-	return !opts.GetMulti() && !opts.GetQueue() && !opts.GetTopicParams().GetSingleServer()
+	return opts.Type != options.Routing_MULTI && (opts.TopicParams == nil || !opts.TopicParams.SingleServer)
 }
 
 type topic struct {

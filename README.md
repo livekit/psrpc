@@ -60,12 +60,12 @@ service MyService {
 
   // An RPC with a server affinity function for handler selection.
   rpc IntensiveRPC(MyRequest) returns (MyResponse) {
-    option (psrpc.options).affinity_func = true;
+    option (psrpc.options).type = AFFINITY;
   };
 
   // A multi-rpc - a client will send one request, and receive one response each from every server
   rpc GetStats(MyRequest) returns (MyResponse) {
-    option (psrpc.options).multi = true;
+    option (psrpc.options).type = MULTI;
   };
 
   // A streaming RPC - a client opens a stream, the first server to respond accepts it and both send and
@@ -77,7 +77,7 @@ service MyService {
   // An RPC with topics - a client can send one request, and receive one response from each server in one region
   rpc GetRegionStats(MyRequest) returns (MyResponse) {
     option (psrpc.options).topics = true;
-    option (psrpc.options).multi = true;
+    option (psrpc.options).type = MULTI;
   }
 
   // A queue subscription - even if multiple clients are subscribed, only one will receive this update.
@@ -90,7 +90,7 @@ service MyService {
   // The request parameter (in this case, Ignored) will always be ignored when generating go files.
   rpc UpdateState(Ignored) returns (MyUpdate) {
     option (psrpc.options).subscription = true;
-    option (psrpc.options).multi = true;
+    option (psrpc.options).type = MULTI;
   };
 
   // A subscription with topics - every client subscribed to the topic will receive every update.
@@ -98,7 +98,7 @@ service MyService {
   rpc UpdateRegionState(Ignored) returns (MyUpdate) {
     option (psrpc.options).subscription = true;
     option (psrpc.options).topics = true;
-    option (psrpc.options).multi = true;
+    option (psrpc.options).type = MULTI;
   }
 }
 
@@ -273,7 +273,7 @@ will not respond to the request.
 For example, the following could be used to return an affinity based on cpu load:
 ```protobuf
 rpc IntensiveRPC(MyRequest) returns (MyResponse) {
-  option (psrpc.options).affinity_func = true;
+  option (psrpc.options).type = AFFINITY;
 };
 ```
 
