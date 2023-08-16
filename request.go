@@ -20,7 +20,6 @@ type RequestOption func(*RequestOpts)
 
 type RequestOpts struct {
 	Timeout       time.Duration
-	ClaimRetries  int // faster than request retries when using queue rpcs
 	SelectionOpts SelectionOpts
 }
 
@@ -35,12 +34,6 @@ type SelectionOpts struct {
 func WithRequestTimeout(timeout time.Duration) RequestOption {
 	return func(o *RequestOpts) {
 		o.Timeout = timeout
-	}
-}
-
-func WithClaimRetries(retries int) RequestOption {
-	return func(o *RequestOpts) {
-		o.ClaimRetries = retries
 	}
 }
 

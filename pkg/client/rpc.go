@@ -120,20 +120,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		defer cancel()
 
 		if i.RequireClaim {
-			var serverID string
-			for n := 0; n <= o.ClaimRetries; n++ {
-				if n > 0 {
-					if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
-						err = psrpc.NewError(psrpc.Internal, err)
-						return
-					}
-				}
-
-				serverID, err = selectServer(ctx, claimChan, resChan, o.SelectionOpts)
-				if err != nil && !errors.Is(err, psrpc.ErrNoResponse) {
-					return nil, err
-				}
-			}
+			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
 			if err != nil {
 				return nil, err
 			}

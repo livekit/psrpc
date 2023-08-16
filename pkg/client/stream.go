@@ -85,37 +85,22 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	go runClientStream(c, cs, recvChan)
 
-	octx, cancel := context.WithTimeout(ctx, o.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 
-	if err := c.bus.Publish(octx, i.GetStreamServerChannel(), req); err != nil {
+	if err := c.bus.Publish(ctx, i.GetStreamServerChannel(), req); err != nil {
 		_ = cs.Close(err)
 		return nil, psrpc.NewError(psrpc.Internal, err)
 	}
 
 	if i.RequireClaim {
-		var serverID string
-		var err error
-		for n := 0; n <= o.ClaimRetries; n++ {
-			if n > 0 {
-				if err = c.bus.Publish(octx, i.GetStreamServerChannel(), req); err != nil {
-					_ = cs.Close(err)
-					return nil, psrpc.NewError(psrpc.Internal, err)
-				}
-			}
-
-			serverID, err = selectServer(octx, claimChan, nil, o.SelectionOpts)
-			if err != nil && !errors.Is(err, psrpc.ErrNoResponse) {
-				_ = cs.Close(err)
-				return nil, err
-			}
-		}
+		serverID, err := selectServer(ctx, claimChan, nil, o.SelectionOpts)
 		if err != nil {
 			_ = cs.Close(err)
 			return nil, err
 		}
 
-		if err = c.bus.Publish(octx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
+		if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 			RequestId: requestID,
 			ServerId:  serverID,
 		}); err != nil {
@@ -128,8 +113,8 @@ func OpenStream[SendType, RecvType proto.Message](
 	case <-ackChan:
 		return cs, nil
 
-	case <-octx.Done():
-		err := octx.Err()
+	case <-ctx.Done():
+		err := ctx.Err()
 		if errors.Is(err, context.Canceled) {
 			err = psrpc.ErrRequestCanceled
 		} else if errors.Is(err, context.DeadlineExceeded) {
