@@ -20,13 +20,8 @@ type RequestOption func(*RequestOpts)
 
 type RequestOpts struct {
 	Timeout       time.Duration
+	ClaimRetries  int // faster than request retries when using queue rpcs
 	SelectionOpts SelectionOpts
-}
-
-func WithRequestTimeout(timeout time.Duration) RequestOption {
-	return func(o *RequestOpts) {
-		o.Timeout = timeout
-	}
 }
 
 type SelectionOpts struct {
@@ -35,6 +30,18 @@ type SelectionOpts struct {
 	AcceptFirstAvailable bool          // go fast
 	AffinityTimeout      time.Duration // server selection deadline
 	ShortCircuitTimeout  time.Duration // deadline imposed after receiving first response
+}
+
+func WithRequestTimeout(timeout time.Duration) RequestOption {
+	return func(o *RequestOpts) {
+		o.Timeout = timeout
+	}
+}
+
+func WithClaimRetries(retries int) RequestOption {
+	return func(o *RequestOpts) {
+		o.ClaimRetries = retries
+	}
 }
 
 func WithSelectionOpts(opts SelectionOpts) RequestOption {

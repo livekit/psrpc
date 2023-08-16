@@ -23,6 +23,13 @@ extend google.protobuf.MethodOptions {
   optional Options options = 2198;
 }
 
+// RPC types
+enum Routing {
+  QUEUE = 0;    // Servers will join a queue, and only one will receive each request
+  AFFINITY = 1; // Servers will implement an affinity function for handler selection
+  MULTI = 2;    // Every server will respond to every request (for subscriptions, all clients will receive every message)
+}
+
 message Options {
   // This method is a pub/sub.
   bool subscription = 1;
@@ -35,6 +42,10 @@ message Options {
   // The method uses bidirectional streaming.
   bool stream = 4;
 
+  // RPC type
+  Routing type = 8;
+
+  // deprecated
   oneof routing {
     // For RPCs, each client request will receive a response from every server.
     // For subscriptions, every client will receive every update.

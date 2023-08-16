@@ -91,17 +91,22 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
 		}
 
-		claimChan := make(chan *internal.ClaimRequest, c.ChannelSize)
+		var claimChan chan *internal.ClaimRequest
 		resChan := make(chan *internal.Response, 1)
 
 		c.mu.Lock()
-		c.claimRequests[requestID] = claimChan
+		if i.RequireClaim {
+			claimChan = make(chan *internal.ClaimRequest, c.ChannelSize)
+			c.claimRequests[requestID] = claimChan
+		}
 		c.responseChannels[requestID] = resChan
 		c.mu.Unlock()
 
 		defer func() {
 			c.mu.Lock()
-			delete(c.claimRequests, requestID)
+			if i.RequireClaim {
+				delete(c.claimRequests, requestID)
+			}
 			delete(c.responseChannels, requestID)
 			c.mu.Unlock()
 		}()
@@ -115,10 +120,24 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		defer cancel()
 
 		if i.RequireClaim {
-			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+			var serverID string
+			for n := 0; n <= o.ClaimRetries; n++ {
+				if n > 0 {
+					if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
+						err = psrpc.NewError(psrpc.Internal, err)
+						return
+					}
+				}
+
+				serverID, err = selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+				if err != nil && !errors.Is(err, psrpc.ErrNoResponse) {
+					return nil, err
+				}
+			}
 			if err != nil {
 				return nil, err
 			}
+
 			if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 				RequestId: requestID,
 				ServerId:  serverID,

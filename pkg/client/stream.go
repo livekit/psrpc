@@ -94,11 +94,27 @@ func OpenStream[SendType, RecvType proto.Message](
 	}
 
 	if i.RequireClaim {
-		serverID, err := selectServer(octx, claimChan, nil, o.SelectionOpts)
+		var serverID string
+		var err error
+		for n := 0; n <= o.ClaimRetries; n++ {
+			if n > 0 {
+				if err = c.bus.Publish(octx, i.GetStreamServerChannel(), req); err != nil {
+					_ = cs.Close(err)
+					return nil, psrpc.NewError(psrpc.Internal, err)
+				}
+			}
+
+			serverID, err = selectServer(octx, claimChan, nil, o.SelectionOpts)
+			if err != nil && !errors.Is(err, psrpc.ErrNoResponse) {
+				_ = cs.Close(err)
+				return nil, err
+			}
+		}
 		if err != nil {
 			_ = cs.Close(err)
 			return nil, err
 		}
+
 		if err = c.bus.Publish(octx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 			RequestId: requestID,
 			ServerId:  serverID,
