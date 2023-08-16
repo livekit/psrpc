@@ -640,7 +640,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			registerFuncName = "RegisterStreamHandler"
 		}
 		t.W(`  err = `, t.pkgs["server"], `.`, registerFuncName, `(s, "`, methName, `", nil, svc.`, methName)
-		if t.getOptions(method).GetAffinityFunc() {
+		if t.getOptions(method).Type == options.Routing_AFFINITY {
 			t.W(`, svc.`, methName, `Affinity`)
 		} else {
 			t.W(`, nil`)
@@ -686,7 +686,7 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 			}
 			t.P(`func (s *`, servStruct, servTopics.FormatTypeParams(), `) Register`, methName, `Topic(`, topics.FormatParams(), `) error {`)
 			t.W(`  return `, t.pkgs["server"], `.`, registerFuncName, `(s.rpc, "`, methName, `", `, topics.FormatCastToStringSlice(), `, s.svc.`, methName)
-			if t.getOptions(method).GetAffinityFunc() {
+			if t.getOptions(method).Type == options.Routing_AFFINITY {
 				t.W(`, s.svc.`, methName, `Affinity`)
 			} else {
 				t.W(`, nil`)
