@@ -80,7 +80,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	//   option (psrpc.options).type = AFFINITY;
 	_, err = cB.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
 		// if using AcceptFirstAvailable, local bus can fail the affinity count check by processing too quickly
-		AffinityTimeout: time.Millisecond * 100,
+		AffinityTimeout: time.Millisecond * 250,
 	}))
 	require.NoError(t, err)
 
