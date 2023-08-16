@@ -77,7 +77,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.Equal(t, 1, responseCount)
 
 	// rpc IntensiveRPC(MyRequest) returns (MyResponse) {
-	//   option (psrpc.options).affinity_func = true;
+	//   option (psrpc.options).type = AFFINITY;
 	_, err = cB.IntensiveRPC(ctx, req, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
 		// if using AcceptFirstAvailable, local bus can fail the affinity count check by processing too quickly
 		AffinityTimeout: time.Millisecond * 100,
@@ -93,7 +93,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	sB.Unlock()
 
 	// rpc GetStats(MyRequest) returns (MyResponse) {
-	//   option (psrpc.options).multi = true;
+	//   option (psrpc.options).type = MULTI;
 	respChan, err := cA.GetStats(ctx, req)
 	require.NoError(t, err)
 	for i := 0; i < 2; i++ {
@@ -134,7 +134,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 
 	// rpc GetRegionStats(MyRequest) returns (MyResponse) {
 	//   option (psrpc.options).topics = true;
-	//   option (psrpc.options).multi = true;
+	//   option (psrpc.options).type = MULTI;
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionA"))
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionB"))
 	sA.server.DeregisterGetRegionStatsTopic("regionB")
@@ -174,7 +174,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	// rpc UpdateRegionState(Ignored) returns (MyUpdate) {
 	//   option (psrpc.options).subscription = true;
 	//   option (psrpc.options).topics = true;
-	//   option (psrpc.options).multi = true;
+	//   option (psrpc.options).type = MULTI;
 	subA, err = cA.SubscribeUpdateRegionState(ctx, "regionA")
 	require.NoError(t, err)
 	subB, err = cB.SubscribeUpdateRegionState(ctx, "regionA")
