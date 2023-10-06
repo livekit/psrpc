@@ -15,6 +15,8 @@
 package client
 
 import (
+	"fmt"
+
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/pkg/info"
@@ -57,4 +59,22 @@ func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc
 	}
 
 	return *o
+}
+
+func getRequestInterceptors[T psrpc.RequestInterceptor](base []T, as []any) []T {
+	if as == nil {
+		return base
+	}
+
+	c := make([]T, len(base), len(base)+len(as))
+	copy(c, base)
+	for _, a := range as {
+		i, ok := a.(T)
+		if !ok {
+			var ex T
+			panic(fmt.Sprintf("cannot use %T as %T in psrpc request", a, ex))
+		}
+		c = append(c, i)
+	}
+	return c
 }

@@ -55,8 +55,13 @@ func RequestMulti[ResponseType proto.Message](
 		requestID: rand.NewRequestID(),
 		resChan:   resChan,
 	}
+
+	reqInterceptors := getRequestInterceptors(
+		c.MultiRPCInterceptors,
+		getRequestOpts(i, c.ClientOpts, opts...).Interceptors,
+	)
 	m.handler = interceptors.ChainClientInterceptors[psrpc.ClientMultiRPCHandler](
-		c.MultiRPCInterceptors, i, m,
+		reqInterceptors, i, m,
 	)
 
 	if err = m.handler.Send(ctx, request, opts...); err != nil {
