@@ -78,7 +78,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		streamID,
 		c.Timeout,
 		&clientStream{c: c, i: i},
-		c.StreamInterceptors,
+		getRequestInterceptors(c.StreamInterceptors, o.Interceptors),
 		make(chan RecvType, c.ChannelSize),
 		map[string]chan struct{}{requestID: ackChan},
 	)

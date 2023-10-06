@@ -14,13 +14,18 @@
 
 package psrpc
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/exp/slices"
+)
 
 type RequestOption func(*RequestOpts)
 
 type RequestOpts struct {
 	Timeout       time.Duration
 	SelectionOpts SelectionOpts
+	Interceptors  []any
 }
 
 type SelectionOpts struct {
@@ -40,5 +45,18 @@ func WithRequestTimeout(timeout time.Duration) RequestOption {
 func WithSelectionOpts(opts SelectionOpts) RequestOption {
 	return func(o *RequestOpts) {
 		o.SelectionOpts = opts
+	}
+}
+
+type RequestInterceptor interface {
+	ClientRPCInterceptor | ClientMultiRPCInterceptor | StreamInterceptor
+}
+
+func WithRequestInterceptors[T RequestInterceptor](interceptors ...T) RequestOption {
+	return func(o *RequestOpts) {
+		o.Interceptors = slices.Grow(o.Interceptors, len(interceptors))
+		for _, i := range interceptors {
+			o.Interceptors = append(o.Interceptors, i)
+		}
 	}
 }

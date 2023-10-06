@@ -57,8 +57,12 @@ func RequestSingle[ResponseType proto.Message](
 		hook(ctx, request, i.RPCInfo)
 	}
 
+	reqInterceptors := getRequestInterceptors(
+		c.RpcInterceptors,
+		getRequestOpts(i, c.ClientOpts, opts...).Interceptors,
+	)
 	handler := interceptors.ChainClientInterceptors[psrpc.ClientRPCHandler](
-		c.RpcInterceptors, i, newRPC[ResponseType](c, i),
+		reqInterceptors, i, newRPC[ResponseType](c, i),
 	)
 
 	res, err := handler(ctx, request, opts...)
