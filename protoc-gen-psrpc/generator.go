@@ -561,12 +561,12 @@ func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorP
 	if opts.Stream {
 		t.P(`  `, methName, `(`, t.pkgs["psrpc"], `.ServerStream[*`, outputType, `, *`, inputType, `]) error`)
 		if opts.Type == options.Routing_AFFINITY {
-			t.P(`  `, methName, `Affinity() float32`)
+			t.P(`  `, methName, `Affinity(context.Context) float32`)
 		}
 	} else {
 		t.P(`  `, methName, `(`, t.pkgs["context"], `.Context, *`, inputType, `) (*`, outputType, `, error)`)
 		if opts.Type == options.Routing_AFFINITY {
-			t.P(`  `, methName, `Affinity(*`, inputType, `) float32`)
+			t.P(`  `, methName, `Affinity(context.Context, *`, inputType, `) float32`)
 		}
 	}
 	t.P()
