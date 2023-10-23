@@ -30,7 +30,7 @@ import (
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
-type AffinityFunc[RequestType proto.Message] func(RequestType) float32
+type AffinityFunc[RequestType proto.Message] func(context.Context, RequestType) float32
 
 type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struct {
 	i *info.RequestInfo
@@ -198,7 +198,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	var affinity float32
 	if h.affinityFunc != nil {
-		affinity = h.affinityFunc(req)
+		affinity = h.affinityFunc(ctx, req)
 		if affinity < 0 {
 			return false, nil
 		}

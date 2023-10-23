@@ -32,7 +32,7 @@ import (
 	"github.com/livekit/psrpc/pkg/metadata"
 )
 
-type StreamAffinityFunc func() float32
+type StreamAffinityFunc func(ctx context.Context) float32
 
 type streamHandler[RecvType, SendType proto.Message] struct {
 	i *info.RequestInfo
@@ -215,7 +215,7 @@ func (h *streamHandler[RecvType, SendType]) claimRequest(
 
 	var affinity float32
 	if h.affinityFunc != nil {
-		affinity = h.affinityFunc()
+		affinity = h.affinityFunc(ctx)
 		if affinity < 0 {
 			return false, nil
 		}

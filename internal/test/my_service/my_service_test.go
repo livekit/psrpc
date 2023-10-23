@@ -272,7 +272,7 @@ func (s *MyService) IntensiveRPC(_ context.Context, _ *MyRequest) (*MyResponse, 
 	return &MyResponse{}, nil
 }
 
-func (s *MyService) IntensiveRPCAffinity(_ *MyRequest) float32 {
+func (s *MyService) IntensiveRPCAffinity(_ context.Context, _ *MyRequest) float32 {
 	s.Lock()
 	s.counts["IntensiveRPCAffinity"]++
 	s.Unlock()
