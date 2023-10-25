@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
-	r "github.com/livekit/psrpc/internal/rand"
 )
 
 func TestGeneratedService(t *testing.T) {
@@ -225,14 +224,14 @@ func createServer(t *testing.T, bus psrpc.MessageBus) *MyService {
 	svc := &MyService{
 		counts: make(map[string]int),
 	}
-	server, err := NewMyServiceServer(r.String(), svc, bus)
+	server, err := NewMyServiceServer(svc, bus)
 	require.NoError(t, err)
 	svc.server = server
 	return svc
 }
 
 func createClient(t *testing.T, bus psrpc.MessageBus, opts ...psrpc.ClientOption) MyServiceClient {
-	client, err := NewMyServiceClient(r.String(), bus, opts...)
+	client, err := NewMyServiceClient(bus, opts...)
 	require.NoError(t, err)
 	return client
 }

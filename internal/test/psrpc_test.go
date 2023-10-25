@@ -27,9 +27,9 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/rand"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
 )
 
@@ -74,15 +74,15 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 	serverB := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 	serverC := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 
 	t.Cleanup(func() {
@@ -93,7 +93,7 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 
 	c, err := client.NewRPCClient(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 	require.NoError(t, err)
 
@@ -173,7 +173,7 @@ func testStream(t *testing.T, bus psrpc.MessageBus) {
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 
 	t.Cleanup(func() {
@@ -182,7 +182,7 @@ func testStream(t *testing.T, bus psrpc.MessageBus) {
 
 	c, err := client.NewRPCClientWithStreams(&info.ServiceDefinition{
 		Name: serviceName,
-		ID:   rand.String(),
+		ID:   rand.NewString(),
 	}, bus)
 	require.NoError(t, err)
 

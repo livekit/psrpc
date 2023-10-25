@@ -102,6 +102,7 @@ func (t *psrpc) Generate(in *plugin.CodeGeneratorRequest) *plugin.CodeGeneratorR
 	t.registerPackageName("context")
 	t.registerPackageName("info")
 	t.registerPackageName("psrpc")
+	t.registerPackageName("rand")
 	t.registerPackageName("server")
 	t.registerPackageName("version")
 
@@ -278,6 +279,7 @@ func (t *psrpc) generateImports(file *descriptor.FileDescriptorProto) {
 	t.P(`  "github.com/livekit/psrpc"`)
 	t.P(`  "github.com/livekit/psrpc/pkg/client"`)
 	t.P(`  "github.com/livekit/psrpc/pkg/info"`)
+	t.P(`  "github.com/livekit/psrpc/pkg/rand"`)
 	t.P(`  "github.com/livekit/psrpc/pkg/server"`)
 	t.P(`  "github.com/livekit/psrpc/version"`)
 	t.P(`)`)
@@ -463,10 +465,10 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 	t.P()
 
 	t.P(`// `, newClientFunc, ` creates a psrpc client that implements the `, servName, `Client interface.`)
-	t.P(`func `, newClientFunc, servTopics.FormatTypeParamConstraints(), `(clientID string, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client`, servTopics.FormatTypeParams(), `, error) {`)
+	t.P(`func `, newClientFunc, servTopics.FormatTypeParamConstraints(), `(bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ClientOption) (`, servName, `Client`, servTopics.FormatTypeParams(), `, error) {`)
 	t.P(`  sd := &`, t.pkgs["info"], `.ServiceDefinition{`)
 	t.P(`    Name: "`, servName, `",`)
-	t.P(`    ID:   clientID,`)
+	t.P(`    ID:   `, t.pkgs["rand"], `.NewClientID(),`)
 	t.P(`  }`)
 	t.P()
 
@@ -606,10 +608,10 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	// Constructor for server implementation
 	t.P(`// New`, servName, `Server builds a RPCServer that will route requests`)
 	t.P(`// to the corresponding method in the provided svc implementation.`)
-	t.P(`func New`, servName, `Server`, servTopics.FormatTypeParamConstraints(), `(serverID string, svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server`, servTopics.FormatTypeParams(), `, error) {`)
+	t.P(`func New`, servName, `Server`, servTopics.FormatTypeParamConstraints(), `(svc `, servName, `ServerImpl, bus `, t.pkgs["psrpc"], `.MessageBus, opts ...`, t.pkgs["psrpc"], `.ServerOption) (`, servName, `Server`, servTopics.FormatTypeParams(), `, error) {`)
 	t.P(`  sd := &`, t.pkgs["info"], `.ServiceDefinition{`)
 	t.P(`    Name: "`, servName, `",`)
-	t.P(`    ID:   serverID,`)
+	t.P(`    ID:   `, t.pkgs["rand"], `.NewServerID(),`)
 	t.P(`  }`)
 	t.P()
 	t.P(`  s := `, t.pkgs["server"], `.NewRPCServer(sd, bus, opts...)`)

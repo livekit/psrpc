@@ -27,8 +27,8 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/interceptors"
 	"github.com/livekit/psrpc/internal/logger"
-	"github.com/livekit/psrpc/internal/rand"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/rand"
 )
 
 type Stream[SendType, RecvType proto.Message] interface {
