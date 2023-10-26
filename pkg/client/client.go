@@ -61,6 +61,9 @@ func NewRPCClient(
 		streamChannels:    make(map[string]chan *internal.Stream),
 		closed:            core.NewFuse(),
 	}
+	if c.ClientID != "" {
+		c.ID = c.ClientID
+	}
 
 	ctx := context.Background()
 	responses, err := bus.Subscribe[*internal.Response](
