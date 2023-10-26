@@ -30,6 +30,7 @@ const (
 type ClientOption func(*ClientOpts)
 
 type ClientOpts struct {
+	ClientID             string
 	Timeout              time.Duration
 	ChannelSize          int
 	EnableStreams        bool
@@ -38,6 +39,12 @@ type ClientOpts struct {
 	RpcInterceptors      []ClientRPCInterceptor
 	MultiRPCInterceptors []ClientMultiRPCInterceptor
 	StreamInterceptors   []StreamInterceptor
+}
+
+func WithClientID(id string) ClientOption {
+	return func(o *ClientOpts) {
+		o.ClientID = id
+	}
 }
 
 func WithClientTimeout(timeout time.Duration) ClientOption {

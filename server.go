@@ -26,11 +26,18 @@ const DefaultServerTimeout = time.Second * 3
 type ServerOption func(*ServerOpts)
 
 type ServerOpts struct {
+	ServerID           string
 	Timeout            time.Duration
 	ChannelSize        int
 	Interceptors       []ServerRPCInterceptor
 	StreamInterceptors []StreamInterceptor
 	ChainedInterceptor ServerRPCInterceptor
+}
+
+func WithServerID(id string) ServerOption {
+	return func(o *ServerOpts) {
+		o.ServerID = id
+	}
 }
 
 func WithServerTimeout(timeout time.Duration) ServerOption {

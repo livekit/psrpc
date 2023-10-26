@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/rand"
+	"github.com/livekit/psrpc/pkg/rand"
 )
 
 const defaultClientTimeout = time.Second * 3
@@ -57,7 +57,7 @@ func TestMessageBus(t *testing.T) {
 func testSubscribe(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
-	channel := rand.String()
+	channel := rand.NewString()
 	subA, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
 	subB, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
@@ -79,7 +79,7 @@ func testSubscribe(t *testing.T, bus MessageBus) {
 func testSubscribeQueue(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
-	channel := rand.String()
+	channel := rand.NewString()
 	subA, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
 	subB, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
@@ -115,7 +115,7 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 func testSubscribeClose(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
-	channel := rand.String()
+	channel := rand.NewString()
 	sub, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
 	require.NoError(t, err)
 

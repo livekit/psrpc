@@ -52,6 +52,9 @@ func NewRPCServer(sd *info.ServiceDefinition, b bus.MessageBus, opts ...psrpc.Se
 		handlers:          make(map[string]rpcHandler),
 		shutdown:          core.NewFuse(),
 	}
+	if s.ServerID != "" {
+		s.ID = s.ServerID
+	}
 
 	return s
 }

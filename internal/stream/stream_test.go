@@ -25,8 +25,8 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/rand"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/rand"
 )
 
 func TestClosePendingSend(t *testing.T) {
