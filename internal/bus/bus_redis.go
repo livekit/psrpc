@@ -259,16 +259,14 @@ type redisReconcileSubscriptionsOp struct {
 func (r *redisReconcileSubscriptionsOp) run() {
 	r.mu.Lock()
 	for len(r.dirtyChannels) > 0 {
-		subscribe := map[string]struct{}{}
-		unsubscribe := map[string]struct{}{}
+		subscribe := make(map[string]struct{}, len(r.dirtyChannels))
+		unsubscribe := make(map[string]struct{}, len(r.dirtyChannels))
 		for c := range r.dirtyChannels {
 			_, current := r.currentChannels[c]
 			desired := r.subs[c] != nil || r.queues[c] != nil
 			if !current && desired {
-				delete(unsubscribe, c)
 				subscribe[c] = struct{}{}
 			} else if current && !desired {
-				delete(subscribe, c)
 				unsubscribe[c] = struct{}{}
 			}
 		}
@@ -290,18 +288,12 @@ func (r *redisReconcileSubscriptionsOp) run() {
 
 		r.mu.Lock()
 		if subscribeErr != nil {
-			for c := range subscribe {
-				r.dirtyChannels[c] = struct{}{}
-			}
+			maps.Copy(r.dirtyChannels, subscribe)
 		} else {
-			for c := range subscribe {
-				r.currentChannels[c] = struct{}{}
-			}
+			maps.Copy(r.currentChannels, subscribe)
 		}
 		if unsubscribeErr != nil {
-			for c := range unsubscribe {
-				r.dirtyChannels[c] = struct{}{}
-			}
+			maps.Copy(r.dirtyChannels, unsubscribe)
 		} else {
 			for c := range unsubscribe {
 				delete(r.currentChannels, c)
@@ -317,7 +309,7 @@ type redisSubList struct {
 }
 
 func (r *redisSubList) dispatchQueue(msg *redis.Message) {
-	if r.next > len(r.subs) {
+	if r.next >= len(r.subs) {
 		r.next = 0
 	}
 	r.subs[r.next] <- msg
