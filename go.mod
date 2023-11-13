@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/frostbyte73/core v0.0.5
+	github.com/gammazero/deque v0.2.1
 	github.com/go-logr/logr v1.2.3
 	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1
 	github.com/nats-io/nats.go v1.21.0
@@ -12,6 +13,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	go.uber.org/atomic v1.10.0
+	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20230213192124-5e25df0256eb
 	golang.org/x/mod v0.6.0
 	google.golang.org/grpc v1.52.0
