@@ -150,10 +150,10 @@ func (r *redisMessageBus) readWorker() {
 
 		r.mu.Lock()
 		if subList, ok := r.subs[msg.Channel]; ok {
-			subList.publish(msg)
+			subList.dispatch(msg)
 		}
 		if subList, ok := r.queues[msg.Channel]; ok {
-			subList.publishQueue(msg)
+			subList.dispatchQueue(msg)
 		}
 		r.mu.Unlock()
 	}
@@ -263,7 +263,7 @@ type redisSubList struct {
 	next int
 }
 
-func (r *redisSubList) publishQueue(msg *redis.Message) {
+func (r *redisSubList) dispatchQueue(msg *redis.Message) {
 	if r.next > len(r.subs) {
 		r.next = 0
 	}
@@ -271,7 +271,7 @@ func (r *redisSubList) publishQueue(msg *redis.Message) {
 	r.next++
 }
 
-func (r *redisSubList) publish(msg *redis.Message) {
+func (r *redisSubList) dispatch(msg *redis.Message) {
 	for _, ch := range r.subs {
 		ch <- msg
 	}
