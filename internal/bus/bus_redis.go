@@ -45,8 +45,9 @@ type redisMessageBus struct {
 	queues map[string]*redisSubList
 
 	wakeup          chan struct{}
-	ops             *deque.Deque[redisWriteOp]
-	dirtyChannels   *deque.Deque[string]
+	ops             *redisWriteOpQueue
+	publishOps      map[string]*redisWriteOpQueue
+	dirtyChannels   map[string]struct{}
 	currentChannels map[string]struct{}
 }
 
@@ -60,8 +61,9 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 		queues: map[string]*redisSubList{},
 
 		wakeup:          make(chan struct{}, 1),
-		ops:             deque.New[redisWriteOp](),
-		dirtyChannels:   deque.New[string](),
+		ops:             &redisWriteOpQueue{},
+		publishOps:      map[string]*redisWriteOpQueue{},
+		dirtyChannels:   map[string]struct{}{},
 		currentChannels: map[string]struct{}{},
 	}
 	go r.readWorker()
@@ -76,8 +78,17 @@ func (r *redisMessageBus) Publish(_ context.Context, channel string, msg proto.M
 	}
 
 	r.mu.Lock()
-	r.enqueueWriteOp(&redisPublishOp{r, channel, b})
+	ops, ok := r.publishOps[channel]
+	if !ok {
+		ops = &redisWriteOpQueue{}
+		r.publishOps[channel] = ops
+	}
+	ops.push(&redisPublishOp{r, channel, b})
 	r.mu.Unlock()
+
+	if !ok {
+		r.enqueueWriteOp(&redisExecPublishOp{r, channel, ops})
+	}
 	return nil
 }
 
@@ -160,12 +171,12 @@ func (r *redisMessageBus) readWorker() {
 }
 
 func (r *redisMessageBus) reconcileSubscriptions(channel string) {
-	r.dirtyChannels.PushBack(channel)
+	r.dirtyChannels[channel] = struct{}{}
 	r.enqueueWriteOp(&redisReconcileSubscriptionsOp{r})
 }
 
 func (r *redisMessageBus) enqueueWriteOp(op redisWriteOp) {
-	r.ops.PushBack(op)
+	r.ops.push(op)
 	select {
 	case r.wakeup <- struct{}{}:
 	default:
@@ -174,15 +185,36 @@ func (r *redisMessageBus) enqueueWriteOp(op redisWriteOp) {
 
 func (r *redisMessageBus) writeWorker() {
 	for range r.wakeup {
-		r.mu.Lock()
-		for r.ops.Len() > 0 {
-			op := r.ops.PopFront()
-			r.mu.Unlock()
-			op.run()
-			r.mu.Lock()
-		}
-		r.mu.Unlock()
+		r.ops.drain()
 	}
+}
+
+type redisWriteOpQueue struct {
+	mu  sync.Mutex
+	ops deque.Deque[redisWriteOp]
+}
+
+func (q *redisWriteOpQueue) empty() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.ops.Len() == 0
+}
+
+func (q *redisWriteOpQueue) push(op redisWriteOp) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.ops.PushBack(op)
+}
+
+func (q *redisWriteOpQueue) drain() {
+	q.mu.Lock()
+	for q.ops.Len() > 0 {
+		op := q.ops.PopFront()
+		q.mu.Unlock()
+		op.run()
+		q.mu.Lock()
+	}
+	q.mu.Unlock()
 }
 
 type redisWriteOp interface {
@@ -199,17 +231,37 @@ func (r *redisPublishOp) run() {
 	r.rc.Publish(r.ctx, r.channel, r.message)
 }
 
+type redisExecPublishOp struct {
+	*redisMessageBus
+	channel string
+	ops     *redisWriteOpQueue
+}
+
+func (r *redisExecPublishOp) run() {
+	go r.exec()
+}
+
+func (r *redisExecPublishOp) exec() {
+	r.mu.Lock()
+	for !r.ops.empty() {
+		r.mu.Unlock()
+		r.ops.drain()
+		r.mu.Lock()
+	}
+	delete(r.publishOps, r.channel)
+	r.mu.Unlock()
+}
+
 type redisReconcileSubscriptionsOp struct {
 	*redisMessageBus
 }
 
 func (r *redisReconcileSubscriptionsOp) run() {
 	r.mu.Lock()
-	for r.dirtyChannels.Len() > 0 {
+	for len(r.dirtyChannels) > 0 {
 		subscribe := map[string]struct{}{}
 		unsubscribe := map[string]struct{}{}
-		for r.dirtyChannels.Len() > 0 {
-			c := r.dirtyChannels.PopFront()
+		for c := range r.dirtyChannels {
 			_, current := r.currentChannels[c]
 			desired := r.subs[c] != nil || r.queues[c] != nil
 			if !current && desired {
@@ -220,6 +272,7 @@ func (r *redisReconcileSubscriptionsOp) run() {
 				unsubscribe[c] = struct{}{}
 			}
 		}
+		maps.Clear(r.dirtyChannels)
 		r.mu.Unlock()
 
 		var subscribeErr, unsubscribeErr error
@@ -238,7 +291,7 @@ func (r *redisReconcileSubscriptionsOp) run() {
 		r.mu.Lock()
 		if subscribeErr != nil {
 			for c := range subscribe {
-				r.dirtyChannels.PushFront(c)
+				r.dirtyChannels[c] = struct{}{}
 			}
 		} else {
 			for c := range subscribe {
@@ -247,7 +300,7 @@ func (r *redisReconcileSubscriptionsOp) run() {
 		}
 		if unsubscribeErr != nil {
 			for c := range unsubscribe {
-				r.dirtyChannels.PushFront(c)
+				r.dirtyChannels[c] = struct{}{}
 			}
 		} else {
 			for c := range unsubscribe {
