@@ -46,10 +46,10 @@ func (l *localMessageBus) Publish(_ context.Context, channel string, msg proto.M
 	l.RUnlock()
 
 	if subs != nil {
-		subs.publish(b)
+		subs.dispatch(b)
 	}
 	if queues != nil {
-		queues.publish(b)
+		queues.dispatch(b)
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ func (l *localSubList) create(size int) *localSubscription {
 	}
 }
 
-func (l *localSubList) publish(b []byte) {
+func (l *localSubList) dispatch(b []byte) {
 	if l.queue {
 		l.Lock()
 		defer l.Unlock()

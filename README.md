@@ -125,7 +125,7 @@ go list -json -m github.com/livekit/psrpc
 	"Time": "2022-12-27T21:40:05Z",
 	"Dir": "/Users/dc/go/pkg/mod/github.com/livekit/psrpc@v0.2.2",
 	"GoMod": "/Users/dc/go/pkg/mod/cache/download/github.com/livekit/psrpc/@v/v0.2.2.mod",
-	"GoVersion": "1.18"
+	"GoVersion": "1.20"
 }
 ```
 
@@ -293,8 +293,8 @@ On the client side, you can also set server selection options with single RPCs.
 
 ```go
 type SelectionOpts struct {
-    MinimumAffinity      float32       // (default 0) minimum affinity for a server to be considered a valid handler 
-    MaxiumAffinity       float32       // (default 0) if > 0, any server returning a max score will be selected immediately  
+    MinimumAffinity      float32       // (default 0) minimum affinity for a server to be considered a valid handler
+    MaxiumAffinity       float32       // (default 0) if > 0, any server returning a max score will be selected immediately
     AcceptFirstAvailable bool          // (default true)
     AffinityTimeout      time.Duration // (default 0 (none)) server selection deadline
     ShortCircuitTimeout  time.Duration // (default 0 (none)) deadline imposed after receiving first response

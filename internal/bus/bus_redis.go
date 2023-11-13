@@ -19,71 +19,343 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"math/rand"
+	"sync"
 	"time"
 
+	"github.com/gammazero/deque"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/multierr"
+	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc/internal/logger"
 )
 
 const lockExpiration = time.Second * 5
+const reconcilerRetryInterval = time.Second
 
 type redisMessageBus struct {
-	rc redis.UniversalClient
+	rc  redis.UniversalClient
+	ctx context.Context
+	ps  *redis.PubSub
+
+	mu     sync.Mutex
+	subs   map[string]*redisSubList
+	queues map[string]*redisSubList
+
+	wakeup          chan struct{}
+	ops             *redisWriteOpQueue
+	publishOps      map[string]*redisWriteOpQueue
+	dirtyChannels   map[string]struct{}
+	currentChannels map[string]struct{}
 }
 
 func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
-	return &redisMessageBus{
-		rc: rc,
+	ctx := context.Background()
+	r := &redisMessageBus{
+		rc:     rc,
+		ctx:    ctx,
+		ps:     rc.Subscribe(ctx),
+		subs:   map[string]*redisSubList{},
+		queues: map[string]*redisSubList{},
+
+		wakeup:          make(chan struct{}, 1),
+		ops:             &redisWriteOpQueue{},
+		publishOps:      map[string]*redisWriteOpQueue{},
+		dirtyChannels:   map[string]struct{}{},
+		currentChannels: map[string]struct{}{},
 	}
+	go r.readWorker()
+	go r.writeWorker()
+	return r
 }
 
-func (r *redisMessageBus) Publish(ctx context.Context, channel string, msg proto.Message) error {
+func (r *redisMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	return r.rc.Publish(ctx, channel, b).Err()
+	r.mu.Lock()
+	ops, ok := r.publishOps[channel]
+	if !ok {
+		ops = &redisWriteOpQueue{}
+		r.publishOps[channel] = ops
+	}
+	ops.push(&redisPublishOp{r, channel, b})
+	r.mu.Unlock()
+
+	if !ok {
+		r.enqueueWriteOp(&redisExecPublishOp{r, channel, ops})
+	}
+	return nil
 }
 
 func (r *redisMessageBus) Subscribe(ctx context.Context, channel string, size int) (Reader, error) {
-	sub := r.rc.Subscribe(ctx, channel)
-	return &redisSubscription{
-		sub:     sub,
-		msgChan: sub.Channel(redis.WithChannelSize(size)),
-	}, nil
+	return r.subscribe(ctx, channel, size, r.subs, false)
 }
 
 func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string, size int) (Reader, error) {
-	sub := r.rc.Subscribe(ctx, channel)
-	return &redisSubscription{
+	return r.subscribe(ctx, channel, size, r.queues, true)
+}
+
+func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (Reader, error) {
+	sub := &redisSubscription{
+		bus:     r,
 		ctx:     ctx,
-		rc:      r.rc,
-		sub:     sub,
-		msgChan: sub.Channel(redis.WithChannelSize(size)),
-		queue:   true,
-	}, nil
+		channel: channel,
+		msgChan: make(chan *redis.Message, size),
+		queue:   queue,
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	subList, ok := subLists[channel]
+	if !ok {
+		subList = &redisSubList{}
+		subLists[channel] = subList
+		r.reconcileSubscriptions(channel)
+	}
+	subList.subs = append(subList.subs, sub.msgChan)
+
+	return sub, nil
+}
+
+func (r *redisMessageBus) unsubscribe(channel string, queue bool, msgChan chan *redis.Message) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var subLists map[string]*redisSubList
+	if queue {
+		subLists = r.queues
+	} else {
+		subLists = r.subs
+	}
+
+	subList, ok := subLists[channel]
+	if !ok {
+		return
+	}
+	i := slices.Index(subList.subs, msgChan)
+	if i == -1 {
+		return
+	}
+
+	subList.subs = slices.Delete(subList.subs, i, i+1)
+	close(msgChan)
+
+	if len(subList.subs) == 0 {
+		delete(subLists, channel)
+		r.reconcileSubscriptions(channel)
+	}
+}
+
+func (r *redisMessageBus) readWorker() {
+	for {
+		msg, err := r.ps.ReceiveMessage(r.ctx)
+		if err != nil {
+			return
+		}
+
+		r.mu.Lock()
+		if subList, ok := r.subs[msg.Channel]; ok {
+			subList.dispatch(msg)
+		}
+		if subList, ok := r.queues[msg.Channel]; ok {
+			subList.dispatchQueue(msg)
+		}
+		r.mu.Unlock()
+	}
+}
+
+func (r *redisMessageBus) reconcileSubscriptions(channel string) {
+	r.dirtyChannels[channel] = struct{}{}
+	r.enqueueWriteOp(&redisReconcileSubscriptionsOp{r})
+}
+
+func (r *redisMessageBus) enqueueWriteOp(op redisWriteOp) {
+	r.ops.push(op)
+	select {
+	case r.wakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (r *redisMessageBus) writeWorker() {
+	for range r.wakeup {
+		r.ops.drain()
+	}
+}
+
+type redisWriteOpQueue struct {
+	mu  sync.Mutex
+	ops deque.Deque[redisWriteOp]
+}
+
+func (q *redisWriteOpQueue) empty() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.ops.Len() == 0
+}
+
+func (q *redisWriteOpQueue) push(op redisWriteOp) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.ops.PushBack(op)
+}
+
+func (q *redisWriteOpQueue) drain() {
+	q.mu.Lock()
+	for q.ops.Len() > 0 {
+		op := q.ops.PopFront()
+		q.mu.Unlock()
+		op.run()
+		q.mu.Lock()
+	}
+	q.mu.Unlock()
+}
+
+type redisWriteOp interface {
+	run()
+}
+
+type redisPublishOp struct {
+	*redisMessageBus
+	channel string
+	message []byte
+}
+
+func (r *redisPublishOp) run() {
+	r.rc.Publish(r.ctx, r.channel, r.message)
+}
+
+type redisExecPublishOp struct {
+	*redisMessageBus
+	channel string
+	ops     *redisWriteOpQueue
+}
+
+func (r *redisExecPublishOp) run() {
+	go r.exec()
+}
+
+func (r *redisExecPublishOp) exec() {
+	r.mu.Lock()
+	for !r.ops.empty() {
+		r.mu.Unlock()
+		r.ops.drain()
+		r.mu.Lock()
+	}
+	delete(r.publishOps, r.channel)
+	r.mu.Unlock()
+}
+
+type redisReconcileSubscriptionsOp struct {
+	*redisMessageBus
+}
+
+func (r *redisReconcileSubscriptionsOp) run() {
+	r.mu.Lock()
+	for len(r.dirtyChannels) > 0 {
+		subscribe := map[string]struct{}{}
+		unsubscribe := map[string]struct{}{}
+		for c := range r.dirtyChannels {
+			_, current := r.currentChannels[c]
+			desired := r.subs[c] != nil || r.queues[c] != nil
+			if !current && desired {
+				delete(unsubscribe, c)
+				subscribe[c] = struct{}{}
+			} else if current && !desired {
+				delete(subscribe, c)
+				unsubscribe[c] = struct{}{}
+			}
+		}
+		maps.Clear(r.dirtyChannels)
+		r.mu.Unlock()
+
+		var subscribeErr, unsubscribeErr error
+		if len(subscribe) != 0 {
+			subscribeErr = r.ps.Subscribe(r.ctx, maps.Keys(subscribe)...)
+		}
+		if len(unsubscribe) != 0 {
+			unsubscribeErr = r.ps.Unsubscribe(r.ctx, maps.Keys(unsubscribe)...)
+		}
+
+		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
+			logger.Error(err, "redis subscription reconciliation failed")
+			time.Sleep(reconcilerRetryInterval)
+		}
+
+		r.mu.Lock()
+		if subscribeErr != nil {
+			for c := range subscribe {
+				r.dirtyChannels[c] = struct{}{}
+			}
+		} else {
+			for c := range subscribe {
+				r.currentChannels[c] = struct{}{}
+			}
+		}
+		if unsubscribeErr != nil {
+			for c := range unsubscribe {
+				r.dirtyChannels[c] = struct{}{}
+			}
+		} else {
+			for c := range unsubscribe {
+				delete(r.currentChannels, c)
+			}
+		}
+	}
+	r.mu.Unlock()
+}
+
+type redisSubList struct {
+	subs []chan *redis.Message
+	next int
+}
+
+func (r *redisSubList) dispatchQueue(msg *redis.Message) {
+	if r.next > len(r.subs) {
+		r.next = 0
+	}
+	r.subs[r.next] <- msg
+	r.next++
+}
+
+func (r *redisSubList) dispatch(msg *redis.Message) {
+	for _, ch := range r.subs {
+		ch <- msg
+	}
 }
 
 type redisSubscription struct {
+	bus     *redisMessageBus
 	ctx     context.Context
-	rc      redis.UniversalClient
-	sub     *redis.PubSub
-	msgChan <-chan *redis.Message
+	channel string
+	msgChan chan *redis.Message
 	queue   bool
 }
 
 func (r *redisSubscription) read() ([]byte, bool) {
 	for {
-		msg, ok := <-r.msgChan
-		if !ok {
+		var msg *redis.Message
+		var ok bool
+		select {
+		case msg, ok = <-r.msgChan:
+			if !ok {
+				return nil, false
+			}
+		case <-r.ctx.Done():
+			r.Close()
 			return nil, false
 		}
 
 		if r.queue {
 			sha := sha256.Sum256([]byte(msg.Payload))
 			hash := base64.StdEncoding.EncodeToString(sha[:])
-			acquired, err := r.rc.SetNX(r.ctx, hash, rand.Int(), lockExpiration).Result()
+			acquired, err := r.bus.rc.SetNX(r.ctx, hash, rand.Int(), lockExpiration).Result()
 			if err != nil || !acquired {
 				continue
 			}
@@ -94,5 +366,6 @@ func (r *redisSubscription) read() ([]byte, bool) {
 }
 
 func (r *redisSubscription) Close() error {
-	return r.sub.Close()
+	r.bus.unsubscribe(r.channel, r.queue, r.msgChan)
+	return nil
 }
