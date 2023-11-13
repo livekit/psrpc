@@ -263,3 +263,7 @@ func (e psrpcError) As(target any) bool {
 
 	return false
 }
+
+func (e psrpcError) Unwrap() []error {
+	return []error{e.error, e.code}
+}
