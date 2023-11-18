@@ -30,8 +30,9 @@ func withStreams() psrpc.ClientOption {
 
 func getClientOpts(opts ...psrpc.ClientOption) psrpc.ClientOpts {
 	o := &psrpc.ClientOpts{
-		Timeout:     psrpc.DefaultClientTimeout,
-		ChannelSize: bus.DefaultChannelSize,
+		Timeout:          psrpc.DefaultClientTimeout,
+		SelectionTimeout: psrpc.DefaultAffinityTimeout,
+		ChannelSize:      bus.DefaultChannelSize,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -45,11 +46,12 @@ func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc
 	}
 	if i.AffinityEnabled {
 		o.SelectionOpts = psrpc.SelectionOpts{
-			AffinityTimeout:     psrpc.DefaultAffinityTimeout,
+			AffinityTimeout:     options.SelectionTimeout,
 			ShortCircuitTimeout: psrpc.DefaultAffinityShortCircuit,
 		}
 	} else {
 		o.SelectionOpts = psrpc.SelectionOpts{
+			AffinityTimeout:      options.SelectionTimeout,
 			AcceptFirstAvailable: true,
 		}
 	}
