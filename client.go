@@ -32,6 +32,7 @@ type ClientOption func(*ClientOpts)
 type ClientOpts struct {
 	ClientID             string
 	Timeout              time.Duration
+	SelectionTimeout     time.Duration
 	ChannelSize          int
 	EnableStreams        bool
 	RequestHooks         []ClientRequestHook
@@ -50,6 +51,12 @@ func WithClientID(id string) ClientOption {
 func WithClientTimeout(timeout time.Duration) ClientOption {
 	return func(o *ClientOpts) {
 		o.Timeout = timeout
+	}
+}
+
+func WithClientSelectTimeout(timeout time.Duration) ClientOption {
+	return func(o *ClientOpts) {
+		o.SelectionTimeout = timeout
 	}
 }
 
