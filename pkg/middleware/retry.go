@@ -17,6 +17,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -25,10 +26,11 @@ import (
 )
 
 type RetryOptions struct {
-	MaxAttempts   int
-	Timeout       time.Duration
-	Backoff       time.Duration
-	IsRecoverable func(err error) bool
+	MaxAttempts        int
+	Timeout            time.Duration
+	Backoff            time.Duration
+	ExponentialBackoff bool // multiply backoff by [1, 1 + rand(1)) for each run
+	IsRecoverable      func(err error) bool
 }
 
 func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
@@ -82,6 +84,10 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 
 		attempt++
 		timeout += opt.Backoff
+
+		if opt.ExponentialBackoff {
+			opt.Backoff = time.Duration(float32(opt.Backoff) * (1 + rand.Float32()))
+		}
 	}
 }
 
