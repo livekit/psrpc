@@ -51,7 +51,7 @@ func TestRetryBackoff(t *testing.T) {
 		require.Equal(t, ro.Timeout, timeouts[0])
 	})
 
-	t.Run("Failure, all errors retryable", func(t *testing.T) {
+	t.Run("Failure all errors retryable", func(t *testing.T) {
 		ro.IsRecoverable = func(err error) bool { return true }
 		ri := NewRPCRetryInterceptor(ro)
 
