@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/livekit/psrpc"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"gotest.tools/v3/assert"
 )
 
 func TestRetryBackoff(t *testing.T) {
@@ -18,13 +18,12 @@ func TestRetryBackoff(t *testing.T) {
 		Backoff:     200 * time.Millisecond,
 	}
 
-	t.Run("Failure, all errors retryable", func(t *testing.T) {
-		ro.IsRecoverable = func(err error) bool { return true }
-		ri := NewRPCRetryInterceptor(ro)
+	var timeouts []time.Duration
+	getClientRpcHandler := func(errors []error) func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
+		timeouts = nil
+		attempt := 0
 
-		var timeouts []time.Duration
-
-		f := func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
+		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
 			o := &psrpc.RequestOpts{}
 
 			for _, f := range opts {
@@ -33,17 +32,29 @@ func TestRetryBackoff(t *testing.T) {
 
 			timeouts = append(timeouts, o.Timeout)
 
-			return nil, errors.New("Test error")
-		}
+			err = errors[attempt]
+			attempt++
 
-		h := ri(psrpc.RPCInfo{}, f)
+			return nil, err
+		}
+	}
+
+	t.Run("Failure, all errors retryable", func(t *testing.T) {
+		ro.IsRecoverable = func(err error) bool { return true }
+		ri := NewRPCRetryInterceptor(ro)
+
+		errs := make([]error, 3)
+		for i, _ := range errs {
+			errs[i] = errors.New("test error")
+		}
+		h := ri(psrpc.RPCInfo{}, getClientRpcHandler(errs))
 		h(context.Background(), nil)
 
-		assert.Equal(t, ro.MaxAttempts, len(timeouts))
+		require.Equal(t, ro.MaxAttempts, len(timeouts))
 
-		expectedTimeout = ro.Timeout
+		expectedTimeout := ro.Timeout
 		for _, timeout := range timeouts {
-			assert.Equal(t, expectedTimeout, timeout)
+			require.Equal(t, expectedTimeout, timeout)
 			expectedTimeout += ro.Backoff
 		}
 	})
