@@ -29,7 +29,7 @@ type RetryOptions struct {
 	Timeout            time.Duration
 	Backoff            time.Duration
 	IsRecoverable      func(err error) bool
-	GetRetryParameters func(err error) (retry bool, timeout time.Duration, waitTime time.Duration) // will override the MaxAttempts, Timeout and Backoff parameters
+	GetRetryParameters func(err error, attempt int) (retry bool, timeout time.Duration, waitTime time.Duration) // will override the MaxAttempts, Timeout and Backoff parameters
 }
 
 func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
@@ -63,16 +63,14 @@ func isTimeout(err error) bool {
 	return e.Code() == psrpc.DeadlineExceeded || e.Code() == psrpc.Unavailable
 }
 
-func getRetryWithBackoffParameters(o RetryOptions) func(err error) (retry bool, timeout time.Duration, waitTime time.Duration) {
-	attempt := 1
+func getRetryWithBackoffParameters(o RetryOptions) func(err error, attempt int) (retry bool, timeout time.Duration, waitTime time.Duration) {
 	timeout := o.Timeout
 
-	return func(err error) (bool, time.Duration, time.Duration) {
+	return func(err error, attempt int) (bool, time.Duration, time.Duration) {
 		if !o.IsRecoverable(err) || attempt == o.MaxAttempts {
 			return false, 0, 0
 		}
 
-		attempt++
 		timeout += o.Backoff
 
 		return true, timeout, 0
@@ -81,6 +79,7 @@ func getRetryWithBackoffParameters(o RetryOptions) func(err error) (retry bool, 
 
 func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
 	timeout := opt.Timeout
+	attempt := 1
 	if opt.IsRecoverable == nil {
 		opt.IsRecoverable = isTimeout
 	}
@@ -97,10 +96,12 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 
 		var retry bool
 		var waitTime time.Duration
-		retry, timeout, waitTime = opt.GetRetryParameters(err)
+		retry, timeout, waitTime = opt.GetRetryParameters(err, attempt)
 		if !retry {
 			return err
 		}
+
+		attempt++
 
 		select {
 		case <-done:
