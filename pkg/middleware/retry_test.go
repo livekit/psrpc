@@ -39,7 +39,7 @@ func TestRetryBackoff(t *testing.T) {
 		}
 	}
 
-	t.Run("Success", func(t *testing.T) {
+	t.Run("TestSuccess", func(t *testing.T) {
 		ro.IsRecoverable = func(err error) bool { return true }
 		ri := NewRPCRetryInterceptor(ro)
 
@@ -51,7 +51,7 @@ func TestRetryBackoff(t *testing.T) {
 		require.Equal(t, ro.Timeout, timeouts[0])
 	})
 
-	t.Run("Failure all errors retryable", func(t *testing.T) {
+	t.Run("TestFailureAllErrorsRetryable", func(t *testing.T) {
 		ro.IsRecoverable = func(err error) bool { return true }
 		ri := NewRPCRetryInterceptor(ro)
 
@@ -69,5 +69,17 @@ func TestRetryBackoff(t *testing.T) {
 			require.Equal(t, expectedTimeout, timeout)
 			expectedTimeout += ro.Backoff
 		}
+	})
+
+	t.Run("TestFailureNoErrorRetryable", func(t *testing.T) {
+		ro.IsRecoverable = func(err error) bool { return false }
+		ri := NewRPCRetryInterceptor(ro)
+
+		errs := []error{errors.New("test error")}
+		h := ri(psrpc.RPCInfo{}, getClientRpcHandler(errs))
+		h(context.Background(), nil)
+
+		require.Equal(t, 1, len(timeouts))
+		require.Equal(t, ro.Timeout, timeouts[0])
 	})
 }
