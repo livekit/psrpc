@@ -82,4 +82,39 @@ func TestRetryBackoff(t *testing.T) {
 		require.Equal(t, 1, len(timeouts))
 		require.Equal(t, ro.Timeout, timeouts[0])
 	})
+
+	t.Run("TestCustomParameters", func(t *testing.T) {
+		attempt := 1
+		lastTry := time.Now()
+
+		ro.GetRetryParameters = func(err error) (retry bool, timeout time.Duration, waitTime time.Duration) {
+			if attempt > 1 {
+				now := time.Now()
+				require.InDelta(t, 500*time.Millisecond, now.Sub(lastTry), float64(20*time.Millisecond), "Retry didn't wait for required interval")
+				lastTry = now
+			}
+
+			if attempt == 3 {
+				return false, 0, 0
+			}
+
+			attempt++
+			return true, 100 * time.Millisecond, 500 * time.Millisecond
+		}
+
+		ri := NewRPCRetryInterceptor(ro)
+
+		errs := make([]error, 3)
+		for i, _ := range errs {
+			errs[i] = errors.New("test error")
+		}
+		h := ri(psrpc.RPCInfo{}, getClientRpcHandler(errs))
+		h(context.Background(), nil)
+
+		require.Equal(t, ro.MaxAttempts, len(timeouts))
+
+		for _, timeout := range timeouts {
+			require.Equal(t, 100*time.Millisecond, timeout)
+		}
+	})
 }
