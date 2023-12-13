@@ -17,7 +17,6 @@ package middleware
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -29,8 +28,8 @@ type RetryOptions struct {
 	MaxAttempts        int
 	Timeout            time.Duration
 	Backoff            time.Duration
-	ExponentialBackoff bool // multiply backoff by [1, 1 + rand(1)) for each run
 	IsRecoverable      func(err error) bool
+	GetRetryParameters func(err error) (retry bool, timeout time.Duration, waitTime time.Duration) // will override the MaxAttempts, Timeout and Backoff parameters
 }
 
 func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
@@ -64,29 +63,49 @@ func isTimeout(err error) bool {
 	return e.Code() == psrpc.DeadlineExceeded || e.Code() == psrpc.Unavailable
 }
 
-func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
+func getRetryWithBackoffParameters(o RetryOptions) func(err error) (retry bool, timeout time.Duration, waitTime time.Duration) {
 	attempt := 1
+	timeout := o.Timeout
+
+	return func(err error) (bool, time.Duration, time.Duration) {
+		if !o.IsRecoverable(err) || attempt == o.MaxAttempts {
+			return false, 0, 0
+		}
+
+		attempt++
+		timeout += o.Backoff
+
+		return true, timeout, 0
+	}
+}
+
+func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
 	timeout := opt.Timeout
 	if opt.IsRecoverable == nil {
 		opt.IsRecoverable = isTimeout
 	}
 
+	if opt.GetRetryParameters == nil {
+		opt.GetRetryParameters = getRetryWithBackoffParameters(opt)
+	}
+
 	for {
 		err := fn(timeout)
-		if err == nil || !opt.IsRecoverable(err) || attempt == opt.MaxAttempts {
+		if err == nil {
+			return nil
+		}
+
+		var retry bool
+		var waitTime time.Duration
+		retry, timeout, waitTime = opt.GetRetryParameters(err)
+		if !retry {
 			return err
 		}
+
 		select {
 		case <-done:
 			return psrpc.ErrRequestCanceled
-		default:
-		}
-
-		attempt++
-		timeout += opt.Backoff
-
-		if opt.ExponentialBackoff {
-			opt.Backoff = time.Duration(float32(opt.Backoff) * (1 + rand.Float32()))
+		case <-time.After(waitTime):
 		}
 	}
 }
