@@ -86,7 +86,11 @@ func (l *laggySubscribeInterceptor) popRead() ([]byte, bool) {
 
 	r := heap.Pop(&l.rh).(*readResult)
 	if l.rh.Len() > 0 {
-		l.t.Reset(time.Until(l.rh.Peek().time))
+		d := time.Until(l.rh.Peek().time)
+		if d < 0 {
+			d = 0
+		}
+		l.t.Reset(d)
 	}
 	return r.body, r.ok
 }
