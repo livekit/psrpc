@@ -44,28 +44,25 @@ func Proto() error {
 		return err
 	}
 
-	cmd := exec.Command(protoc,
-		"--go_out", "internal",
-		"--go_opt=paths=source_relative",
-		"--plugin=go="+protocGoPath,
-		"-I=./internal",
-		"internal.proto",
-	)
-	mageutil.ConnectStd(cmd)
-	if err = cmd.Run(); err != nil {
-		return err
+	protos := []struct {
+		importPath, outputPath, filename string
+	}{
+		{"./internal", "internal", "internal.proto"},
+		{"./protoc-gen-psrpc/options", "protoc-gen-psrpc/options", "options.proto"},
+		{"./testutils", "testutils", "testutils.proto"},
 	}
-
-	cmd = exec.Command(protoc,
-		"--go_out", "protoc-gen-psrpc/options",
-		"--go_opt=paths=source_relative",
-		"--plugin=go="+protocGoPath,
-		"-I=./protoc-gen-psrpc/options",
-		"options.proto",
-	)
-	mageutil.ConnectStd(cmd)
-	if err = cmd.Run(); err != nil {
-		return err
+	for _, p := range protos {
+		cmd := exec.Command(protoc,
+			"--go_out", p.outputPath,
+			"--go_opt=paths=source_relative",
+			"--plugin=go="+protocGoPath,
+			"-I="+p.importPath,
+			p.filename,
+		)
+		mageutil.ConnectStd(cmd)
+		if err = cmd.Run(); err != nil {
+			return err
+		}
 	}
 
 	return nil
