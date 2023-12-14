@@ -39,6 +39,14 @@ func WithSubscribeInterceptor(interceptor SubscribeInterceptor) TestBusOption {
 	}
 }
 
+func WithBusOptions(opts ...TestBusOption) TestBusOption {
+	return func(o *bus.TestBusOpts) {
+		for _, opt := range opts {
+			opt(o)
+		}
+	}
+}
+
 func NewTestBus(next psrpc.MessageBus, opts ...TestBusOption) psrpc.MessageBus {
 	return bus.NewTestBus(next, opts...)
 }
