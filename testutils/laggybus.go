@@ -72,7 +72,7 @@ func (l *laggySubscribeInterceptor) pushRead(r *readResult) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	heap.Push(&l.rh, r)
-	if l.rh.Peek() == r && l.t.Stop() {
+	if l.rh.Peek() == r {
 		l.t.Reset(time.Until(r.time))
 	}
 }
@@ -80,11 +80,13 @@ func (l *laggySubscribeInterceptor) pushRead(r *readResult) {
 func (l *laggySubscribeInterceptor) popRead() ([]byte, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.rh.Len() == 0 {
+		return nil, true
+	}
+
 	r := heap.Pop(&l.rh).(*readResult)
 	if l.rh.Len() > 0 {
 		l.t.Reset(time.Until(l.rh.Peek().time))
-	} else if r.ok {
-		l.t.Reset(math.MaxInt64)
 	}
 	return r.body, r.ok
 }
@@ -121,9 +123,13 @@ func (l *laggySubscribeInterceptor) Copy(
 	l.pushRead(&readResult{time: time.Now(), ok: false})
 }
 
-func (l *laggySubscribeInterceptor) Read() (b []byte, open bool) {
-	<-l.t.C
-	return l.popRead()
+func (l *laggySubscribeInterceptor) Read() ([]byte, bool) {
+	for {
+		<-l.t.C
+		if b, ok := l.popRead(); b != nil || !ok {
+			return b, ok
+		}
+	}
 }
 
 type readResult struct {
