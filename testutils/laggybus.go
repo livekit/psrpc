@@ -18,7 +18,7 @@ import (
 	"container/heap"
 	"context"
 	"math"
-	sync "sync"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -86,11 +86,7 @@ func (l *laggySubscribeInterceptor) popRead() ([]byte, bool) {
 
 	r := heap.Pop(&l.rh).(*readResult)
 	if l.rh.Len() > 0 {
-		d := time.Until(l.rh.Peek().time)
-		if d < 0 {
-			d = 0
-		}
-		l.t.Reset(d)
+		l.t.Reset(time.Until(l.rh.Peek().time))
 	}
 	return r.body, r.ok
 }
