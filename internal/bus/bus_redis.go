@@ -34,6 +34,8 @@ import (
 
 const lockExpiration = time.Second * 5
 const reconcilerRetryInterval = time.Second
+const minReadRetryInterval = time.Millisecond * 100
+const maxReadRetryInterval = time.Second
 
 type redisMessageBus struct {
 	rc  redis.UniversalClient
@@ -153,11 +155,21 @@ func (r *redisMessageBus) unsubscribe(channel string, queue bool, msgChan chan *
 }
 
 func (r *redisMessageBus) readWorker() {
+	var delay time.Duration
 	for {
 		msg, err := r.ps.ReceiveMessage(r.ctx)
 		if err != nil {
-			return
+			logger.Error(err, "redis receive message failed")
+
+			time.Sleep(delay)
+			if delay *= 2; delay == 0 {
+				delay = minReadRetryInterval
+			} else if delay > maxReadRetryInterval {
+				delay = maxReadRetryInterval
+			}
+			continue
 		}
+		delay = 0
 
 		r.mu.Lock()
 		if subList, ok := r.subs[msg.Channel]; ok {
