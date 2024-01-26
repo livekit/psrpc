@@ -156,7 +156,15 @@ func (r *redisMessageBus) readWorker() {
 	for {
 		msg, err := r.ps.ReceiveMessage(r.ctx)
 		if err != nil {
-			return
+			logger.Error(err, "redis receive message failed")
+
+			err = r.ps.Ping(r.ctx, "receive message failed")
+			if err != nil {
+				logger.Error(err, "redis ping failed")
+				time.Sleep(time.Millisecond * 100)
+			}
+
+			continue
 		}
 
 		r.mu.Lock()
