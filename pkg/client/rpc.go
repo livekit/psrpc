@@ -17,6 +17,8 @@ package client
 import (
 	"context"
 	"errors"
+	r "math/rand"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -176,36 +178,52 @@ func selectServer(
 		time.AfterFunc(opts.AffinityTimeout, cancel)
 	}
 
-	serverID := ""
-	best := float32(0)
 	shorted := false
-	claims := 0
 	var resErr error
+	var claims []*internal.ClaimRequest
+	var resCount int
 
 	for {
 		select {
 		case <-ctx.Done():
-			if best > 0 {
-				return serverID, nil
+			if len(claims) > 0 {
+				sort.Slice(claims, func(i, j int) bool {
+					return claims[i].Affinity > claims[j].Affinity
+				})
+
+				best := claims[0].Affinity
+				minAffinity := best * (1 - opts.Jitter)
+
+				i := 0
+				for ; i < len(claims); i++ {
+					if claims[i].Affinity < minAffinity {
+						break
+					}
+				}
+
+				return claims[r.Intn(i)].ServerId, nil
 			}
+
 			if resErr != nil {
 				return "", resErr
 			}
-			if claims == 0 {
-				return "", psrpc.ErrNoResponse
+
+			if len(claims) == 0 {
+				if resCount > 0 {
+					return "", psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", resCount)
+				} else {
+					return "", psrpc.ErrNoResponse
+				}
 			}
-			return "", psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", claims)
 
 		case claim := <-claimChan:
-			claims++
-			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity && claim.Affinity > best) ||
-				(opts.MinimumAffinity <= 0 && claim.Affinity > best) {
+			resCount++
+			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity) || opts.MinimumAffinity <= 0 {
 				if opts.AcceptFirstAvailable || opts.MaximumAffinity > 0 && claim.Affinity >= opts.MaximumAffinity {
 					return claim.ServerId, nil
 				}
 
-				serverID = claim.ServerId
-				best = claim.Affinity
+				claims = append(claims, claim)
 
 				if opts.ShortCircuitTimeout > 0 && !shorted {
 					shorted = true
