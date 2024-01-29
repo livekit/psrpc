@@ -190,14 +190,17 @@ func selectServer(
 				sort.Slice(claims, func(i, j int) bool {
 					return claims[i].Affinity > claims[j].Affinity
 				})
+
 				best := claims[0].Affinity
-				cutoff := best * 0.9
+				minAffinity := best * (1 - opts.Jitter)
+
 				i := 0
 				for ; i < len(claims); i++ {
-					if claims[i].Affinity < cutoff {
+					if claims[i].Affinity < minAffinity {
 						break
 					}
 				}
+
 				return claims[r.Intn(i)].ServerId, nil
 			}
 

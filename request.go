@@ -31,6 +31,7 @@ type RequestOpts struct {
 type SelectionOpts struct {
 	MinimumAffinity      float32       // minimum affinity for a server to be considered a valid handler
 	MaximumAffinity      float32       // if > 0, any server returning a max score will be selected immediately
+	Jitter               float32       // randomness applied to selection (0 to 1)
 	AcceptFirstAvailable bool          // go fast
 	AffinityTimeout      time.Duration // server selection deadline
 	ShortCircuitTimeout  time.Duration // deadline imposed after receiving first response
