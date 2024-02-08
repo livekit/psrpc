@@ -17,8 +17,6 @@ package client
 import (
 	"context"
 	"errors"
-	r "math/rand"
-	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -178,52 +176,44 @@ func selectServer(
 		time.AfterFunc(opts.AffinityTimeout, cancel)
 	}
 
-	shorted := false
-	var resErr error
-	var claims []*internal.ClaimRequest
-	var resCount int
+	var (
+		shorted    bool
+		serverID   string
+		affinity   float32
+		claims     []*psrpc.Claim
+		claimCount int
+		resErr     error
+	)
 
 	for {
 		select {
 		case <-ctx.Done():
-			if len(claims) > 0 {
-				sort.Slice(claims, func(i, j int) bool {
-					return claims[i].Affinity > claims[j].Affinity
-				})
-
-				best := claims[0].Affinity
-				minAffinity := best * (1 - opts.Jitter)
-
-				i := 0
-				for ; i < len(claims); i++ {
-					if claims[i].Affinity < minAffinity {
-						break
-					}
-				}
-
-				return claims[r.Intn(i)].ServerId, nil
-			}
-
-			if resErr != nil {
+			switch {
+			case opts.SelectionFunc != nil:
+				return opts.SelectionFunc(claims)
+			case serverID != "":
+				return serverID, nil
+			case resErr != nil:
 				return "", resErr
-			}
-
-			if len(claims) == 0 {
-				if resCount > 0 {
-					return "", psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", resCount)
-				} else {
-					return "", psrpc.ErrNoResponse
-				}
+			case claimCount > 0:
+				return "", psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", claimCount)
+			default:
+				return "", psrpc.ErrNoResponse
 			}
 
 		case claim := <-claimChan:
-			resCount++
+			claimCount++
 			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity) || opts.MinimumAffinity <= 0 {
 				if opts.AcceptFirstAvailable || opts.MaximumAffinity > 0 && claim.Affinity >= opts.MaximumAffinity {
 					return claim.ServerId, nil
 				}
 
-				claims = append(claims, claim)
+				if opts.SelectionFunc != nil {
+					claims = append(claims, &psrpc.Claim{ServerID: claim.ServerId, Affinity: claim.Affinity})
+				} else if claim.Affinity > affinity {
+					serverID = claim.ServerId
+					affinity = claim.Affinity
+				}
 
 				if opts.ShortCircuitTimeout > 0 && !shorted {
 					shorted = true
