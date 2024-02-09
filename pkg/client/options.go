@@ -60,13 +60,6 @@ func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc
 		opt(o)
 	}
 
-	if o.SelectionOpts.Jitter < 0 {
-		o.SelectionOpts.Jitter = 0
-	}
-	if o.SelectionOpts.Jitter > 1 {
-		o.SelectionOpts.Jitter = 1
-	}
-
 	return *o
 }
 
