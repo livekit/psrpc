@@ -59,7 +59,6 @@ func NewRPCClient(
 		claimRequests:     make(map[string]chan *internal.ClaimRequest),
 		responseChannels:  make(map[string]chan *internal.Response),
 		streamChannels:    make(map[string]chan *internal.Stream),
-		closed:            core.NewFuse(),
 	}
 	if c.ClientID != "" {
 		c.ID = c.ClientID
