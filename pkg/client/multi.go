@@ -58,7 +58,7 @@ func RequestMulti[ResponseType proto.Message](
 
 	reqInterceptors := getRequestInterceptors(
 		c.MultiRPCInterceptors,
-		getRequestOpts(i, c.ClientOpts, opts...).Interceptors,
+		getRequestOpts(ctx, i, c.ClientOpts, opts...).Interceptors,
 	)
 	m.handler = interceptors.ChainClientInterceptors[psrpc.ClientMultiRPCHandler](
 		reqInterceptors, i, m,
@@ -83,7 +83,7 @@ type multiRPC[ResponseType proto.Message] struct {
 }
 
 func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) error {
-	o := getRequestOpts(m.i, m.c.ClientOpts, opts...)
+	o := getRequestOpts(ctx, m.i, m.c.ClientOpts, opts...)
 
 	b, err := bus.SerializePayload(req)
 	if err != nil {

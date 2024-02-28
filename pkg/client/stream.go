@@ -39,7 +39,7 @@ func OpenStream[SendType, RecvType proto.Message](
 ) (psrpc.ClientStream[SendType, RecvType], error) {
 
 	i := c.GetInfo(rpc, topic)
-	o := getRequestOpts(i, c.ClientOpts, opts...)
+	o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
 	streamID := rand.NewStreamID()
 	requestID := rand.NewRequestID()
@@ -76,7 +76,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		ctx,
 		i,
 		streamID,
-		c.Timeout,
+		o.Timeout,
 		&clientStream{c: c, i: i},
 		getRequestInterceptors(c.StreamInterceptors, o.Interceptors),
 		make(chan RecvType, c.ChannelSize),
