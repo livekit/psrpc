@@ -59,7 +59,7 @@ func RequestSingle[ResponseType proto.Message](
 
 	reqInterceptors := getRequestInterceptors(
 		c.RpcInterceptors,
-		getRequestOpts(i, c.ClientOpts, opts...).Interceptors,
+		getRequestOpts(ctx, i, c.ClientOpts, opts...).Interceptors,
 	)
 	handler := interceptors.ChainClientInterceptors[psrpc.ClientRPCHandler](
 		reqInterceptors, i, newRPC[ResponseType](c, i),
@@ -75,7 +75,7 @@ func RequestSingle[ResponseType proto.Message](
 
 func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc.ClientRPCHandler {
 	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
-		o := getRequestOpts(i, c.ClientOpts, opts...)
+		o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
 		b, err := bus.SerializePayload(request)
 		if err != nil {

@@ -15,7 +15,9 @@
 package client
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
@@ -30,7 +32,6 @@ func withStreams() psrpc.ClientOption {
 
 func getClientOpts(opts ...psrpc.ClientOption) psrpc.ClientOpts {
 	o := &psrpc.ClientOpts{
-		Timeout:          psrpc.DefaultClientTimeout,
 		SelectionTimeout: psrpc.DefaultAffinityTimeout,
 		ChannelSize:      bus.DefaultChannelSize,
 	}
@@ -40,9 +41,17 @@ func getClientOpts(opts ...psrpc.ClientOption) psrpc.ClientOpts {
 	return *o
 }
 
-func getRequestOpts(i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc.RequestOption) psrpc.RequestOpts {
+func getRequestOpts(ctx context.Context, i *info.RequestInfo, options psrpc.ClientOpts, opts ...psrpc.RequestOption) psrpc.RequestOpts {
 	o := &psrpc.RequestOpts{
 		Timeout: options.Timeout,
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if dt := time.Until(deadline); o.Timeout == 0 || o.Timeout > dt {
+			o.Timeout = dt
+		}
+	}
+	if o.Timeout == 0 {
+		o.Timeout = psrpc.DefaultClientTimeout
 	}
 	if i.AffinityEnabled {
 		o.SelectionOpts = psrpc.SelectionOpts{
