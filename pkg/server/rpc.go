@@ -266,7 +266,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Error = err.Error()
 			res.Code = string(psrpc.Unknown)
 		}
-	} else if response != nil {
+	} else if response.ProtoReflect().IsValid() {
 		b, err := bus.SerializePayload(response)
 		if err != nil {
 			res.Error = err.Error()
