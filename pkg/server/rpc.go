@@ -186,9 +186,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 
 	// call handler function and return response
 	response, err := h.handler(ctx, req)
-	if ir.Multi && !response.ProtoReflect().IsValid() && err == nil {
-		return nil
-	}
 	return h.sendResponse(s, ctx, ir, response, err)
 }
 
@@ -277,6 +274,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		} else {
 			res.RawResponse = b
 		}
+	} else if ir.Multi {
+		// ignore nil responses from multirpc methods
+		return nil
 	}
 
 	return s.bus.Publish(ctx, info.GetResponseChannel(s.Name, ir.ClientId), res)
