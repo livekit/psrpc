@@ -186,6 +186,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 
 	// call handler function and return response
 	response, err := h.handler(ctx, req)
+	if ir.Multi && !response.ProtoReflect().IsValid() && err == nil {
+		return nil
+	}
 	return h.sendResponse(s, ctx, ir, response, err)
 }
 
