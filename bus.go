@@ -21,6 +21,20 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 )
 
+const (
+	LegacySubLegacyPub       = bus.LegacySubLegacyPub
+	LegacySubCompatiblePub   = bus.LegacySubCompatiblePub
+	WildcardSubCompatiblePub = bus.WildcardSubCompatiblePub
+	WildcardSubWildcardPub   = bus.WildcardSubWildcardPub
+)
+
+func SetChannelMode(m uint32) {
+	if m <= WildcardSubWildcardPub {
+		bus.ChannelMode.Store(m)
+	}
+}
+
+type Channel = bus.Channel
 type MessageBus bus.MessageBus
 
 func NewLocalMessageBus() MessageBus {

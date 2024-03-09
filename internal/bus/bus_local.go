@@ -34,15 +34,15 @@ func NewLocalMessageBus() MessageBus {
 	}
 }
 
-func (l *localMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
+func (l *localMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
 	}
 
 	l.RLock()
-	subs := l.subs[channel]
-	queues := l.queues[channel]
+	subs := l.subs[channel.Primary]
+	queues := l.queues[channel.Primary]
 	l.RUnlock()
 
 	if subs != nil {
@@ -54,12 +54,12 @@ func (l *localMessageBus) Publish(_ context.Context, channel string, msg proto.M
 	return nil
 }
 
-func (l *localMessageBus) Subscribe(_ context.Context, channel string, size int) (Reader, error) {
-	return l.subscribe(l.subs, channel, size, false)
+func (l *localMessageBus) Subscribe(_ context.Context, channel Channel, size int) (Reader, error) {
+	return l.subscribe(l.subs, channel.Primary, size, false)
 }
 
-func (l *localMessageBus) SubscribeQueue(_ context.Context, channel string, size int) (Reader, error) {
-	return l.subscribe(l.queues, channel, size, true)
+func (l *localMessageBus) SubscribeQueue(_ context.Context, channel Channel, size int) (Reader, error) {
+	return l.subscribe(l.queues, channel.Primary, size, true)
 }
 
 func (l *localMessageBus) subscribe(subLists map[string]*localSubList, channel string, size int, queue bool) (Reader, error) {

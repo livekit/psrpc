@@ -42,8 +42,8 @@ func WithUnreliableBus(rate AtomicFailureRate) TestBusOption {
 }
 
 func WithUnreliableBusChannel(rate AtomicFailureRate, channelFilter string) TestBusOption {
-	return WithSubscribeInterceptor(func(_ context.Context, channel string, next ReadHandler) ReadHandler {
-		if channelFilter != "" && channelFilter != channel {
+	return WithSubscribeInterceptor(func(_ context.Context, channel Channel, next ReadHandler) ReadHandler {
+		if channelFilter != "" && channelFilter != channel.Legacy {
 			return next
 		}
 

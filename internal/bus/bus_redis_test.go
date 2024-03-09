@@ -16,14 +16,20 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
+
+func redisTestChannel(channel string) Channel {
+	return Channel{Primary: channel}
+}
 
 func TestRedisMessageBus(t *testing.T) {
 	t.Run("published messages are received by subscribers", func(t *testing.T) {
@@ -37,14 +43,14 @@ func TestRedisMessageBus(t *testing.T) {
 		b0 := NewRedisMessageBus(rc0)
 		b1 := NewRedisMessageBus(rc1)
 
-		r, err := b0.Subscribe(context.Background(), "test", 100)
+		r, err := b0.Subscribe(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
 
 		src := wrapperspb.String("test")
 
-		err = b1.Publish(context.Background(), "test", src)
+		err = b1.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
 		b, ok := r.read()
@@ -69,16 +75,16 @@ func TestRedisMessageBus(t *testing.T) {
 		b1 := NewRedisMessageBus(rc1)
 		b2 := NewRedisMessageBus(rc2)
 
-		r1, err := b1.SubscribeQueue(context.Background(), "test", 100)
+		r1, err := b1.SubscribeQueue(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
-		r2, err := b2.SubscribeQueue(context.Background(), "test", 100)
+		r2, err := b2.SubscribeQueue(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
 
 		src := wrapperspb.String("test")
 
-		err = b0.Publish(context.Background(), "test", src)
+		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
 		var n atomic.Int64
@@ -113,16 +119,16 @@ func TestRedisMessageBus(t *testing.T) {
 		b1 := NewRedisMessageBus(rc1)
 		b2 := NewRedisMessageBus(rc2)
 
-		r1, err := b1.Subscribe(context.Background(), "test", 100)
+		r1, err := b1.Subscribe(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
-		r2, err := b2.Subscribe(context.Background(), "test", 100)
+		r2, err := b2.Subscribe(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
 
 		src := wrapperspb.String("test")
 
-		err = b0.Publish(context.Background(), "test", src)
+		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
 		_, ok := r1.read()
@@ -135,7 +141,7 @@ func TestRedisMessageBus(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		err = b0.Publish(context.Background(), "test", src)
+		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
 		_, ok = r1.read()
@@ -156,7 +162,7 @@ func BenchmarkRedisMessageBus(b *testing.B) {
 	b0 := NewRedisMessageBus(rc0)
 	b1 := NewRedisMessageBus(rc1)
 
-	r, _ := b0.Subscribe(context.Background(), "test", 100)
+	r, _ := b0.Subscribe(context.Background(), redisTestChannel("test"), 100)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -172,8 +178,13 @@ func BenchmarkRedisMessageBus(b *testing.B) {
 
 	src := wrapperspb.String("test")
 	for i := 0; i < b.N; i++ {
-		b1.Publish(context.Background(), "test", src)
+		b1.Publish(context.Background(), redisTestChannel("test"), src)
 	}
 
 	<-done
+}
+
+func TestFoo(t *testing.T) {
+	foo := "asdf"
+	fmt.Println(*(*[]byte)(unsafe.Pointer(&foo)))
 }

@@ -16,33 +16,86 @@ package bus
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"sync"
 
 	"github.com/nats-io/nats.go"
+	"go.uber.org/multierr"
+	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 )
 
 type natsMessageBus struct {
 	nc *nats.Conn
+
+	mu      sync.Mutex
+	routers map[string]*natsWildcardRouter
 }
 
 func NewNatsMessageBus(nc *nats.Conn) MessageBus {
 	return &natsMessageBus{
-		nc: nc,
+		nc:      nc,
+		routers: map[string]*natsWildcardRouter{},
 	}
 }
 
-func (n *natsMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
+func (n *natsMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
 	b, err := serialize(msg)
 	if err != nil {
 		return err
 	}
 
-	return n.nc.Publish(channel, b)
+	if ChannelMode.Load() != WildcardSubWildcardPub {
+		err = multierr.Append(err, n.nc.Publish(channel.Legacy, b))
+	}
+	if ChannelMode.Load() != LegacySubLegacyPub {
+		err = multierr.Append(err, n.nc.Publish(channel.Primary, b))
+	}
+	return err
 }
 
-func (n *natsMessageBus) Subscribe(_ context.Context, channel string, size int) (Reader, error) {
+func (n *natsMessageBus) Subscribe(_ context.Context, channel Channel, size int) (Reader, error) {
+	if channel.Wildcard == "" {
+		if ChannelMode.Load() == WildcardSubWildcardPub {
+			return n.subscribe(channel.Primary, size, false)
+		} else {
+			return n.subscribeCompatible(channel, size, false)
+		}
+	} else {
+		if ChannelMode.Load() == WildcardSubWildcardPub {
+			return n.subscribeWildcard(channel, size, false)
+		} else {
+			return n.subscribeCompatibleWildcard(channel, size, false)
+		}
+	}
+}
+
+func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel Channel, size int) (Reader, error) {
+	if channel.Wildcard == "" {
+		if ChannelMode.Load() == WildcardSubWildcardPub {
+			return n.subscribe(channel.Primary, size, true)
+		} else {
+			return n.subscribeCompatible(channel, size, true)
+		}
+	} else {
+		if ChannelMode.Load() == WildcardSubWildcardPub {
+			return n.subscribeWildcard(channel, size, true)
+		} else {
+			return n.subscribeCompatibleWildcard(channel, size, true)
+		}
+	}
+}
+
+func (n *natsMessageBus) subscribe(channel string, size int, queue bool) (*natsSubscription, error) {
 	msgChan := make(chan *nats.Msg, size)
-	sub, err := n.nc.ChanSubscribe(channel, msgChan)
+	var sub *nats.Subscription
+	var err error
+	if queue {
+		sub, err = n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
+	} else {
+		sub, err = n.nc.ChanSubscribe(channel, msgChan)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -53,16 +106,97 @@ func (n *natsMessageBus) Subscribe(_ context.Context, channel string, size int) 
 	}, nil
 }
 
-func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel string, size int) (Reader, error) {
-	msgChan := make(chan *nats.Msg, size)
-	sub, err := n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
+func (n *natsMessageBus) subscribeCompatible(channel Channel, size int, queue bool) (*natsCompatibleSubscription, error) {
+	sub, err := n.subscribe(channel.Primary, size, queue)
 	if err != nil {
 		return nil, err
 	}
+	legacySub, err := n.subscribe(channel.Legacy, size, queue)
+	if err != nil {
+		sub.Close()
+		return nil, err
+	}
 
-	return &natsSubscription{
-		sub:     sub,
-		msgChan: msgChan,
+	return &natsCompatibleSubscription{
+		sub:           sub,
+		legacySub:     legacySub,
+		msgChan:       sub.msgChan,
+		legacyMsgChan: legacySub.msgChan,
+	}, nil
+}
+
+func (n *natsMessageBus) subscribeWildcardRouter(channel string, size int, sub *natsWildcardSubscription, queue bool) error {
+	n.mu.Lock()
+	r, ok := n.routers[channel]
+	if !ok {
+		r = &natsWildcardRouter{
+			routes:  map[string]natsRouterSub{},
+			bus:     n,
+			channel: channel,
+			queue:   queue,
+		}
+		n.routers[channel] = r
+	} else if r.queue != queue {
+		n.mu.Unlock()
+		return fmt.Errorf("subscription type mismatch for channel %q %s vs %s", channel, maps.Keys(r.routes), sub.channel)
+	}
+
+	r.open(sub.channel, sub)
+	sub.router = r
+	n.mu.Unlock()
+
+	if !ok {
+		wsub, err := n.subscribe(channel, size, queue)
+		if err != nil {
+			n.mu.Lock()
+			delete(n.routers, channel)
+			n.mu.Unlock()
+			return err
+		}
+
+		r.sub = wsub
+		go r.worker()
+	}
+	return nil
+}
+
+func (n *natsMessageBus) unsubscribeWildcardRouter(r *natsWildcardRouter, channel string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if r.close(channel) {
+		delete(n.routers, r.channel)
+	}
+}
+
+func (n *natsMessageBus) subscribeWildcard(channel Channel, size int, queue bool) (*natsWildcardSubscription, error) {
+	sub := &natsWildcardSubscription{
+		msgChan: make(chan *nats.Msg, size),
+		channel: channel.Primary,
+	}
+
+	if err := n.subscribeWildcardRouter(channel.Wildcard, size, sub, queue); err != nil {
+		return nil, err
+	}
+
+	return sub, nil
+}
+
+func (n *natsMessageBus) subscribeCompatibleWildcard(channel Channel, size int, queue bool) (*natsCompatibleSubscription, error) {
+	sub, err := n.subscribeWildcard(channel, size, queue)
+	if err != nil {
+		return nil, err
+	}
+	legacySub, err := n.subscribe(channel.Legacy, size, queue)
+	if err != nil {
+		sub.Close()
+		return nil, err
+	}
+
+	return &natsCompatibleSubscription{
+		sub:           sub,
+		legacySub:     legacySub,
+		msgChan:       sub.msgChan,
+		legacyMsgChan: legacySub.msgChan,
 	}, nil
 }
 
@@ -83,4 +217,104 @@ func (n *natsSubscription) Close() error {
 	err := n.sub.Unsubscribe()
 	close(n.msgChan)
 	return err
+}
+
+type natsRouterSub interface {
+	write(m *nats.Msg)
+}
+
+type natsWildcardRouter struct {
+	sub     *natsSubscription
+	mu      sync.Mutex
+	routes  map[string]natsRouterSub
+	bus     *natsMessageBus
+	channel string
+	queue   bool
+}
+
+func (n *natsWildcardRouter) open(channel string, s *natsWildcardSubscription) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.routes[channel] = s
+}
+
+func (n *natsWildcardRouter) close(channel string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.routes, channel)
+	if len(n.routes) == 0 {
+		n.sub.Close()
+		return true
+	}
+	return false
+}
+
+func (n *natsWildcardRouter) worker() {
+	for m := range n.sub.msgChan {
+		n.mu.Lock()
+		if s, ok := n.routes[m.Subject]; ok {
+			s.write(m)
+		}
+		n.mu.Unlock()
+	}
+}
+
+type natsWildcardSubscription struct {
+	msgChan chan *nats.Msg
+	router  *natsWildcardRouter
+	channel string
+}
+
+func (n *natsWildcardSubscription) write(m *nats.Msg) {
+	select {
+	case n.msgChan <- m:
+	default:
+	}
+}
+
+func (n *natsWildcardSubscription) read() ([]byte, bool) {
+	msg, ok := <-n.msgChan
+	if !ok {
+		return nil, false
+	}
+	return msg.Data, true
+}
+
+func (n *natsWildcardSubscription) Close() error {
+	n.router.bus.unsubscribeWildcardRouter(n.router, n.channel)
+	close(n.msgChan)
+	return nil
+}
+
+type natsCompatibleSubscription struct {
+	sub, legacySub         io.Closer
+	msgChan, legacyMsgChan chan *nats.Msg
+}
+
+func (n *natsCompatibleSubscription) read() ([]byte, bool) {
+	for {
+		select {
+		case msg, ok := <-n.msgChan:
+			if !ok {
+				return nil, false
+			}
+			switch ChannelMode.Load() {
+			case WildcardSubCompatiblePub, WildcardSubWildcardPub:
+				return msg.Data, true
+			}
+
+		case msg, ok := <-n.legacyMsgChan:
+			if !ok {
+				return nil, false
+			}
+			switch ChannelMode.Load() {
+			case LegacySubLegacyPub, LegacySubCompatiblePub:
+				return msg.Data, true
+			}
+		}
+	}
+}
+
+func (n *natsCompatibleSubscription) Close() error {
+	return multierr.Combine(n.sub.Close(), n.legacySub.Close())
 }

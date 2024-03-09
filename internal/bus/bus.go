@@ -16,6 +16,7 @@ package bus
 
 import (
 	"context"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -24,10 +25,25 @@ const (
 	DefaultChannelSize = 100
 )
 
+const (
+	LegacySubLegacyPub = iota
+	LegacySubCompatiblePub
+	WildcardSubCompatiblePub
+	WildcardSubWildcardPub
+
+	finalChannelMode = WildcardSubWildcardPub
+)
+
+var ChannelMode atomic.Uint32
+
+type Channel struct {
+	Primary, Legacy, Wildcard string
+}
+
 type MessageBus interface {
-	Publish(ctx context.Context, channel string, msg proto.Message) error
-	Subscribe(ctx context.Context, channel string, channelSize int) (Reader, error)
-	SubscribeQueue(ctx context.Context, channel string, channelSize int) (Reader, error)
+	Publish(ctx context.Context, channel Channel, msg proto.Message) error
+	Subscribe(ctx context.Context, channel Channel, channelSize int) (Reader, error)
+	SubscribeQueue(ctx context.Context, channel Channel, channelSize int) (Reader, error)
 }
 
 type Reader interface {
@@ -38,7 +54,7 @@ type Reader interface {
 func Subscribe[MessageType proto.Message](
 	ctx context.Context,
 	bus MessageBus,
-	channel string,
+	channel Channel,
 	channelSize int,
 ) (Subscription[MessageType], error) {
 
@@ -53,7 +69,7 @@ func Subscribe[MessageType proto.Message](
 func SubscribeQueue[MessageType proto.Message](
 	ctx context.Context,
 	bus MessageBus,
-	channel string,
+	channel Channel,
 	channelSize int,
 ) (Subscription[MessageType], error) {
 

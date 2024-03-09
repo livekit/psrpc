@@ -28,7 +28,7 @@ import (
 func WithLaggyBus(id string, latency latencyFunc) TestBusOption {
 	return WithBusOptions(
 		WithPublishInterceptor(func(next PublishHandler) PublishHandler {
-			return func(ctx context.Context, channel string, msg proto.Message) error {
+			return func(ctx context.Context, channel Channel, msg proto.Message) error {
 				a, err := anypb.New(msg)
 				if err != nil {
 					return err
@@ -46,7 +46,7 @@ func WithLaggyBus(id string, latency latencyFunc) TestBusOption {
 				})
 			}
 		}),
-		WithSubscribeInterceptor(func(ctx context.Context, channel string, next ReadHandler) ReadHandler {
+		WithSubscribeInterceptor(func(ctx context.Context, channel Channel, next ReadHandler) ReadHandler {
 			l := newLaggySubscribeInterceptor()
 			go l.Copy(ctx, id, latency, next)
 			return l.Read

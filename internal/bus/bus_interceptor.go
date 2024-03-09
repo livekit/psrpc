@@ -21,9 +21,9 @@ import (
 )
 
 type PublishInterceptor func(next PublishHandler) PublishHandler
-type SubscribeInterceptor func(ctx context.Context, channel string, next ReadHandler) ReadHandler
+type SubscribeInterceptor func(ctx context.Context, channel Channel, next ReadHandler) ReadHandler
 
-type PublishHandler func(ctx context.Context, channel string, msg proto.Message) error
+type PublishHandler func(ctx context.Context, channel Channel, msg proto.Message) error
 type ReadHandler func() ([]byte, bool)
 
 type TestBusOption func(*TestBusOpts)
@@ -57,11 +57,11 @@ type testBus struct {
 	subscribeInterceptors []SubscribeInterceptor
 }
 
-func (l *testBus) Publish(ctx context.Context, channel string, msg proto.Message) error {
+func (l *testBus) Publish(ctx context.Context, channel Channel, msg proto.Message) error {
 	return l.publishHandler(ctx, channel, msg)
 }
 
-func (l *testBus) Subscribe(ctx context.Context, channel string, size int) (Reader, error) {
+func (l *testBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
 	r, err := l.bus.Subscribe(ctx, channel, size)
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ func (l *testBus) Subscribe(ctx context.Context, channel string, size int) (Read
 	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.read)}, nil
 }
 
-func (l *testBus) SubscribeQueue(ctx context.Context, channel string, size int) (Reader, error) {
+func (l *testBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
 	r, err := l.bus.SubscribeQueue(ctx, channel, size)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (l *testBus) SubscribeQueue(ctx context.Context, channel string, size int) 
 	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.read)}, nil
 }
 
-func (l *testBus) chainSubscribeInterceptors(ctx context.Context, channel string, handler ReadHandler) ReadHandler {
+func (l *testBus) chainSubscribeInterceptors(ctx context.Context, channel Channel, handler ReadHandler) ReadHandler {
 	for i := len(l.subscribeInterceptors) - 1; i >= 0; i-- {
 		handler = l.subscribeInterceptors[i](ctx, channel, handler)
 	}

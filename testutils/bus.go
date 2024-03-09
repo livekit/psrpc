@@ -19,6 +19,8 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 )
 
+type Channel = bus.Channel
+
 type PublishInterceptor = bus.PublishInterceptor
 type SubscribeInterceptor = bus.SubscribeInterceptor
 
