@@ -124,12 +124,12 @@ func (n *natsMessageBus) subscribeCompatible(channel Channel, size int, queue bo
 	}, nil
 }
 
-func (n *natsMessageBus) subscribeWildcardRouter(channel string, size int, sub *natsWildcardSubscription, queue bool) error {
+func (n *natsMessageBus) subscribeWildcardRouter(channel string, sub *natsWildcardSubscription, queue bool) error {
 	n.mu.Lock()
 	r, ok := n.routers[channel]
 	if !ok {
 		r = &natsWildcardRouter{
-			routes:  map[string]natsRouterSub{},
+			routes:  map[string]*natsWildcardSubscription{},
 			bus:     n,
 			channel: channel,
 			queue:   queue,
@@ -144,19 +144,22 @@ func (n *natsMessageBus) subscribeWildcardRouter(channel string, size int, sub *
 	sub.router = r
 	n.mu.Unlock()
 
-	if !ok {
-		wsub, err := n.subscribe(channel, size, queue)
-		if err != nil {
-			n.mu.Lock()
-			delete(n.routers, channel)
-			n.mu.Unlock()
-			return err
-		}
-
-		r.sub = wsub
-		go r.worker()
+	if ok {
+		return nil
 	}
-	return nil
+
+	var err error
+	if queue {
+		r.sub, err = n.nc.QueueSubscribe(channel, "bus", r.write)
+	} else {
+		r.sub, err = n.nc.Subscribe(channel, r.write)
+	}
+	if err != nil {
+		n.mu.Lock()
+		delete(n.routers, channel)
+		n.mu.Unlock()
+	}
+	return err
 }
 
 func (n *natsMessageBus) unsubscribeWildcardRouter(r *natsWildcardRouter, channel string) {
@@ -173,7 +176,7 @@ func (n *natsMessageBus) subscribeWildcard(channel Channel, size int, queue bool
 		channel: channel.Primary,
 	}
 
-	if err := n.subscribeWildcardRouter(channel.Wildcard, size, sub, queue); err != nil {
+	if err := n.subscribeWildcardRouter(channel.Wildcard, sub, queue); err != nil {
 		return nil, err
 	}
 
@@ -218,14 +221,10 @@ func (n *natsSubscription) Close() error {
 	return err
 }
 
-type natsRouterSub interface {
-	write(m *nats.Msg)
-}
-
 type natsWildcardRouter struct {
-	sub     *natsSubscription
+	sub     *nats.Subscription
 	mu      sync.Mutex
-	routes  map[string]natsRouterSub
+	routes  map[string]*natsWildcardSubscription
 	bus     *natsMessageBus
 	channel string
 	queue   bool
@@ -242,19 +241,17 @@ func (n *natsWildcardRouter) close(channel string) bool {
 	defer n.mu.Unlock()
 	delete(n.routes, channel)
 	if len(n.routes) == 0 {
-		n.sub.Close()
+		n.sub.Unsubscribe()
 		return true
 	}
 	return false
 }
 
-func (n *natsWildcardRouter) worker() {
-	for m := range n.sub.msgChan {
-		n.mu.Lock()
-		if s, ok := n.routes[m.Subject]; ok {
-			s.write(m)
-		}
-		n.mu.Unlock()
+func (n *natsWildcardRouter) write(m *nats.Msg) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if s, ok := n.routes[m.Subject]; ok {
+		s.write(m)
 	}
 }
 

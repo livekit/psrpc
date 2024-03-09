@@ -37,7 +37,7 @@ const (
 var ChannelMode atomic.Uint32
 
 type Channel struct {
-	Primary, Legacy, Wildcard string
+	Legacy, Primary, Wildcard string
 }
 
 type MessageBus interface {

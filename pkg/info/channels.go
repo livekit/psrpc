@@ -15,6 +15,7 @@
 package info
 
 import (
+	"sync"
 	"unicode"
 
 	"github.com/livekit/psrpc/internal/bus"
@@ -32,62 +33,106 @@ var channelChar = &unicode.RangeTable{
 	LatinOffset: 4,
 }
 
-type wildcard byte
-
-var wc wildcard = '*'
-
 func GetClaimRequestChannel(service, clientID string) bus.Channel {
 	return bus.Channel{
 		Legacy:  formatChannel('|', service, clientID, "CLAIM"),
-		Primary: formatChannel('.', "CLI", service, clientID, "CLAIM"),
+		Primary: formatClientChannel(service, clientID, "CLAIM"),
 	}
 }
 
 func GetStreamChannel(service, nodeID string) bus.Channel {
 	return bus.Channel{
 		Legacy:  formatChannel('|', service, nodeID, "STR"),
-		Primary: formatChannel('.', "CLI", service, nodeID, "STR"),
+		Primary: formatClientChannel(service, nodeID, "STR"),
 	}
 }
 
 func GetResponseChannel(service, clientID string) bus.Channel {
 	return bus.Channel{
 		Legacy:  formatChannel('|', service, clientID, "RES"),
-		Primary: formatChannel('.', "CLI", service, clientID, "RES"),
+		Primary: formatClientChannel(service, clientID, "RES"),
 	}
 }
 
 func (i *RequestInfo) GetRPCChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "REQ"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
+		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "REQ"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic),
 	}
 }
 
 func (i *RequestInfo) GetHandlerKey() string {
-	return formatChannel('.', i.Method, i.Topic)
+	return formatChannel('/', i.Method, i.Topic)
 }
 
 func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "RCLAIM"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
+		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "RCLAIM"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic),
 	}
 }
 
 func (i *RequestInfo) GetStreamServerChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "STR"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
+		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "STR"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic),
 	}
+}
+
+var scratch = &sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 512)
+		return &b
+	},
+}
+
+func formatClientChannel(service, clientID, channel string) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := append(*p, "CLI/"...)
+	b = append(b, service...)
+	b = append(b, '.')
+	b = append(b, clientID...)
+	b = append(b, '.')
+	b = append(b, channel...)
+	return string(b)
+}
+
+func formatServerChannel(service string, topic []string, method, channel string) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := appendServerPrefix(*p, service, topic)
+	b = append(b, method...)
+	b = append(b, '.')
+	b = append(b, channel...)
+	return string(b)
+}
+
+func formatServerWildcard(service string, topic []string) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := appendServerPrefix(*p, service, topic)
+	b = append(b, "*.*"...)
+	return string(b)
+}
+
+func appendServerPrefix(b []byte, service string, topic []string) []byte {
+	b = append(b, "SRV/"...)
+	b = append(b, service...)
+	if len(topic) > 0 {
+		b = append(b, '/')
+		b = appendChannelParts(b, '/', topic...)
+	}
+	b = append(b, '.')
+	return b
 }
 
 func formatChannel(delim byte, parts ...any) string {
 	buf := make([]byte, 0, 4*channelPartsLen(parts...)/3)
-	return string(appendChannelParts(delim, buf, parts...))
+	return string(appendChannelParts(buf, delim, parts...))
 }
 
 func channelPartsLen[T any](parts ...T) int {
@@ -96,8 +141,6 @@ func channelPartsLen[T any](parts ...T) int {
 		switch v := any(t).(type) {
 		case string:
 			n += len(v) + 1
-		case wildcard:
-			n++
 		case []string:
 			n += channelPartsLen(v...)
 		}
@@ -105,7 +148,7 @@ func channelPartsLen[T any](parts ...T) int {
 	return n
 }
 
-func appendChannelParts[T any](delim byte, buf []byte, parts ...T) []byte {
+func appendChannelParts[T any](buf []byte, delim byte, parts ...T) []byte {
 	var prefix bool
 	for _, t := range parts {
 		if prefix {
@@ -115,10 +158,8 @@ func appendChannelParts[T any](delim byte, buf []byte, parts ...T) []byte {
 		switch v := any(t).(type) {
 		case string:
 			buf = appendSanitizedChannelPart(buf, v)
-		case wildcard:
-			buf = append(buf, '*')
 		case []string:
-			buf = appendChannelParts(delim, buf, v...)
+			buf = appendChannelParts(buf, delim, v...)
 		}
 		prefix = len(buf) > l
 	}
