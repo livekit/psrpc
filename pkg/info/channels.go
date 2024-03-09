@@ -32,6 +32,10 @@ var channelChar = &unicode.RangeTable{
 	LatinOffset: 4,
 }
 
+type wildcard byte
+
+var wc wildcard = '*'
+
 func GetClaimRequestChannel(service, clientID string) bus.Channel {
 	return bus.Channel{
 		Legacy:  formatChannel('|', service, clientID, "CLAIM"),
@@ -57,7 +61,7 @@ func (i *RequestInfo) GetRPCChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
 		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "REQ"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("REQ")),
+		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
 	}
 }
 
@@ -69,7 +73,7 @@ func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
 		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "RCLAIM"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("RCLAIM")),
+		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
 	}
 }
 
@@ -77,59 +81,9 @@ func (i *RequestInfo) GetStreamServerChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
 		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "STR"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("STR")),
+		Wildcard: formatChannel('.', "SRV", i.Service, wc, i.Topic, wc),
 	}
 }
-
-func (i *RequestInfo) GetRPCMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "REQ"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("REQ")),
-	}
-}
-
-func (i *RequestInfo) GetClaimResponseMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "RCLAIM"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("RCLAIM")),
-	}
-}
-
-func (i *RequestInfo) GetStreamServerMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "STR"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("STR")),
-	}
-}
-
-func (i *RequestInfo) GetRPCWildMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "REQ"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("REQ")),
-	}
-}
-
-func (i *RequestInfo) GetClaimResponseWildMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "RCLAIM"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("RCLAIM")),
-	}
-}
-
-func (i *RequestInfo) GetStreamServerWildMultiChannel() bus.Channel {
-	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
-		Primary:  formatChannel('.', "SRV", i.Service, i.Method, i.Topic, "STR"),
-		Wildcard: formatChannel('.', "SRV", i.Service, wildcard(i.Method), i.Topic, wildcard("STR")),
-	}
-}
-
-type wildcard string
 
 func formatChannel(delim byte, parts ...any) string {
 	buf := make([]byte, 0, 4*channelPartsLen(parts...)/3)
