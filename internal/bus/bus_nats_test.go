@@ -82,39 +82,3 @@ func TestNats(t *testing.T) {
 		}
 	})
 }
-
-func BenchmarkNats(b *testing.B) {
-	nc, _ := nats.Connect(nats.DefaultURL)
-	b.Cleanup(nc.Close)
-	bus := NewNatsMessageBus(nc)
-
-	ChannelMode.Store(WildcardSubWildcardPub)
-
-	ctx := context.Background()
-
-	ch := Channel{
-		Legacy:   "test|foo|baz",
-		Primary:  "test.foo.baz",
-		Wildcard: "test.foo.*",
-	}
-	sub, err := Subscribe[*internal.Request](ctx, bus, ch, DefaultChannelSize)
-	require.NoError(b, err)
-
-	n := b.N
-	if n == 0 {
-		n = 1
-	}
-
-	go func() {
-		for i := 0; i < n; i++ {
-			bus.Publish(ctx, ch, &internal.Request{RequestId: "1"})
-		}
-		time.AfterFunc(time.Second, func() { sub.Close() })
-	}()
-
-	for i := 0; i < n; i++ {
-		if _, ok := <-sub.Channel(); !ok {
-			return
-		}
-	}
-}
