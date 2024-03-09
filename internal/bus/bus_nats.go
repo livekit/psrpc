@@ -22,7 +22,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"go.uber.org/multierr"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -138,7 +137,7 @@ func (n *natsMessageBus) subscribeWildcardRouter(channel string, size int, sub *
 		n.routers[channel] = r
 	} else if r.queue != queue {
 		n.mu.Unlock()
-		return fmt.Errorf("subscription type mismatch for channel %q %s vs %s", channel, maps.Keys(r.routes), sub.channel)
+		return fmt.Errorf("subscription type mismatch for channel %q %q", channel, sub.channel)
 	}
 
 	r.open(sub.channel, sub)
