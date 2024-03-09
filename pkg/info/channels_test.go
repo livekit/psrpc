@@ -64,11 +64,11 @@ func TestChannelFormatters(t *testing.T) {
 	i.Queue = true
 
 	require.Equal(t, "foo|bar|a|b|c|REQ", i.GetRPCChannel().Legacy)
-	require.Equal(t, "SRV/Q/foo/a/b/c.bar.REQ", i.GetRPCChannel().Primary)
-	require.Equal(t, "SRV/Q/foo/a/b/c.*.*", i.GetRPCChannel().Wildcard)
+	require.Equal(t, "SRV/foo/a/b/c/Q.bar.REQ", i.GetRPCChannel().Primary)
+	require.Equal(t, "SRV/foo/a/b/c/Q.*.*", i.GetRPCChannel().Wildcard)
 	require.Equal(t, "foo|bar|a|b|c|RCLAIM", i.GetClaimResponseChannel().Legacy)
-	require.Equal(t, "SRV/Q/foo/a/b/c.bar.RCLAIM", i.GetClaimResponseChannel().Primary)
-	require.Equal(t, "SRV/Q/foo/a/b/c.*.*", i.GetClaimResponseChannel().Wildcard)
+	require.Equal(t, "SRV/foo/a/b/c/Q.bar.RCLAIM", i.GetClaimResponseChannel().Primary)
+	require.Equal(t, "SRV/foo/a/b/c/Q.*.*", i.GetClaimResponseChannel().Wildcard)
 	require.Equal(t, "foo|bar|a|b|c|STR", i.GetStreamServerChannel().Legacy)
 	require.Equal(t, "SRV/foo/a/b/c.bar.STR", i.GetStreamServerChannel().Primary)
 	require.Equal(t, "SRV/foo/a/b/c.*.*", i.GetStreamServerChannel().Wildcard)

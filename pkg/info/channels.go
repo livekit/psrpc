@@ -121,13 +121,13 @@ func formatServerWildcard(service string, topic []string, queue bool) string {
 
 func appendServerPrefix(b []byte, service string, topic []string, queue bool) []byte {
 	b = append(b, "SRV/"...)
-	if queue {
-		b = append(b, "Q/"...)
-	}
 	b = append(b, service...)
 	if len(topic) > 0 {
 		b = append(b, '/')
 		b = appendChannelParts(b, '/', topic...)
+	}
+	if queue {
+		b = append(b, "/Q"...)
 	}
 	b = append(b, '.')
 	return b
