@@ -57,8 +57,8 @@ func GetResponseChannel(service, clientID string) bus.Channel {
 func (i *RequestInfo) GetRPCChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
-		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "REQ"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic),
+		Primary:  formatServerChannel(i.Service, i.Topic, i.Queue, i.Method, "REQ"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic, i.Queue),
 	}
 }
 
@@ -69,16 +69,16 @@ func (i *RequestInfo) GetHandlerKey() string {
 func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "RCLAIM"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic),
+		Primary:  formatServerChannel(i.Service, i.Topic, i.Queue, i.Method, "RCLAIM"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic, i.Queue),
 	}
 }
 
 func (i *RequestInfo) GetStreamServerChannel() bus.Channel {
 	return bus.Channel{
 		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
-		Primary:  formatServerChannel(i.Service, i.Topic, i.Method, "STR"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic),
+		Primary:  formatServerChannel(i.Service, i.Topic, false, i.Method, "STR"),
+		Wildcard: formatServerWildcard(i.Service, i.Topic, false),
 	}
 }
 
@@ -101,26 +101,29 @@ func formatClientChannel(service, clientID, channel string) string {
 	return string(b)
 }
 
-func formatServerChannel(service string, topic []string, method, channel string) string {
+func formatServerChannel(service string, topic []string, queue bool, method, channel string) string {
 	p := scratch.Get().(*[]byte)
 	defer scratch.Put(p)
-	b := appendServerPrefix(*p, service, topic)
+	b := appendServerPrefix(*p, service, topic, queue)
 	b = append(b, method...)
 	b = append(b, '.')
 	b = append(b, channel...)
 	return string(b)
 }
 
-func formatServerWildcard(service string, topic []string) string {
+func formatServerWildcard(service string, topic []string, queue bool) string {
 	p := scratch.Get().(*[]byte)
 	defer scratch.Put(p)
-	b := appendServerPrefix(*p, service, topic)
+	b := appendServerPrefix(*p, service, topic, queue)
 	b = append(b, "*.*"...)
 	return string(b)
 }
 
-func appendServerPrefix(b []byte, service string, topic []string) []byte {
+func appendServerPrefix(b []byte, service string, topic []string, queue bool) []byte {
 	b = append(b, "SRV/"...)
+	if queue {
+		b = append(b, "Q/"...)
+	}
 	b = append(b, service...)
 	if len(topic) > 0 {
 		b = append(b, '/')

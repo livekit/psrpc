@@ -61,5 +61,17 @@ func TestChannelFormatters(t *testing.T) {
 	require.Equal(t, "SRV/foo/a/b/c.bar.STR", i.GetStreamServerChannel().Primary)
 	require.Equal(t, "SRV/foo/a/b/c.*.*", i.GetStreamServerChannel().Wildcard)
 
+	i.Queue = true
+
+	require.Equal(t, "foo|bar|a|b|c|REQ", i.GetRPCChannel().Legacy)
+	require.Equal(t, "SRV/Q/foo/a/b/c.bar.REQ", i.GetRPCChannel().Primary)
+	require.Equal(t, "SRV/Q/foo/a/b/c.*.*", i.GetRPCChannel().Wildcard)
+	require.Equal(t, "foo|bar|a|b|c|RCLAIM", i.GetClaimResponseChannel().Legacy)
+	require.Equal(t, "SRV/Q/foo/a/b/c.bar.RCLAIM", i.GetClaimResponseChannel().Primary)
+	require.Equal(t, "SRV/Q/foo/a/b/c.*.*", i.GetClaimResponseChannel().Wildcard)
+	require.Equal(t, "foo|bar|a|b|c|STR", i.GetStreamServerChannel().Legacy)
+	require.Equal(t, "SRV/foo/a/b/c.bar.STR", i.GetStreamServerChannel().Primary)
+	require.Equal(t, "SRV/foo/a/b/c.*.*", i.GetStreamServerChannel().Wildcard)
+
 	require.Equal(t, "U+0001f680_u+00c9.U+0001f6f0_bar.u+8f6fu+4ef6.END", formatChannel('.', "🚀_É", "🛰_bar", []string{"软件"}, "END"))
 }
