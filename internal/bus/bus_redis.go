@@ -73,33 +73,33 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 	return r
 }
 
-func (r *redisMessageBus) Publish(_ context.Context, channel string, msg proto.Message) error {
-	b, err := serialize(msg)
+func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
+	b, err := serialize(msg, "")
 	if err != nil {
 		return err
 	}
 
 	r.mu.Lock()
-	ops, ok := r.publishOps[channel]
+	ops, ok := r.publishOps[channel.Legacy]
 	if !ok {
 		ops = &redisWriteOpQueue{}
-		r.publishOps[channel] = ops
+		r.publishOps[channel.Legacy] = ops
 	}
-	ops.push(&redisPublishOp{r, channel, b})
+	ops.push(&redisPublishOp{r, channel.Legacy, b})
 	r.mu.Unlock()
 
 	if !ok {
-		r.enqueueWriteOp(&redisExecPublishOp{r, channel, ops})
+		r.enqueueWriteOp(&redisExecPublishOp{r, channel.Legacy, ops})
 	}
 	return nil
 }
 
-func (r *redisMessageBus) Subscribe(ctx context.Context, channel string, size int) (Reader, error) {
-	return r.subscribe(ctx, channel, size, r.subs, false)
+func (r *redisMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
+	return r.subscribe(ctx, channel.Legacy, size, r.subs, false)
 }
 
-func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel string, size int) (Reader, error) {
-	return r.subscribe(ctx, channel, size, r.queues, true)
+func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
+	return r.subscribe(ctx, channel.Legacy, size, r.queues, true)
 }
 
 func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (Reader, error) {

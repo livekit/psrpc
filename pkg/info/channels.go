@@ -15,7 +15,10 @@
 package info
 
 import (
+	"sync"
 	"unicode"
+
+	"github.com/livekit/psrpc/internal/bus"
 )
 
 const lowerHex = "0123456789abcdef"
@@ -30,37 +33,101 @@ var channelChar = &unicode.RangeTable{
 	LatinOffset: 4,
 }
 
-func GetClaimRequestChannel(service, clientID string) string {
-	return formatChannel(service, clientID, "CLAIM")
+func GetClaimRequestChannel(service, clientID string) bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', service, clientID, "CLAIM"),
+		Server: formatClientChannel(service, clientID, "CLAIM"),
+	}
 }
 
-func GetStreamChannel(service, nodeID string) string {
-	return formatChannel(service, nodeID, "STR")
+func GetStreamChannel(service, nodeID string) bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', service, nodeID, "STR"),
+		Server: formatClientChannel(service, nodeID, "STR"),
+	}
 }
 
-func GetResponseChannel(service, clientID string) string {
-	return formatChannel(service, clientID, "RES")
+func GetResponseChannel(service, clientID string) bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', service, clientID, "RES"),
+		Server: formatClientChannel(service, clientID, "RES"),
+	}
 }
 
-func (i *RequestInfo) GetRPCChannel() string {
-	return formatChannel(i.Service, i.Method, i.Topic, "REQ")
+func (i *RequestInfo) GetRPCChannel() bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
+		Server: formatServerChannel(i.Service, i.Topic, i.Queue),
+		Local:  formatLocalChannel(i.Method, "REQ"),
+	}
 }
 
 func (i *RequestInfo) GetHandlerKey() string {
-	return formatChannel(i.Method, i.Topic)
+	return formatChannel('.', i.Method, i.Topic)
 }
 
-func (i *RequestInfo) GetClaimResponseChannel() string {
-	return formatChannel(i.Service, i.Method, i.Topic, "RCLAIM")
+func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
+		Server: formatServerChannel(i.Service, i.Topic, i.Queue),
+		Local:  formatLocalChannel(i.Method, "RCLAIM"),
+	}
 }
 
-func (i *RequestInfo) GetStreamServerChannel() string {
-	return formatChannel(i.Service, i.Method, i.Topic, "STR")
+func (i *RequestInfo) GetStreamServerChannel() bus.Channel {
+	return bus.Channel{
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
+		Server: formatServerChannel(i.Service, i.Topic, false),
+		Local:  formatLocalChannel(i.Method, "STR"),
+	}
 }
 
-func formatChannel(parts ...any) string {
+var scratch = &sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 512)
+		return &b
+	},
+}
+
+func formatClientChannel(service, clientID, channel string) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := append(*p, "CLI."...)
+	b = append(b, service...)
+	b = append(b, '.')
+	b = append(b, clientID...)
+	b = append(b, '.')
+	b = append(b, channel...)
+	return string(b)
+}
+
+func formatLocalChannel(method, channel string) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := append(*p, method...)
+	b = append(b, '.')
+	b = append(b, channel...)
+	return string(b)
+}
+
+func formatServerChannel(service string, topic []string, queue bool) string {
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	b := append(*p, "SRV."...)
+	b = append(b, service...)
+	if len(topic) > 0 {
+		b = append(b, '.')
+		b = appendChannelParts(b, '.', topic...)
+	}
+	if queue {
+		b = append(b, ".Q"...)
+	}
+	return string(b)
+}
+
+func formatChannel(delim byte, parts ...any) string {
 	buf := make([]byte, 0, 4*channelPartsLen(parts...)/3)
-	return string(appendChannelParts(buf, parts...))
+	return string(appendChannelParts(buf, delim, parts...))
 }
 
 func channelPartsLen[T any](parts ...T) int {
@@ -76,18 +143,18 @@ func channelPartsLen[T any](parts ...T) int {
 	return n
 }
 
-func appendChannelParts[T any](buf []byte, parts ...T) []byte {
+func appendChannelParts[T any](buf []byte, delim byte, parts ...T) []byte {
 	var prefix bool
 	for _, t := range parts {
 		if prefix {
-			buf = append(buf, '|')
+			buf = append(buf, delim)
 		}
 		l := len(buf)
 		switch v := any(t).(type) {
 		case string:
 			buf = appendSanitizedChannelPart(buf, v)
 		case []string:
-			buf = appendChannelParts(buf, v...)
+			buf = appendChannelParts(buf, delim, v...)
 		}
 		prefix = len(buf) > l
 	}

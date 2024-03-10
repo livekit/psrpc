@@ -29,28 +29,35 @@ import (
 
 const defaultClientTimeout = time.Second * 3
 
+func busTestChannel(channel string) Channel {
+	return Channel{
+		Legacy: channel,
+		Server: channel,
+	}
+}
+
 func TestMessageBus(t *testing.T) {
 	t.Run("Local", func(t *testing.T) {
 		bus := NewLocalMessageBus()
-		testSubscribe(t, bus)
-		testSubscribeQueue(t, bus)
-		testSubscribeClose(t, bus)
+		t.Run("testSubscribe", func(t *testing.T) { testSubscribe(t, bus) })
+		t.Run("testSubscribeQueue", func(t *testing.T) { testSubscribeQueue(t, bus) })
+		t.Run("testSubscribeClose", func(t *testing.T) { testSubscribeClose(t, bus) })
 	})
 
 	t.Run("Redis", func(t *testing.T) {
 		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
 		bus := NewRedisMessageBus(rc)
-		testSubscribe(t, bus)
-		testSubscribeQueue(t, bus)
-		testSubscribeClose(t, bus)
+		t.Run("testSubscribe", func(t *testing.T) { testSubscribe(t, bus) })
+		t.Run("testSubscribeQueue", func(t *testing.T) { testSubscribeQueue(t, bus) })
+		t.Run("testSubscribeClose", func(t *testing.T) { testSubscribeClose(t, bus) })
 	})
 
 	t.Run("Nats", func(t *testing.T) {
 		nc, _ := nats.Connect(nats.DefaultURL)
 		bus := NewNatsMessageBus(nc)
-		testSubscribe(t, bus)
-		testSubscribeQueue(t, bus)
-		testSubscribeClose(t, bus)
+		t.Run("testSubscribe", func(t *testing.T) { testSubscribe(t, bus) })
+		t.Run("testSubscribeQueue", func(t *testing.T) { testSubscribeQueue(t, bus) })
+		t.Run("testSubscribeClose", func(t *testing.T) { testSubscribeClose(t, bus) })
 	})
 }
 
@@ -58,13 +65,13 @@ func testSubscribe(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
 	channel := rand.NewString()
-	subA, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	subA, err := Subscribe[*internal.Request](ctx, bus, busTestChannel(channel), DefaultChannelSize)
 	require.NoError(t, err)
-	subB, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	subB, err := Subscribe[*internal.Request](ctx, bus, busTestChannel(channel), DefaultChannelSize)
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 100)
 
-	require.NoError(t, bus.Publish(ctx, channel, &internal.Request{
+	require.NoError(t, bus.Publish(ctx, busTestChannel(channel), &internal.Request{
 		RequestId: "1",
 	}))
 
@@ -80,13 +87,13 @@ func testSubscribeQueue(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
 	channel := rand.NewString()
-	subA, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	subA, err := SubscribeQueue[*internal.Request](ctx, bus, busTestChannel(channel), DefaultChannelSize)
 	require.NoError(t, err)
-	subB, err := SubscribeQueue[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	subB, err := SubscribeQueue[*internal.Request](ctx, bus, busTestChannel(channel), DefaultChannelSize)
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 100)
 
-	require.NoError(t, bus.Publish(ctx, channel, &internal.Request{
+	require.NoError(t, bus.Publish(ctx, busTestChannel(channel), &internal.Request{
 		RequestId: "2",
 	}))
 
@@ -116,7 +123,7 @@ func testSubscribeClose(t *testing.T, bus MessageBus) {
 	ctx := context.Background()
 
 	channel := rand.NewString()
-	sub, err := Subscribe[*internal.Request](ctx, bus, channel, DefaultChannelSize)
+	sub, err := Subscribe[*internal.Request](ctx, bus, busTestChannel(channel), DefaultChannelSize)
 	require.NoError(t, err)
 
 	require.NoError(t, sub.Close())

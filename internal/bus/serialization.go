@@ -17,20 +17,34 @@ package bus
 import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/livekit/psrpc/internal"
 )
 
-func serialize(msg proto.Message) ([]byte, error) {
-	a, err := anypb.New(msg)
+func serialize(msg proto.Message, channel string) ([]byte, error) {
+	value, err := proto.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := proto.Marshal(a)
+	return proto.Marshal(&internal.Msg{
+		TypeUrl: "type.googleapis.com/" + string(msg.ProtoReflect().Descriptor().FullName()),
+		Value:   value,
+		Channel: channel,
+	})
+}
+
+func deserializeChannel(b []byte) (string, error) {
+	c := &internal.Channel{}
+	opt := proto.UnmarshalOptions{
+		DiscardUnknown: true,
+	}
+	err := opt.Unmarshal(b, c)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return b, nil
+	return c.Channel, nil
 }
 
 func deserialize(b []byte) (proto.Message, error) {
@@ -48,7 +62,7 @@ func SerializePayload(m proto.Message) ([]byte, error) {
 }
 
 func DeserializePayload[T proto.Message](buf []byte) (T, error) {
-	var p T
-	v := p.ProtoReflect().New().Interface().(T)
+	var v T
+	v = v.ProtoReflect().New().Interface().(T)
 	return v, proto.Unmarshal(buf, v)
 }
