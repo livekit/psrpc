@@ -35,50 +35,50 @@ var channelChar = &unicode.RangeTable{
 
 func GetClaimRequestChannel(service, clientID string) bus.Channel {
 	return bus.Channel{
-		Legacy:  formatChannel('|', service, clientID, "CLAIM"),
-		Primary: formatClientChannel(service, clientID, "CLAIM"),
+		Legacy: formatChannel('|', service, clientID, "CLAIM"),
+		Server: formatClientChannel(service, clientID, "CLAIM"),
 	}
 }
 
 func GetStreamChannel(service, nodeID string) bus.Channel {
 	return bus.Channel{
-		Legacy:  formatChannel('|', service, nodeID, "STR"),
-		Primary: formatClientChannel(service, nodeID, "STR"),
+		Legacy: formatChannel('|', service, nodeID, "STR"),
+		Server: formatClientChannel(service, nodeID, "STR"),
 	}
 }
 
 func GetResponseChannel(service, clientID string) bus.Channel {
 	return bus.Channel{
-		Legacy:  formatChannel('|', service, clientID, "RES"),
-		Primary: formatClientChannel(service, clientID, "RES"),
+		Legacy: formatChannel('|', service, clientID, "RES"),
+		Server: formatClientChannel(service, clientID, "RES"),
 	}
 }
 
 func (i *RequestInfo) GetRPCChannel() bus.Channel {
 	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
-		Primary:  formatServerChannel(i.Service, i.Topic, i.Queue, i.Method, "REQ"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic, i.Queue),
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "REQ"),
+		Server: formatServerChannel(i.Service, i.Topic, i.Queue),
+		Local:  formatLocalChannel(i.Method, "REQ"),
 	}
 }
 
 func (i *RequestInfo) GetHandlerKey() string {
-	return formatChannel('/', i.Method, i.Topic)
+	return formatChannel('.', i.Method, i.Topic)
 }
 
 func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
 	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Primary:  formatServerChannel(i.Service, i.Topic, i.Queue, i.Method, "RCLAIM"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic, i.Queue),
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
+		Server: formatServerChannel(i.Service, i.Topic, i.Queue),
+		Local:  formatLocalChannel(i.Method, "RCLAIM"),
 	}
 }
 
 func (i *RequestInfo) GetStreamServerChannel() bus.Channel {
 	return bus.Channel{
-		Legacy:   formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
-		Primary:  formatServerChannel(i.Service, i.Topic, false, i.Method, "STR"),
-		Wildcard: formatServerWildcard(i.Service, i.Topic, false),
+		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "STR"),
+		Server: formatServerChannel(i.Service, i.Topic, false),
+		Local:  formatLocalChannel(i.Method, "STR"),
 	}
 }
 
@@ -92,7 +92,7 @@ var scratch = &sync.Pool{
 func formatClientChannel(service, clientID, channel string) string {
 	p := scratch.Get().(*[]byte)
 	defer scratch.Put(p)
-	b := append(*p, "CLI/"...)
+	b := append(*p, "CLI."...)
 	b = append(b, service...)
 	b = append(b, '.')
 	b = append(b, clientID...)
@@ -101,36 +101,28 @@ func formatClientChannel(service, clientID, channel string) string {
 	return string(b)
 }
 
-func formatServerChannel(service string, topic []string, queue bool, method, channel string) string {
+func formatLocalChannel(method, channel string) string {
 	p := scratch.Get().(*[]byte)
 	defer scratch.Put(p)
-	b := appendServerPrefix(*p, service, topic, queue)
-	b = append(b, method...)
+	b := append(*p, method...)
 	b = append(b, '.')
 	b = append(b, channel...)
 	return string(b)
 }
 
-func formatServerWildcard(service string, topic []string, queue bool) string {
+func formatServerChannel(service string, topic []string, queue bool) string {
 	p := scratch.Get().(*[]byte)
 	defer scratch.Put(p)
-	b := appendServerPrefix(*p, service, topic, queue)
-	b = append(b, "*.*"...)
-	return string(b)
-}
-
-func appendServerPrefix(b []byte, service string, topic []string, queue bool) []byte {
-	b = append(b, "SRV/"...)
+	b := append(*p, "SRV."...)
 	b = append(b, service...)
 	if len(topic) > 0 {
-		b = append(b, '/')
-		b = appendChannelParts(b, '/', topic...)
+		b = append(b, '.')
+		b = appendChannelParts(b, '.', topic...)
 	}
 	if queue {
-		b = append(b, "/Q"...)
+		b = append(b, ".Q"...)
 	}
-	b = append(b, '.')
-	return b
+	return string(b)
 }
 
 func formatChannel(delim byte, parts ...any) string {

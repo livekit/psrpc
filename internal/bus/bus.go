@@ -28,16 +28,14 @@ const (
 const (
 	LegacySubLegacyPub = iota
 	LegacySubCompatiblePub
-	WildcardSubCompatiblePub
-	WildcardSubWildcardPub
-
-	finalChannelMode = WildcardSubWildcardPub
+	RouterSubCompatiblePub
+	RouterSubWildcardPub
 )
 
 var ChannelMode atomic.Uint32
 
 type Channel struct {
-	Legacy, Primary, Wildcard string
+	Legacy, Server, Local string
 }
 
 type MessageBus interface {

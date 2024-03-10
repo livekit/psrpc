@@ -40,48 +40,48 @@ func NewNatsMessageBus(nc *nats.Conn) MessageBus {
 }
 
 func (n *natsMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg)
+	b, err := serialize(msg, channel.Local)
 	if err != nil {
 		return err
 	}
 
-	if ChannelMode.Load() != WildcardSubWildcardPub {
+	if ChannelMode.Load() != RouterSubWildcardPub {
 		err = multierr.Append(err, n.nc.Publish(channel.Legacy, b))
 	}
 	if ChannelMode.Load() != LegacySubLegacyPub {
-		err = multierr.Append(err, n.nc.Publish(channel.Primary, b))
+		err = multierr.Append(err, n.nc.Publish(channel.Server, b))
 	}
 	return err
 }
 
 func (n *natsMessageBus) Subscribe(_ context.Context, channel Channel, size int) (Reader, error) {
-	if channel.Wildcard == "" {
-		if ChannelMode.Load() == WildcardSubWildcardPub {
-			return n.subscribe(channel.Primary, size, false)
+	if channel.Local == "" {
+		if ChannelMode.Load() == RouterSubWildcardPub {
+			return n.subscribe(channel.Server, size, false)
 		} else {
 			return n.subscribeCompatible(channel, size, false)
 		}
 	} else {
-		if ChannelMode.Load() == WildcardSubWildcardPub {
-			return n.subscribeWildcard(channel, size, false)
+		if ChannelMode.Load() == RouterSubWildcardPub {
+			return n.subscribeRouter(channel, size, false)
 		} else {
-			return n.subscribeCompatibleWildcard(channel, size, false)
+			return n.subscribeCompatibleRouter(channel, size, false)
 		}
 	}
 }
 
 func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel Channel, size int) (Reader, error) {
-	if channel.Wildcard == "" {
-		if ChannelMode.Load() == WildcardSubWildcardPub {
-			return n.subscribe(channel.Primary, size, true)
+	if channel.Local == "" {
+		if ChannelMode.Load() == RouterSubWildcardPub {
+			return n.subscribe(channel.Server, size, true)
 		} else {
 			return n.subscribeCompatible(channel, size, true)
 		}
 	} else {
-		if ChannelMode.Load() == WildcardSubWildcardPub {
-			return n.subscribeWildcard(channel, size, true)
+		if ChannelMode.Load() == RouterSubWildcardPub {
+			return n.subscribeRouter(channel, size, true)
 		} else {
-			return n.subscribeCompatibleWildcard(channel, size, true)
+			return n.subscribeCompatibleRouter(channel, size, true)
 		}
 	}
 }
@@ -106,7 +106,7 @@ func (n *natsMessageBus) subscribe(channel string, size int, queue bool) (*natsS
 }
 
 func (n *natsMessageBus) subscribeCompatible(channel Channel, size int, queue bool) (*natsCompatibleSubscription, error) {
-	sub, err := n.subscribe(channel.Primary, size, queue)
+	sub, err := n.subscribe(channel.Server, size, queue)
 	if err != nil {
 		return nil, err
 	}
@@ -170,21 +170,21 @@ func (n *natsMessageBus) unsubscribeWildcardRouter(r *natsWildcardRouter, channe
 	}
 }
 
-func (n *natsMessageBus) subscribeWildcard(channel Channel, size int, queue bool) (*natsWildcardSubscription, error) {
+func (n *natsMessageBus) subscribeRouter(channel Channel, size int, queue bool) (*natsWildcardSubscription, error) {
 	sub := &natsWildcardSubscription{
 		msgChan: make(chan *nats.Msg, size),
-		channel: channel.Primary,
+		channel: channel.Local,
 	}
 
-	if err := n.subscribeWildcardRouter(channel.Wildcard, sub, queue); err != nil {
+	if err := n.subscribeWildcardRouter(channel.Server, sub, queue); err != nil {
 		return nil, err
 	}
 
 	return sub, nil
 }
 
-func (n *natsMessageBus) subscribeCompatibleWildcard(channel Channel, size int, queue bool) (*natsCompatibleSubscription, error) {
-	sub, err := n.subscribeWildcard(channel, size, queue)
+func (n *natsMessageBus) subscribeCompatibleRouter(channel Channel, size int, queue bool) (*natsCompatibleSubscription, error) {
+	sub, err := n.subscribeRouter(channel, size, queue)
 	if err != nil {
 		return nil, err
 	}
@@ -248,9 +248,14 @@ func (n *natsWildcardRouter) close(channel string) bool {
 }
 
 func (n *natsWildcardRouter) write(m *nats.Msg) {
+	channel, err := deserializeChannel(m.Data)
+	if err != nil {
+		return
+	}
+
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if s, ok := n.routes[m.Subject]; ok {
+	if s, ok := n.routes[channel]; ok {
 		s.write(m)
 	}
 }
@@ -295,7 +300,7 @@ func (n *natsCompatibleSubscription) read() ([]byte, bool) {
 				return nil, false
 			}
 			switch ChannelMode.Load() {
-			case WildcardSubCompatiblePub, WildcardSubWildcardPub:
+			case RouterSubCompatiblePub, RouterSubWildcardPub:
 				return msg.Data, true
 			}
 

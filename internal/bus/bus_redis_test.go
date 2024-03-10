@@ -28,7 +28,7 @@ import (
 )
 
 func redisTestChannel(channel string) Channel {
-	return Channel{Primary: channel}
+	return Channel{Legacy: channel}
 }
 
 func TestRedisMessageBus(t *testing.T) {

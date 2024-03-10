@@ -31,8 +31,7 @@ const defaultClientTimeout = time.Second * 3
 
 func busTestChannel(channel string) Channel {
 	return Channel{
-		Primary: channel,
-		Legacy:  channel,
+		Legacy: channel,
 	}
 }
 

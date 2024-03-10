@@ -32,16 +32,20 @@ func TestSerialization(t *testing.T) {
 		Multi:     true,
 	}
 
-	b, err := serialize(msg)
+	b, err := serialize(msg, "channel")
 	require.NoError(t, err)
 
 	m, err := deserialize(b)
+	require.NoError(t, err)
+
+	channel, err := deserializeChannel(b)
 	require.NoError(t, err)
 
 	require.Equal(t, m.(*internal.Request).RequestId, msg.RequestId)
 	require.Equal(t, m.(*internal.Request).ClientId, msg.ClientId)
 	require.Equal(t, m.(*internal.Request).SentAt, msg.SentAt)
 	require.Equal(t, m.(*internal.Request).Multi, msg.Multi)
+	require.Equal(t, "channel", channel)
 }
 
 func TestRawSerialization(t *testing.T) {

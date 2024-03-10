@@ -24,8 +24,8 @@ import (
 const (
 	LegacySubLegacyPub       = bus.LegacySubLegacyPub
 	LegacySubCompatiblePub   = bus.LegacySubCompatiblePub
-	WildcardSubCompatiblePub = bus.WildcardSubCompatiblePub
-	WildcardSubWildcardPub   = bus.WildcardSubWildcardPub
+	WildcardSubCompatiblePub = bus.RouterSubCompatiblePub
+	WildcardSubWildcardPub   = bus.RouterSubWildcardPub
 )
 
 func SetChannelMode(m uint32) {
