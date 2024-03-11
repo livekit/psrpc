@@ -44,9 +44,8 @@ func (s *ServiceDefinition) RegisterMethod(name string, affinityEnabled, multi, 
 	s.Methods.Store(name, &MethodInfo{
 		AffinityEnabled: affinityEnabled,
 		Multi:           multi,
-		// TODO: move queue check to generator
-		RequireClaim: requireClaim && !queue,
-		Queue:        queue,
+		RequireClaim:    requireClaim,
+		Queue:           queue,
 	})
 }
 

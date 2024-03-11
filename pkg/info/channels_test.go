@@ -67,7 +67,7 @@ func TestChannelFormatters(t *testing.T) {
 	require.Equal(t, "SRV.foo.a.b.c.Q", i.GetRPCChannel().Server)
 	require.Equal(t, "bar.REQ", i.GetRPCChannel().Local)
 	require.Equal(t, "foo|bar|a|b|c|RCLAIM", i.GetClaimResponseChannel().Legacy)
-	require.Equal(t, "SRV.foo.a.b.c.Q", i.GetClaimResponseChannel().Server)
+	require.Equal(t, "SRV.foo.a.b.c", i.GetClaimResponseChannel().Server)
 	require.Equal(t, "bar.RCLAIM", i.GetClaimResponseChannel().Local)
 	require.Equal(t, "foo|bar|a|b|c|STR", i.GetStreamServerChannel().Legacy)
 	require.Equal(t, "SRV.foo.a.b.c", i.GetStreamServerChannel().Server)

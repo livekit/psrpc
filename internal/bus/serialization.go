@@ -49,7 +49,10 @@ func deserializeChannel(b []byte) (string, error) {
 
 func deserialize(b []byte) (proto.Message, error) {
 	a := &anypb.Any{}
-	err := proto.Unmarshal(b, a)
+	opt := proto.UnmarshalOptions{
+		DiscardUnknown: true,
+	}
+	err := opt.Unmarshal(b, a)
 	if err != nil {
 		return nil, err
 	}

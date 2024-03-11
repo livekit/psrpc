@@ -69,7 +69,7 @@ func (i *RequestInfo) GetHandlerKey() string {
 func (i *RequestInfo) GetClaimResponseChannel() bus.Channel {
 	return bus.Channel{
 		Legacy: formatChannel('|', i.Service, i.Method, i.Topic, "RCLAIM"),
-		Server: formatServerChannel(i.Service, i.Topic, i.Queue),
+		Server: formatServerChannel(i.Service, i.Topic, false),
 		Local:  formatLocalChannel(i.Method, "RCLAIM"),
 	}
 }
