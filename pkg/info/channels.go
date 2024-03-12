@@ -115,11 +115,9 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 	defer scratch.Put(p)
 	b := append(*p, "SRV."...)
 	b = append(b, service...)
-	for _, t := range topic {
-		if len(t) > 0 {
-			b = append(b, '.')
-			b = append(b, t...)
-		}
+	if channelPartsLen(topic) > 0 {
+		b = append(b, '.')
+		b = appendChannelParts(b, '.', topic...)
 	}
 	if queue {
 		b = append(b, ".Q"...)
