@@ -115,22 +115,16 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 	defer scratch.Put(p)
 	b := append(*p, "SRV."...)
 	b = append(b, service...)
-	if stringSliceLen(topic) > 0 {
-		b = append(b, '.')
-		b = appendChannelParts(b, '.', topic...)
+	for _, t := range topic {
+		if len(t) > 0 {
+			b = append(b, '.')
+			b = appendSanitizedChannelPart(b, t)
+		}
 	}
 	if queue {
 		b = append(b, ".Q"...)
 	}
 	return string(b)
-}
-
-func stringSliceLen(s []string) int {
-	var n int
-	for i := range s {
-		n += len(s[i])
-	}
-	return n
 }
 
 func formatChannel(delim byte, parts ...any) string {
