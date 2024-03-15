@@ -116,7 +116,7 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 	b := append(*p, "SRV."...)
 	b = append(b, service...)
 	for _, t := range topic {
-		if len(t) > 0 {
+		if len(t) != 0 {
 			b = append(b, '.')
 			b = appendSanitizedChannelPart(b, t)
 		}
