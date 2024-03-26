@@ -16,7 +16,6 @@ package bus
 
 import (
 	"context"
-	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -24,15 +23,6 @@ import (
 const (
 	DefaultChannelSize = 100
 )
-
-const (
-	LegacySubLegacyPub = iota
-	LegacySubCompatiblePub
-	RouterSubCompatiblePub
-	RouterSubWildcardPub
-)
-
-var ChannelMode atomic.Uint32
 
 type Channel struct {
 	Legacy, Server, Local string

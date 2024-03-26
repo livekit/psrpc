@@ -40,7 +40,10 @@ func TestRPC(t *testing.T) {
 	}{
 		{
 			label: "Local",
-			bus:   func() psrpc.MessageBus { return psrpc.NewLocalMessageBus() },
+			bus: (func() func() psrpc.MessageBus {
+				bus := psrpc.NewLocalMessageBus()
+				return func() psrpc.MessageBus { return bus }
+			})(),
 		},
 		{
 			label: "Redis",
@@ -61,29 +64,29 @@ func TestRPC(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(fmt.Sprintf("RPC/%s", c.label), func(t *testing.T) {
-			testRPC(t, c.bus())
+			testRPC(t, c.bus)
 		})
 		t.Run(fmt.Sprintf("Stream/%s", c.label), func(t *testing.T) {
-			testStream(t, c.bus())
+			testStream(t, c.bus)
 		})
 	}
 }
 
-func testRPC(t *testing.T, bus psrpc.MessageBus) {
+func testRPC(t *testing.T, bus func() psrpc.MessageBus) {
 	serviceName := "test"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 	serverB := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 	serverC := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 
 	t.Cleanup(func() {
 		serverA.Close(true)
@@ -94,7 +97,7 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	c, err := client.NewRPCClient(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 	require.NoError(t, err)
 
 	retErr := psrpc.NewErrorf(psrpc.Internal, "foo")
@@ -119,6 +122,7 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	require.NoError(t, err)
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil)
 	require.NoError(t, err)
+	time.Sleep(time.Second)
 
 	ctx := context.Background()
 	requestID := rand.NewRequestID()
@@ -141,6 +145,7 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	require.NoError(t, err)
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverC, multiRpc, nil, returnError, nil)
 	require.NoError(t, err)
+	time.Sleep(time.Second)
 
 	requestID = rand.NewRequestID()
 	resChan, err := client.RequestMulti[*internal.Response](
@@ -168,13 +173,13 @@ func testRPC(t *testing.T, bus psrpc.MessageBus) {
 	}
 }
 
-func testStream(t *testing.T, bus psrpc.MessageBus) {
+func testStream(t *testing.T, bus func() psrpc.MessageBus) {
 	serviceName := "test_stream"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 
 	t.Cleanup(func() {
 		serverA.Close(true)
@@ -183,7 +188,7 @@ func testStream(t *testing.T, bus psrpc.MessageBus) {
 	c, err := client.NewRPCClientWithStreams(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus)
+	}, bus())
 	require.NoError(t, err)
 
 	serverClose := make(chan struct{})

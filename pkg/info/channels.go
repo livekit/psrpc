@@ -128,21 +128,9 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 }
 
 func formatChannel(delim byte, parts ...any) string {
-	buf := make([]byte, 0, 4*channelPartsLen(parts...)/3)
-	return string(appendChannelParts(buf, delim, parts...))
-}
-
-func channelPartsLen[T any](parts ...T) int {
-	var n int
-	for _, t := range parts {
-		switch v := any(t).(type) {
-		case string:
-			n += len(v) + 1
-		case []string:
-			n += channelPartsLen(v...)
-		}
-	}
-	return n
+	p := scratch.Get().(*[]byte)
+	defer scratch.Put(p)
+	return string(appendChannelParts(*p, delim, parts...))
 }
 
 func appendChannelParts[T any](buf []byte, delim byte, parts ...T) []byte {

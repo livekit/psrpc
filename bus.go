@@ -21,18 +21,8 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 )
 
-const (
-	LegacySubLegacyPub       = bus.LegacySubLegacyPub
-	LegacySubCompatiblePub   = bus.LegacySubCompatiblePub
-	WildcardSubCompatiblePub = bus.RouterSubCompatiblePub
-	WildcardSubWildcardPub   = bus.RouterSubWildcardPub
-)
-
-func SetChannelMode(m uint32) {
-	if m <= WildcardSubWildcardPub {
-		bus.ChannelMode.Store(m)
-	}
-}
+// TODO: clean up
+func SetChannelMode(m uint32) {}
 
 type Channel = bus.Channel
 type MessageBus bus.MessageBus

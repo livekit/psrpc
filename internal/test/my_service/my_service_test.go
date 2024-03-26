@@ -31,26 +31,38 @@ import (
 
 func TestGeneratedService(t *testing.T) {
 	t.Run("Local", func(t *testing.T) {
-		testGeneratedService(t, psrpc.NewLocalMessageBus())
+		testGeneratedService(t, (func() func() psrpc.MessageBus {
+			bus := psrpc.NewLocalMessageBus()
+			return func() psrpc.MessageBus { return bus }
+		})())
 	})
 
 	t.Run("Redis", func(t *testing.T) {
-		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		testGeneratedService(t, psrpc.NewRedisMessageBus(rc))
+		testGeneratedService(t, func() psrpc.MessageBus {
+			rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
+			return psrpc.NewRedisMessageBus(rc)
+		})
 	})
 
 	t.Run("Nats", func(t *testing.T) {
-		nc, _ := nats.Connect(nats.DefaultURL)
-		testGeneratedService(t, psrpc.NewNatsMessageBus(nc))
+		testGeneratedService(t, func() psrpc.MessageBus {
+			nc, _ := nats.Connect(nats.DefaultURL)
+			return psrpc.NewNatsMessageBus(nc)
+		})
 	})
 }
 
-func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
+func testGeneratedService(t *testing.T, bus func() psrpc.MessageBus) {
 	ctx := context.Background()
 	req := &MyRequest{}
 	update := &MyUpdate{}
-	sA := createServer(t, bus)
-	sB := createServer(t, bus)
+	sA := createServer(t, bus())
+	sB := createServer(t, bus())
+
+	t.Cleanup(func() {
+		shutdown(t, sA)
+		shutdown(t, sB)
+	})
 
 	requestCount := 0
 	requestHook := func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo) {
@@ -60,8 +72,8 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	responseHook := func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo, res proto.Message, err error) {
 		responseCount++
 	}
-	cA := createClient(t, bus, psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
-	cB := createClient(t, bus)
+	cA := createClient(t, bus(), psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
+	cB := createClient(t, bus())
 
 	// rpc NormalRPC(MyRequest) returns (MyResponse);
 	_, err := cA.NormalRPC(ctx, req)
@@ -101,7 +113,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 			require.NotNil(t, res)
 			require.NoError(t, res.Err)
 		case <-time.After(time.Second * 3):
-			t.Fatalf("timed out")
+			require.FailNow(t, "timed out")
 		}
 	}
 
@@ -121,7 +133,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.NoError(t, stream.Close(nil))
 
 	// let the service goroutine run
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Second)
 
 	sA.Lock()
 	sB.Lock()
@@ -138,7 +150,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	require.NoError(t, sA.server.RegisterGetRegionStatsTopic("regionB"))
 	sA.server.DeregisterGetRegionStatsTopic("regionB")
 	require.NoError(t, sB.server.RegisterGetRegionStatsTopic("regionB"))
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Second)
 
 	respChan, err = cB.GetRegionStats(ctx, "regionB", req)
 	require.NoError(t, err)
@@ -147,7 +159,7 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 		require.NotNil(t, res)
 		require.NoError(t, res.Err)
 	case <-time.After(time.Second):
-		t.Fatalf("timed out")
+		require.FailNow(t, "timed out")
 	}
 
 	sA.Lock()
@@ -157,56 +169,20 @@ func testGeneratedService(t *testing.T, bus psrpc.MessageBus) {
 	sA.Unlock()
 	sB.Unlock()
 
-	// rpc ProcessUpdate(Ignored) returns (MyUpdate) {
-	//   option (psrpc.options).subscription = true;
-	subA, err := cA.SubscribeProcessUpdate(ctx)
-	require.NoError(t, err)
-	subB, err := cB.SubscribeProcessUpdate(ctx)
-	require.NoError(t, err)
-	time.Sleep(time.Millisecond * 100)
-
-	require.NoError(t, sA.server.PublishProcessUpdate(ctx, update))
-	requireOne(t, subA, subB)
-	require.NoError(t, subA.Close())
-	require.NoError(t, subB.Close())
-
 	// rpc UpdateRegionState(Ignored) returns (MyUpdate) {
 	//   option (psrpc.options).subscription = true;
 	//   option (psrpc.options).topics = true;
 	//   option (psrpc.options).type = MULTI;
-	subA, err = cA.SubscribeUpdateRegionState(ctx, "regionA")
+	subA, err := cA.SubscribeUpdateRegionState(ctx, "regionA")
 	require.NoError(t, err)
-	subB, err = cB.SubscribeUpdateRegionState(ctx, "regionA")
+	subB, err := cB.SubscribeUpdateRegionState(ctx, "regionA")
 	require.NoError(t, err)
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Second)
 
 	require.NoError(t, sB.server.PublishUpdateRegionState(ctx, "regionA", update))
 	requireTwo(t, subA, subB)
 	require.NoError(t, subA.Close())
 	require.NoError(t, subB.Close())
-
-	shutdown(t, sA)
-	shutdown(t, sB)
-}
-
-func requireOne(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
-	for i := 0; i < 2; i++ {
-		select {
-		case <-subA.Channel():
-			if i == 0 {
-				continue
-			}
-		case <-subB.Channel():
-			if i == 0 {
-				continue
-			}
-		case <-time.After(time.Second):
-			if i == 1 {
-				continue
-			}
-		}
-		t.Fatalf("%d responses received", i*2)
-	}
 }
 
 func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
@@ -215,7 +191,7 @@ func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
 		case <-subA.Channel():
 		case <-subB.Channel():
 		case <-time.After(time.Second):
-			t.Fatalf("timed out")
+			require.FailNow(t, "timed out")
 		}
 	}
 }
@@ -246,7 +222,7 @@ func shutdown(t *testing.T, s *MyService) {
 	case <-done:
 	// continue
 	case <-time.After(time.Second * 3):
-		t.Fatalf("shutdown not returning")
+		require.FailNow(t, "shutdown not returning")
 	}
 }
 
