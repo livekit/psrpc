@@ -25,7 +25,7 @@ const (
 )
 
 type Channel struct {
-	Legacy, Server, Server2, Local string
+	Legacy, Server, Local string
 }
 
 type MessageBus interface {
