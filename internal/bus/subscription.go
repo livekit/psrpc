@@ -16,8 +16,6 @@ package bus
 
 import (
 	"google.golang.org/protobuf/proto"
-
-	"github.com/livekit/psrpc/internal/logger"
 )
 
 type Subscription[MessageType proto.Message] interface {
@@ -42,7 +40,6 @@ func newSubscription[MessageType proto.Message](sub Reader, size int) Subscripti
 
 			p, err := deserialize(b)
 			if err != nil {
-				logger.Error(err, "failed to deserialize message")
 				continue
 			}
 			msgChan <- p.(MessageType)
