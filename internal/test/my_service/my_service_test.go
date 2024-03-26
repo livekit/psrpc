@@ -185,21 +185,6 @@ func testGeneratedService(t *testing.T, bus func() psrpc.MessageBus) {
 	require.NoError(t, subB.Close())
 }
 
-func requireOne(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
-	var n int
-	select {
-	case <-subA.Channel():
-		n++
-	case <-time.After(time.Second):
-	}
-	select {
-	case <-subB.Channel():
-		n++
-	case <-time.After(time.Second):
-	}
-	require.Equal(t, 1, n, "expected one response")
-}
-
 func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
 	for i := 0; i < 2; i++ {
 		select {
