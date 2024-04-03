@@ -212,6 +212,7 @@ func testStream(t *testing.T, bus func() psrpc.MessageBus) {
 
 	err = server.RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
 	require.NoError(t, err)
+	time.Sleep(time.Second)
 
 	ctx := context.Background()
 	stream, err := client.OpenStream[*internal.Response, *internal.Response](
