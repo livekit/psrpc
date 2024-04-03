@@ -17,6 +17,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/nats-io/nats.go"
@@ -80,10 +81,10 @@ func (n *natsMessageBus) subscribe(channel string, size int, queue bool) (*natsS
 	}, nil
 }
 
-func (n *natsMessageBus) unsubscribeRouter(r *natsRouter, channel string) {
+func (n *natsMessageBus) unsubscribeRouter(r *natsRouter, channel string, s *natsRouterSubscription) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if r.close(channel) {
+	if r.close(channel, s) {
 		delete(n.routers, r.channel)
 	}
 }
@@ -98,7 +99,7 @@ func (n *natsMessageBus) subscribeRouter(channel Channel, size int, queue bool) 
 	r, ok := n.routers[channel.Server]
 	if !ok {
 		r = &natsRouter{
-			routes:  map[string]*natsRouterSubscription{},
+			routes:  map[string][]*natsRouterSubscription{},
 			bus:     n,
 			channel: channel.Server,
 			queue:   queue,
@@ -155,7 +156,7 @@ func (n *natsSubscription) Close() error {
 type natsRouter struct {
 	sub     *nats.Subscription
 	mu      sync.Mutex
-	routes  map[string]*natsRouterSubscription
+	routes  map[string][]*natsRouterSubscription
 	bus     *natsMessageBus
 	channel string
 	queue   bool
@@ -164,12 +165,24 @@ type natsRouter struct {
 func (n *natsRouter) open(channel string, s *natsRouterSubscription) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.routes[channel] = s
+	n.routes[channel] = append(n.routes[channel], s)
 }
 
-func (n *natsRouter) close(channel string) bool {
+func (n *natsRouter) close(channel string, s *natsRouterSubscription) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	subs := n.routes[channel]
+	i := slices.Index(n.routes[channel], s)
+	if i == -1 {
+		return false
+	}
+
+	if len(subs) > 1 {
+		n.routes[channel] = slices.Delete(subs, i, i+1)
+		return false
+	}
+
 	delete(n.routes, channel)
 	if len(n.routes) == 0 {
 		n.sub.Unsubscribe()
@@ -186,7 +199,7 @@ func (n *natsRouter) write(m *nats.Msg) {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if s, ok := n.routes[channel]; ok {
+	for _, s := range n.routes[channel] {
 		s.write(m)
 	}
 }
@@ -210,7 +223,7 @@ func (n *natsRouterSubscription) read() ([]byte, bool) {
 }
 
 func (n *natsRouterSubscription) Close() error {
-	n.router.bus.unsubscribeRouter(n.router, n.channel)
+	n.router.bus.unsubscribeRouter(n.router, n.channel, n)
 	close(n.msgChan)
 	return nil
 }
