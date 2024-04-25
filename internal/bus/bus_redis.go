@@ -103,9 +103,11 @@ func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel Channel, s
 }
 
 func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (Reader, error) {
+	ctx, cancel := context.WithCancel(ctx)
 	sub := &redisSubscription{
 		bus:     r,
 		ctx:     ctx,
+		cancel:  cancel,
 		channel: channel,
 		msgChan: make(chan *redis.Message, size),
 		queue:   queue,
@@ -120,12 +122,12 @@ func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size in
 		subLists[channel] = subList
 		r.reconcileSubscriptions(channel)
 	}
-	subList.subs = append(subList.subs, sub.msgChan)
+	subList.subs = append(subList.subs, sub)
 
 	return sub, nil
 }
 
-func (r *redisMessageBus) unsubscribe(channel string, queue bool, msgChan chan *redis.Message) {
+func (r *redisMessageBus) unsubscribe(channel string, queue bool, sub *redisSubscription) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -140,13 +142,12 @@ func (r *redisMessageBus) unsubscribe(channel string, queue bool, msgChan chan *
 	if !ok {
 		return
 	}
-	i := slices.Index(subList.subs, msgChan)
+	i := slices.Index(subList.subs, sub)
 	if i == -1 {
 		return
 	}
 
 	subList.subs = slices.Delete(subList.subs, i, i+1)
-	close(msgChan)
 
 	if len(subList.subs) == 0 {
 		delete(subLists, channel)
@@ -320,7 +321,7 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 }
 
 type redisSubList struct {
-	subs []chan *redis.Message
+	subs []*redisSubscription
 	next int
 }
 
@@ -328,22 +329,30 @@ func (r *redisSubList) dispatchQueue(msg *redis.Message) {
 	if r.next >= len(r.subs) {
 		r.next = 0
 	}
-	r.subs[r.next] <- msg
+	r.subs[r.next].write(msg)
 	r.next++
 }
 
 func (r *redisSubList) dispatch(msg *redis.Message) {
-	for _, ch := range r.subs {
-		ch <- msg
+	for _, sub := range r.subs {
+		sub.write(msg)
 	}
 }
 
 type redisSubscription struct {
 	bus     *redisMessageBus
 	ctx     context.Context
+	cancel  context.CancelFunc
 	channel string
 	msgChan chan *redis.Message
 	queue   bool
+}
+
+func (r *redisSubscription) write(msg *redis.Message) {
+	select {
+	case r.msgChan <- msg:
+	case <-r.ctx.Done():
+	}
 }
 
 func (r *redisSubscription) read() ([]byte, bool) {
@@ -356,7 +365,6 @@ func (r *redisSubscription) read() ([]byte, bool) {
 				return nil, false
 			}
 		case <-r.ctx.Done():
-			r.Close()
 			return nil, false
 		}
 
@@ -374,6 +382,8 @@ func (r *redisSubscription) read() ([]byte, bool) {
 }
 
 func (r *redisSubscription) Close() error {
-	r.bus.unsubscribe(r.channel, r.queue, r.msgChan)
+	r.cancel()
+	r.bus.unsubscribe(r.channel, r.queue, r)
+	close(r.msgChan)
 	return nil
 }
