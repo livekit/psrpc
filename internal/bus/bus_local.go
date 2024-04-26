@@ -54,15 +54,15 @@ func (l *localMessageBus) Publish(_ context.Context, channel Channel, msg proto.
 	return nil
 }
 
-func (l *localMessageBus) Subscribe(_ context.Context, channel Channel, size int) (Reader, error) {
-	return l.subscribe(l.subs, channel.Legacy, size, false)
+func (l *localMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
+	return l.subscribe(ctx, l.subs, channel.Legacy, size, false)
 }
 
-func (l *localMessageBus) SubscribeQueue(_ context.Context, channel Channel, size int) (Reader, error) {
-	return l.subscribe(l.queues, channel.Legacy, size, true)
+func (l *localMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
+	return l.subscribe(ctx, l.queues, channel.Legacy, size, true)
 }
 
-func (l *localMessageBus) subscribe(subLists map[string]*localSubList, channel string, size int, queue bool) (Reader, error) {
+func (l *localMessageBus) subscribe(ctx context.Context, subLists map[string]*localSubList, channel string, size int, queue bool) (Reader, error) {
 	l.Lock()
 	defer l.Unlock()
 
@@ -74,7 +74,6 @@ func (l *localMessageBus) subscribe(subLists map[string]*localSubList, channel s
 			l.Lock()
 			subList.Lock()
 
-			close(subList.subs[index])
 			subList.subs[index] = nil
 			subList.subCount--
 			if subList.subCount == 0 {
@@ -87,20 +86,25 @@ func (l *localMessageBus) subscribe(subLists map[string]*localSubList, channel s
 		subLists[channel] = subList
 	}
 
-	return subList.create(size), nil
+	return subList.create(ctx, size), nil
 }
 
 type localSubList struct {
 	sync.RWMutex  // locking while holding localMessageBus lock is allowed
-	subs          []chan []byte
+	subs          []*localSubscription
 	subCount      int
 	queue         bool
 	next          int
 	onUnsubscribe func(int)
 }
 
-func (l *localSubList) create(size int) *localSubscription {
-	msgChan := make(chan []byte, size)
+func (l *localSubList) create(ctx context.Context, size int) *localSubscription {
+	ctx, cancel := context.WithCancel(ctx)
+	sub := &localSubscription{
+		ctx:     ctx,
+		cancel:  cancel,
+		msgChan: make(chan []byte, size),
+	}
 
 	l.Lock()
 	defer l.Unlock()
@@ -112,22 +116,21 @@ func (l *localSubList) create(size int) *localSubscription {
 		if s == nil {
 			added = true
 			index = i
-			l.subs[i] = msgChan
+			l.subs[i] = sub
 			break
 		}
 	}
 
 	if !added {
 		index = len(l.subs)
-		l.subs = append(l.subs, msgChan)
+		l.subs = append(l.subs, sub)
 	}
 
-	return &localSubscription{
-		msgChan: msgChan,
-		onClose: func() {
-			l.onUnsubscribe(index)
-		},
+	sub.onClose = func() {
+		l.onUnsubscribe(index)
 	}
+
+	return sub
 }
 
 func (l *localSubList) dispatch(b []byte) {
@@ -143,7 +146,7 @@ func (l *localSubList) dispatch(b []byte) {
 			s := l.subs[l.next]
 			l.next++
 			if s != nil {
-				s <- b
+				s.write(b)
 				return
 			}
 		}
@@ -154,15 +157,24 @@ func (l *localSubList) dispatch(b []byte) {
 		// send to all
 		for _, s := range l.subs {
 			if s != nil {
-				s <- b
+				s.write(b)
 			}
 		}
 	}
 }
 
 type localSubscription struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	msgChan chan []byte
 	onClose func()
+}
+
+func (l *localSubscription) write(b []byte) {
+	select {
+	case l.msgChan <- b:
+	case <-l.ctx.Done():
+	}
 }
 
 func (l *localSubscription) read() ([]byte, bool) {
@@ -174,6 +186,8 @@ func (l *localSubscription) read() ([]byte, bool) {
 }
 
 func (l *localSubscription) Close() error {
+	l.cancel()
 	l.onClose()
+	close(l.msgChan)
 	return nil
 }

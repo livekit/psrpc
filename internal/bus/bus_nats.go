@@ -46,39 +46,41 @@ func (n *natsMessageBus) Publish(_ context.Context, channel Channel, msg proto.M
 	return n.nc.Publish(channel.Server, b)
 }
 
-func (n *natsMessageBus) Subscribe(_ context.Context, channel Channel, size int) (Reader, error) {
+func (n *natsMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
 	if channel.Local == "" {
-		return n.subscribe(channel.Server, size, false)
+		return n.subscribe(ctx, channel.Server, size, false)
 	} else {
-		return n.subscribeRouter(channel, size, false)
+		return n.subscribeRouter(ctx, channel, size, false)
 	}
 }
 
-func (n *natsMessageBus) SubscribeQueue(_ context.Context, channel Channel, size int) (Reader, error) {
+func (n *natsMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
 	if channel.Local == "" {
-		return n.subscribe(channel.Server, size, true)
+		return n.subscribe(ctx, channel.Server, size, true)
 	} else {
-		return n.subscribeRouter(channel, size, true)
+		return n.subscribeRouter(ctx, channel, size, true)
 	}
 }
 
-func (n *natsMessageBus) subscribe(channel string, size int, queue bool) (*natsSubscription, error) {
-	msgChan := make(chan *nats.Msg, size)
-	var sub *nats.Subscription
+func (n *natsMessageBus) subscribe(ctx context.Context, channel string, size int, queue bool) (*natsSubscription, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	sub := &natsSubscription{
+		ctx:     ctx,
+		cancel:  cancel,
+		msgChan: make(chan *nats.Msg, size),
+	}
+
 	var err error
 	if queue {
-		sub, err = n.nc.ChanQueueSubscribe(channel, "bus", msgChan)
+		sub.sub, err = n.nc.QueueSubscribe(channel, "bus", sub.write)
 	} else {
-		sub, err = n.nc.ChanSubscribe(channel, msgChan)
+		sub.sub, err = n.nc.Subscribe(channel, sub.write)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	return &natsSubscription{
-		sub:     sub,
-		msgChan: msgChan,
-	}, nil
+	return sub, nil
 }
 
 func (n *natsMessageBus) unsubscribeRouter(r *natsRouter, channel string, s *natsRouterSubscription) {
@@ -89,8 +91,11 @@ func (n *natsMessageBus) unsubscribeRouter(r *natsRouter, channel string, s *nat
 	}
 }
 
-func (n *natsMessageBus) subscribeRouter(channel Channel, size int, queue bool) (*natsRouterSubscription, error) {
+func (n *natsMessageBus) subscribeRouter(ctx context.Context, channel Channel, size int, queue bool) (*natsRouterSubscription, error) {
+	ctx, cancel := context.WithCancel(ctx)
 	sub := &natsRouterSubscription{
+		ctx:     ctx,
+		cancel:  cancel,
 		msgChan: make(chan *nats.Msg, size),
 		channel: channel.Local,
 	}
@@ -135,8 +140,17 @@ func (n *natsMessageBus) subscribeRouter(channel Channel, size int, queue bool) 
 }
 
 type natsSubscription struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	sub     *nats.Subscription
 	msgChan chan *nats.Msg
+}
+
+func (n *natsSubscription) write(msg *nats.Msg) {
+	select {
+	case n.msgChan <- msg:
+	case <-n.ctx.Done():
+	}
 }
 
 func (n *natsSubscription) read() ([]byte, bool) {
@@ -148,6 +162,7 @@ func (n *natsSubscription) read() ([]byte, bool) {
 }
 
 func (n *natsSubscription) Close() error {
+	n.cancel()
 	err := n.sub.Unsubscribe()
 	close(n.msgChan)
 	return err
@@ -205,13 +220,18 @@ func (n *natsRouter) write(m *nats.Msg) {
 }
 
 type natsRouterSubscription struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	msgChan chan *nats.Msg
 	router  *natsRouter
 	channel string
 }
 
 func (n *natsRouterSubscription) write(m *nats.Msg) {
-	n.msgChan <- m
+	select {
+	case n.msgChan <- m:
+	case <-n.ctx.Done():
+	}
 }
 
 func (n *natsRouterSubscription) read() ([]byte, bool) {
@@ -223,6 +243,7 @@ func (n *natsRouterSubscription) read() ([]byte, bool) {
 }
 
 func (n *natsRouterSubscription) Close() error {
+	n.cancel()
 	n.router.bus.unsubscribeRouter(n.router, n.channel, n)
 	close(n.msgChan)
 	return nil
