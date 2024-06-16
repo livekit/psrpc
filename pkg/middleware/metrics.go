@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -115,6 +116,7 @@ type streamMetricsInterceptor struct {
 	observer MetricsObserver
 	role     MetricRole
 	info     psrpc.RPCInfo
+	closed   atomic.Bool
 }
 
 func (s *streamMetricsInterceptor) Recv(msg proto.Message) (err error) {
@@ -129,7 +131,9 @@ func (s *streamMetricsInterceptor) Send(msg proto.Message, opts ...psrpc.StreamO
 }
 
 func (s *streamMetricsInterceptor) Close(cause error) error {
-	s.observer.OnStreamClose(s.role, s.info)
+	if !s.closed.Swap(true) {
+		s.observer.OnStreamClose(s.role, s.info)
+	}
 	return s.StreamHandler.Close(cause)
 }
 
