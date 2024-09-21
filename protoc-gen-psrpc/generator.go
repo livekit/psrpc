@@ -423,6 +423,9 @@ func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service 
 		t.P()
 		t.P(`  // Close immediately, without waiting for pending RPCs`)
 		t.P(`  Kill()`)
+	} else if iface == client {
+		t.P(`  // Close immediately, without waiting for pending RPCs`)
+		t.P(`  Close()`)
 	}
 	t.P(`}`)
 }
@@ -554,6 +557,11 @@ func (t *psrpc) generateClient(service *descriptor.ServiceDescriptorProto) {
 		t.P(`}`)
 		t.P()
 	}
+
+	t.P(`func (s *`, structName, servTopics.FormatTypeParams(), `) Close() {`)
+	t.P(`  s.client.Close()`)
+	t.P(`}`)
+	t.P()
 }
 
 func (t *psrpc) generateServerImplSignature(method *descriptor.MethodDescriptorProto, opts *options.Options) {
