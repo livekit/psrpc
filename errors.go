@@ -133,8 +133,6 @@ func (e psrpcError) ToHttp() int {
 	switch e.code {
 	case OK:
 		return http.StatusOK
-	case Canceled, DeadlineExceeded:
-		return http.StatusRequestTimeout
 	case Unknown, MalformedResponse, Internal, DataLoss:
 		return http.StatusInternalServerError
 	case InvalidArgument, MalformedRequest:
@@ -155,7 +153,7 @@ func (e psrpcError) ToHttp() int {
 		return http.StatusRequestedRangeNotSatisfiable
 	case Unimplemented:
 		return http.StatusNotImplemented
-	case Unavailable:
+	case Canceled, DeadlineExceeded, Unavailable:
 		return http.StatusServiceUnavailable
 	case Unauthenticated:
 		return http.StatusUnauthorized
