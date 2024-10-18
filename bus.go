@@ -21,9 +21,6 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 )
 
-// TODO: clean up
-func SetChannelMode(m uint32) {}
-
 type Channel = bus.Channel
 type MessageBus bus.MessageBus
 
