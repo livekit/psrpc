@@ -21,43 +21,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
+	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/internal/bus/bustest"
 )
 
 func TestGeneratedService(t *testing.T) {
-	t.Run("Local", func(t *testing.T) {
-		testGeneratedService(t, (func() func() psrpc.MessageBus {
-			bus := psrpc.NewLocalMessageBus()
-			return func() psrpc.MessageBus { return bus }
-		})())
-	})
-
-	t.Run("Redis", func(t *testing.T) {
-		testGeneratedService(t, func() psrpc.MessageBus {
-			rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-			return psrpc.NewRedisMessageBus(rc)
-		})
-	})
-
-	t.Run("Nats", func(t *testing.T) {
-		testGeneratedService(t, func() psrpc.MessageBus {
-			nc, _ := nats.Connect(nats.DefaultURL)
-			return psrpc.NewNatsMessageBus(nc)
-		})
-	})
+	bustest.TestAll(t, testGeneratedService)
 }
 
-func testGeneratedService(t *testing.T, bus func() psrpc.MessageBus) {
+func testGeneratedService(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	ctx := context.Background()
 	req := &MyRequest{}
 	update := &MyUpdate{}
-	sA := createServer(t, bus())
-	sB := createServer(t, bus())
+	sA := createServer(t, bus(t))
+	sB := createServer(t, bus(t))
 
 	t.Cleanup(func() {
 		shutdown(t, sA)
@@ -72,8 +53,8 @@ func testGeneratedService(t *testing.T, bus func() psrpc.MessageBus) {
 	responseHook := func(ctx context.Context, req proto.Message, rpcInfo psrpc.RPCInfo, res proto.Message, err error) {
 		responseCount++
 	}
-	cA := createClient(t, bus(), psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
-	cB := createClient(t, bus())
+	cA := createClient(t, bus(t), psrpc.WithClientRequestHooks(requestHook), psrpc.WithClientResponseHooks(responseHook))
+	cB := createClient(t, bus(t))
 
 	// rpc NormalRPC(MyRequest) returns (MyResponse);
 	_, err := cA.NormalRPC(ctx, req)

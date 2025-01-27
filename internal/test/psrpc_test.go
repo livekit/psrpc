@@ -16,17 +16,16 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
-	"github.com/nats-io/nats.go"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/internal/bus/bustest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/rand"
@@ -34,59 +33,31 @@ import (
 )
 
 func TestRPC(t *testing.T) {
-	cases := []struct {
-		label string
-		bus   func() psrpc.MessageBus
-	}{
-		{
-			label: "Local",
-			bus: (func() func() psrpc.MessageBus {
-				bus := psrpc.NewLocalMessageBus()
-				return func() psrpc.MessageBus { return bus }
-			})(),
-		},
-		{
-			label: "Redis",
-			bus: func() psrpc.MessageBus {
-				rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-				return psrpc.NewRedisMessageBus(rc)
-			},
-		},
-		{
-			label: "Nats",
-			bus: func() psrpc.MessageBus {
-				nc, _ := nats.Connect(nats.DefaultURL)
-				return psrpc.NewNatsMessageBus(nc)
-			},
-		},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(fmt.Sprintf("RPC/%s", c.label), func(t *testing.T) {
-			testRPC(t, c.bus)
+	bustest.TestAll(t, func(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
+		t.Run("RPC", func(t *testing.T) {
+			testRPC(t, bus)
 		})
-		t.Run(fmt.Sprintf("Stream/%s", c.label), func(t *testing.T) {
-			testStream(t, c.bus)
+		t.Run("Stream", func(t *testing.T) {
+			testStream(t, bus)
 		})
-	}
+	})
 }
 
-func testRPC(t *testing.T, bus func() psrpc.MessageBus) {
+func testRPC(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	serviceName := "test"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 	serverB := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 	serverC := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 
 	t.Cleanup(func() {
 		serverA.Close(true)
@@ -97,7 +68,7 @@ func testRPC(t *testing.T, bus func() psrpc.MessageBus) {
 	c, err := client.NewRPCClient(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 	require.NoError(t, err)
 
 	retErr := psrpc.NewErrorf(psrpc.Internal, "foo")
@@ -173,13 +144,13 @@ func testRPC(t *testing.T, bus func() psrpc.MessageBus) {
 	}
 }
 
-func testStream(t *testing.T, bus func() psrpc.MessageBus) {
+func testStream(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	serviceName := "test_stream"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 
 	t.Cleanup(func() {
 		serverA.Close(true)
@@ -188,7 +159,7 @@ func testStream(t *testing.T, bus func() psrpc.MessageBus) {
 	c, err := client.NewRPCClientWithStreams(&info.ServiceDefinition{
 		Name: serviceName,
 		ID:   rand.NewString(),
-	}, bus())
+	}, bus(t))
 	require.NoError(t, err)
 
 	serverClose := make(chan struct{})

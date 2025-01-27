@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bus
+package bus_test
 
 import (
 	"context"
@@ -21,27 +21,24 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/internal/bus/bustest"
 )
 
-func redisTestChannel(channel string) Channel {
-	return Channel{Legacy: channel}
+func redisTestChannel(channel string) bus.Channel {
+	return bus.Channel{Legacy: channel}
 }
 
 func TestRedisMessageBus(t *testing.T) {
-	t.Run("published messages are received by subscribers", func(t *testing.T) {
-		rc0 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		rc1 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		t.Cleanup(func() {
-			rc0.Close()
-			rc1.Close()
-		})
+	srv := bustest.NewRedis(t, bustest.Docker(t))
 
-		b0 := NewRedisMessageBus(rc0)
-		b1 := NewRedisMessageBus(rc1)
+	t.Run("published messages are received by subscribers", func(t *testing.T) {
+		b0 := srv.Connect(t)
+		b1 := srv.Connect(t)
 
 		r, err := b0.Subscribe(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
@@ -53,27 +50,18 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b1.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		b, ok := r.read()
+		b, ok := bus.RawRead(r)
 		require.True(t, ok)
 
-		dst, err := deserialize(b)
+		dst, err := bus.Deserialize(b)
 		require.NoError(t, err)
 		require.Equal(t, src.Value, dst.(*wrapperspb.StringValue).Value)
 	})
 
 	t.Run("published messages are received by only one queue subscriber", func(t *testing.T) {
-		rc0 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		rc1 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		rc2 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		t.Cleanup(func() {
-			rc0.Close()
-			rc1.Close()
-			rc2.Close()
-		})
-
-		b0 := NewRedisMessageBus(rc0)
-		b1 := NewRedisMessageBus(rc1)
-		b2 := NewRedisMessageBus(rc2)
+		b0 := srv.Connect(t)
+		b1 := srv.Connect(t)
+		b2 := srv.Connect(t)
 
 		r1, err := b1.SubscribeQueue(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
@@ -90,12 +78,12 @@ func TestRedisMessageBus(t *testing.T) {
 		var n atomic.Int64
 
 		go func() {
-			if _, ok := r1.read(); ok {
+			if _, ok := bus.RawRead(r1); ok {
 				n.Inc()
 			}
 		}()
 		go func() {
-			if _, ok := r2.read(); ok {
+			if _, ok := bus.RawRead(r2); ok {
 				n.Inc()
 			}
 		}()
@@ -106,18 +94,9 @@ func TestRedisMessageBus(t *testing.T) {
 	})
 
 	t.Run("closed subscriptions are unreadable", func(t *testing.T) {
-		rc0 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		rc1 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		rc2 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-		t.Cleanup(func() {
-			rc0.Close()
-			rc1.Close()
-			rc2.Close()
-		})
-
-		b0 := NewRedisMessageBus(rc0)
-		b1 := NewRedisMessageBus(rc1)
-		b2 := NewRedisMessageBus(rc2)
+		b0 := srv.Connect(t)
+		b1 := srv.Connect(t)
+		b2 := srv.Connect(t)
 
 		r1, err := b1.Subscribe(context.Background(), redisTestChannel("test"), 100)
 		require.NoError(t, err)
@@ -131,9 +110,9 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		_, ok := r1.read()
+		_, ok := bus.RawRead(r1)
 		require.True(t, ok)
-		_, ok = r2.read()
+		_, ok = bus.RawRead(r2)
 		require.True(t, ok)
 
 		err = r1.Close()
@@ -144,23 +123,18 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		_, ok = r1.read()
+		_, ok = bus.RawRead(r1)
 		require.False(t, ok)
-		_, ok = r2.read()
+		_, ok = bus.RawRead(r2)
 		require.True(t, ok)
 	})
 }
 
 func BenchmarkRedisMessageBus(b *testing.B) {
-	rc0 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-	rc1 := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{"localhost:6379"}})
-	b.Cleanup(func() {
-		rc0.Close()
-		rc1.Close()
-	})
+	srv := bustest.NewRedis(b, bustest.Docker(b))
 
-	b0 := NewRedisMessageBus(rc0)
-	b1 := NewRedisMessageBus(rc1)
+	b0 := srv.Connect(b)
+	b1 := srv.Connect(b)
 
 	r, _ := b0.Subscribe(context.Background(), redisTestChannel("test"), 100)
 
@@ -169,7 +143,7 @@ func BenchmarkRedisMessageBus(b *testing.B) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < b.N; i++ {
-			r.read()
+			bus.RawRead(r)
 		}
 		close(done)
 	}()
