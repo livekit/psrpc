@@ -262,6 +262,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		if errors.As(err, &e) {
 			res.Error = e.Error()
 			res.Code = string(e.Code())
+			res.ErrorDetails = append(res.ErrorDetails, e.DetailsProto()...)
 		} else {
 			res.Error = err.Error()
 			res.Code = string(psrpc.Unknown)

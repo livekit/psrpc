@@ -48,6 +48,7 @@ message Response {
   string error = 5;
   string code = 6;
   bytes raw_response = 7;
+  repeated google.protobuf.Any error_details = 8;
 }
 
 message ClaimRequest {

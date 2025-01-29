@@ -129,7 +129,7 @@ func (m *multiRPC[ResponseType]) handleResponses(
 			var v ResponseType
 			var err error
 			if res.Error != "" {
-				err = psrpc.NewErrorFromResponse(res.Code, res.Error)
+				err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 			} else {
 				v, err = bus.DeserializePayload[ResponseType](res.RawResponse)
 				if err != nil {

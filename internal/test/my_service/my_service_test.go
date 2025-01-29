@@ -16,12 +16,14 @@ package my_service
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -164,6 +166,23 @@ func testGeneratedService(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	requireTwo(t, subA, subB)
 	require.NoError(t, subA.Close())
 	require.NoError(t, subB.Close())
+
+	// rpc NormalRPC(MyRequest) returns (MyResponse);
+	_, err = cA.NormalRPC(ctx, &MyRequest{ReturnError: true})
+	require.Error(t, err)
+	e, ok := err.(psrpc.Error)
+	require.True(t, ok)
+	require.Equal(t, psrpc.FailedPrecondition, e.Code())
+	require.Equal(t, "requested error", e.Error())
+	details := e.Details()
+	require.Equal(t, 1, len(details))
+	require.True(t, proto.Equal(&MyRequest{ReturnError: true}, details[0].(proto.Message)))
+	st := e.GRPCStatus()
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Equal(t, "requested error", st.Message())
+	details = st.Details()
+	require.Equal(t, 1, len(details))
+	require.True(t, proto.Equal(&MyRequest{ReturnError: true}, details[0].(proto.Message)))
 }
 
 func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
@@ -214,7 +233,10 @@ type MyService struct {
 	counts map[string]int
 }
 
-func (s *MyService) NormalRPC(_ context.Context, _ *MyRequest) (*MyResponse, error) {
+func (s *MyService) NormalRPC(_ context.Context, req *MyRequest) (*MyResponse, error) {
+	if req.ReturnError {
+		return nil, psrpc.NewError(psrpc.FailedPrecondition, errors.New("requested error"), req)
+	}
 	s.Lock()
 	s.counts["NormalRPC"]++
 	s.Unlock()

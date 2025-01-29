@@ -141,7 +141,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		select {
 		case res := <-resChan:
 			if res.Error != "" {
-				err = psrpc.NewErrorFromResponse(res.Code, res.Error)
+				err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 			} else {
 				response, err = bus.DeserializePayload[ResponseType](res.RawResponse)
 				if err != nil {
