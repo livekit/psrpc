@@ -21,8 +21,11 @@ import (
 	"net/http"
 
 	"github.com/twitchtv/twirp"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 var (
@@ -39,6 +42,8 @@ var (
 type Error interface {
 	error
 	Code() ErrorCode
+	Details() []any
+	DetailsProto() []*anypb.Any
 
 	// convenience methods
 	ToHttp() int
@@ -51,10 +56,17 @@ func (e ErrorCode) Error() string {
 	return string(e)
 }
 
-func NewError(code ErrorCode, err error) Error {
+func NewError(code ErrorCode, err error, details ...proto.Message) Error {
+	var protoDetails []*anypb.Any
+	for _, e := range details {
+		if p, err := anypb.New(e); err == nil {
+			protoDetails = append(protoDetails, p)
+		}
+	}
 	return &psrpcError{
-		error: err,
-		code:  code,
+		error:   err,
+		code:    code,
+		details: protoDetails,
 	}
 }
 
@@ -65,14 +77,15 @@ func NewErrorf(code ErrorCode, msg string, args ...interface{}) Error {
 	}
 }
 
-func NewErrorFromResponse(code, err string) Error {
+func NewErrorFromResponse(code, err string, details ...*anypb.Any) Error {
 	if code == "" {
 		code = string(Unknown)
 	}
 
 	return &psrpcError{
-		error: errors.New(err),
-		code:  ErrorCode(code),
+		error:   errors.New(err),
+		code:    ErrorCode(code),
+		details: details,
 	}
 }
 
@@ -122,7 +135,8 @@ const (
 
 type psrpcError struct {
 	error
-	code ErrorCode
+	code    ErrorCode
+	details []*anypb.Any
 }
 
 func (e psrpcError) Code() ErrorCode {
@@ -160,6 +174,14 @@ func (e psrpcError) ToHttp() int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+func (e psrpcError) DetailsProto() []*anypb.Any {
+	return e.details
+}
+
+func (e psrpcError) Details() []any {
+	return e.GRPCStatus().Details()
 }
 
 func (e psrpcError) GRPCStatus() *status.Status {
@@ -203,7 +225,11 @@ func (e psrpcError) GRPCStatus() *status.Status {
 		c = codes.Unknown
 	}
 
-	return status.New(c, e.Error())
+	return status.FromProto(&spb.Status{
+		Code:    int32(c),
+		Message: e.Error(),
+		Details: e.details,
+	})
 }
 
 func (e psrpcError) toTwirp() twirp.Error {

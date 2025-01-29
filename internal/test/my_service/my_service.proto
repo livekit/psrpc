@@ -63,7 +63,9 @@ service MyService {
 }
 
 message Ignored {}
-message MyRequest {}
+message MyRequest {
+  bool return_error = 1;
+}
 message MyResponse {}
 message MyUpdate {}
 message MyClientMessage {}
