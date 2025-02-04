@@ -64,7 +64,7 @@ service MyService {
 
 message Ignored {}
 message MyRequest {
-  bool return_error = 1;
+  int32 return_error = 1;
 }
 message MyResponse {}
 message MyUpdate {}

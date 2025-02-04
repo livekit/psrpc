@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -263,6 +264,10 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Error = e.Error()
 			res.Code = string(e.Code())
 			res.ErrorDetails = append(res.ErrorDetails, e.DetailsProto()...)
+		} else if st, ok := status.FromError(err); ok {
+			res.Error = st.Message()
+			res.Code = string(psrpc.ErrorCodeFromGRPC(st.Code()))
+			res.ErrorDetails = append(res.ErrorDetails, st.Proto().Details...)
 		} else {
 			res.Error = err.Error()
 			res.Code = string(psrpc.Unknown)

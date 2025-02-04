@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -167,8 +168,8 @@ func testGeneratedService(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	require.NoError(t, subA.Close())
 	require.NoError(t, subB.Close())
 
-	// rpc NormalRPC(MyRequest) returns (MyResponse);
-	_, err = cA.NormalRPC(ctx, &MyRequest{ReturnError: true})
+	// Test PSRPC error propagation (with error details)
+	_, err = cA.NormalRPC(ctx, &MyRequest{ReturnError: 1})
 	require.Error(t, err)
 	e, ok := err.(psrpc.Error)
 	require.True(t, ok)
@@ -176,13 +177,24 @@ func testGeneratedService(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	require.Equal(t, "requested error", e.Error())
 	details := e.Details()
 	require.Equal(t, 1, len(details))
-	require.True(t, proto.Equal(&MyRequest{ReturnError: true}, details[0].(proto.Message)))
+	require.True(t, proto.Equal(&MyRequest{ReturnError: 1}, details[0].(proto.Message)))
 	st := e.GRPCStatus()
 	require.Equal(t, codes.FailedPrecondition, st.Code())
 	require.Equal(t, "requested error", st.Message())
 	details = st.Details()
 	require.Equal(t, 1, len(details))
-	require.True(t, proto.Equal(&MyRequest{ReturnError: true}, details[0].(proto.Message)))
+	require.True(t, proto.Equal(&MyRequest{ReturnError: 1}, details[0].(proto.Message)))
+
+	// Test gRPC error propagation (with error details)
+	_, err = cA.NormalRPC(ctx, &MyRequest{ReturnError: 2})
+	require.Error(t, err)
+	st, ok = status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Equal(t, "requested error", st.Message())
+	details = st.Details()
+	require.Equal(t, 1, len(details))
+	require.True(t, proto.Equal(&MyRequest{ReturnError: 2}, details[0].(proto.Message)))
 }
 
 func requireTwo(t *testing.T, subA, subB psrpc.Subscription[*MyUpdate]) {
@@ -234,8 +246,18 @@ type MyService struct {
 }
 
 func (s *MyService) NormalRPC(_ context.Context, req *MyRequest) (*MyResponse, error) {
-	if req.ReturnError {
+	switch req.ReturnError {
+	case 1:
 		return nil, psrpc.NewError(psrpc.FailedPrecondition, errors.New("requested error"), req)
+	case 2:
+		st := status.New(codes.FailedPrecondition, "requested error")
+		st, err := st.WithDetails(req)
+		if err != nil {
+			panic(err)
+		}
+		return nil, st.Err()
+	case 0:
+		// none
 	}
 	s.Lock()
 	s.counts["NormalRPC"]++
