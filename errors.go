@@ -56,7 +56,168 @@ func (e ErrorCode) Error() string {
 	return string(e)
 }
 
+func (e ErrorCode) ToHTTP() int {
+	switch e {
+	case OK:
+		return http.StatusOK
+	case Unknown, MalformedResponse, Internal, DataLoss:
+		return http.StatusInternalServerError
+	case InvalidArgument, MalformedRequest:
+		return http.StatusBadRequest
+	case NotFound:
+		return http.StatusNotFound
+	case NotAcceptable:
+		return http.StatusNotAcceptable
+	case AlreadyExists, Aborted:
+		return http.StatusConflict
+	case PermissionDenied:
+		return http.StatusForbidden
+	case ResourceExhausted:
+		return http.StatusTooManyRequests
+	case FailedPrecondition:
+		return http.StatusPreconditionFailed
+	case OutOfRange:
+		return http.StatusRequestedRangeNotSatisfiable
+	case Unimplemented:
+		return http.StatusNotImplemented
+	case Canceled, DeadlineExceeded, Unavailable:
+		return http.StatusServiceUnavailable
+	case Unauthenticated:
+		return http.StatusUnauthorized
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func ErrorCodeFromGRPC(code codes.Code) ErrorCode {
+	switch code {
+	case codes.OK:
+		return OK
+	case codes.Canceled:
+		return Canceled
+	case codes.Unknown:
+		return Unknown
+	case codes.InvalidArgument:
+		return InvalidArgument
+	case codes.DeadlineExceeded:
+		return DeadlineExceeded
+	case codes.NotFound:
+		return NotFound
+	case codes.AlreadyExists:
+		return AlreadyExists
+	case codes.PermissionDenied:
+		return PermissionDenied
+	case codes.ResourceExhausted:
+		return ResourceExhausted
+	case codes.FailedPrecondition:
+		return FailedPrecondition
+	case codes.Aborted:
+		return Aborted
+	case codes.OutOfRange:
+		return OutOfRange
+	case codes.Unimplemented:
+		return Unimplemented
+	case codes.Internal:
+		return Internal
+	case codes.Unavailable:
+		return Unavailable
+	case codes.DataLoss:
+		return DataLoss
+	case codes.Unauthenticated:
+		return Unauthenticated
+	default:
+		return Unknown
+	}
+}
+
+func (e ErrorCode) ToGRPC() codes.Code {
+	switch e {
+	case OK:
+		return codes.OK
+	case Canceled:
+		return codes.Canceled
+	case Unknown:
+		return codes.Unknown
+	case InvalidArgument, MalformedRequest:
+		return codes.InvalidArgument
+	case DeadlineExceeded:
+		return codes.DeadlineExceeded
+	case NotFound:
+		return codes.NotFound
+	case AlreadyExists:
+		return codes.AlreadyExists
+	case PermissionDenied:
+		return codes.PermissionDenied
+	case ResourceExhausted:
+		return codes.ResourceExhausted
+	case FailedPrecondition:
+		return codes.FailedPrecondition
+	case Aborted:
+		return codes.Aborted
+	case OutOfRange:
+		return codes.OutOfRange
+	case Unimplemented:
+		return codes.Unimplemented
+	case MalformedResponse, Internal:
+		return codes.Internal
+	case Unavailable:
+		return codes.Unavailable
+	case DataLoss:
+		return codes.DataLoss
+	case Unauthenticated:
+		return codes.Unauthenticated
+	default:
+		return codes.Unknown
+	}
+}
+
+func (e ErrorCode) ToTwirp() twirp.ErrorCode {
+	switch e {
+	case OK:
+		return twirp.NoError
+	case Canceled:
+		return twirp.Canceled
+	case Unknown:
+		return twirp.Unknown
+	case InvalidArgument:
+		return twirp.InvalidArgument
+	case MalformedRequest, MalformedResponse:
+		return twirp.Malformed
+	case DeadlineExceeded:
+		return twirp.DeadlineExceeded
+	case NotFound:
+		return twirp.NotFound
+	case AlreadyExists:
+		return twirp.AlreadyExists
+	case PermissionDenied:
+		return twirp.PermissionDenied
+	case ResourceExhausted:
+		return twirp.ResourceExhausted
+	case FailedPrecondition:
+		return twirp.FailedPrecondition
+	case Aborted:
+		return twirp.Aborted
+	case OutOfRange:
+		return twirp.OutOfRange
+	case Unimplemented:
+		return twirp.Unimplemented
+	case Internal:
+		return twirp.Internal
+	case Unavailable:
+		return twirp.Unavailable
+	case DataLoss:
+		return twirp.DataLoss
+	case Unauthenticated:
+		return twirp.Unauthenticated
+	default:
+		return twirp.Unknown
+	}
+}
+
 func NewError(code ErrorCode, err error, details ...proto.Message) Error {
+	if err == nil {
+		panic("error is nil")
+	}
 	var protoDetails []*anypb.Any
 	for _, e := range details {
 		if p, err := anypb.New(e); err == nil {
@@ -144,36 +305,7 @@ func (e psrpcError) Code() ErrorCode {
 }
 
 func (e psrpcError) ToHttp() int {
-	switch e.code {
-	case OK:
-		return http.StatusOK
-	case Unknown, MalformedResponse, Internal, DataLoss:
-		return http.StatusInternalServerError
-	case InvalidArgument, MalformedRequest:
-		return http.StatusBadRequest
-	case NotFound:
-		return http.StatusNotFound
-	case NotAcceptable:
-		return http.StatusNotAcceptable
-	case AlreadyExists, Aborted:
-		return http.StatusConflict
-	case PermissionDenied:
-		return http.StatusForbidden
-	case ResourceExhausted:
-		return http.StatusTooManyRequests
-	case FailedPrecondition:
-		return http.StatusPreconditionFailed
-	case OutOfRange:
-		return http.StatusRequestedRangeNotSatisfiable
-	case Unimplemented:
-		return http.StatusNotImplemented
-	case Canceled, DeadlineExceeded, Unavailable:
-		return http.StatusServiceUnavailable
-	case Unauthenticated:
-		return http.StatusUnauthorized
-	default:
-		return http.StatusInternalServerError
-	}
+	return e.code.ToHTTP()
 }
 
 func (e psrpcError) DetailsProto() []*anypb.Any {
@@ -185,97 +317,15 @@ func (e psrpcError) Details() []any {
 }
 
 func (e psrpcError) GRPCStatus() *status.Status {
-	var c codes.Code
-	switch e.code {
-	case OK:
-		c = codes.OK
-	case Canceled:
-		c = codes.Canceled
-	case Unknown:
-		c = codes.Unknown
-	case InvalidArgument, MalformedRequest:
-		c = codes.InvalidArgument
-	case DeadlineExceeded:
-		c = codes.DeadlineExceeded
-	case NotFound:
-		c = codes.NotFound
-	case AlreadyExists:
-		c = codes.AlreadyExists
-	case PermissionDenied:
-		c = codes.PermissionDenied
-	case ResourceExhausted:
-		c = codes.ResourceExhausted
-	case FailedPrecondition:
-		c = codes.FailedPrecondition
-	case Aborted:
-		c = codes.Aborted
-	case OutOfRange:
-		c = codes.OutOfRange
-	case Unimplemented:
-		c = codes.Unimplemented
-	case MalformedResponse, Internal:
-		c = codes.Internal
-	case Unavailable:
-		c = codes.Unavailable
-	case DataLoss:
-		c = codes.DataLoss
-	case Unauthenticated:
-		c = codes.Unauthenticated
-	default:
-		c = codes.Unknown
-	}
-
 	return status.FromProto(&spb.Status{
-		Code:    int32(c),
+		Code:    int32(e.code.ToGRPC()),
 		Message: e.Error(),
 		Details: e.details,
 	})
 }
 
 func (e psrpcError) toTwirp() twirp.Error {
-	var c twirp.ErrorCode
-	switch e.code {
-	case OK:
-		c = twirp.NoError
-	case Canceled:
-		c = twirp.Canceled
-	case Unknown:
-		c = twirp.Unknown
-	case InvalidArgument:
-		c = twirp.InvalidArgument
-	case MalformedRequest, MalformedResponse:
-		c = twirp.Malformed
-	case DeadlineExceeded:
-		c = twirp.DeadlineExceeded
-	case NotFound:
-		c = twirp.NotFound
-	case AlreadyExists:
-		c = twirp.AlreadyExists
-	case PermissionDenied:
-		c = twirp.PermissionDenied
-	case ResourceExhausted:
-		c = twirp.ResourceExhausted
-	case FailedPrecondition:
-		c = twirp.FailedPrecondition
-	case Aborted:
-		c = twirp.Aborted
-	case OutOfRange:
-		c = twirp.OutOfRange
-	case Unimplemented:
-		c = twirp.Unimplemented
-	case Internal:
-		c = twirp.Internal
-	case Unavailable:
-		c = twirp.Unavailable
-	case DataLoss:
-		c = twirp.DataLoss
-	case Unauthenticated:
-		c = twirp.Unauthenticated
-	default:
-		c = twirp.Unknown
-	}
-
-	return twirp.NewError(c, e.Error())
+	return twirp.NewError(e.code.ToTwirp(), e.Error())
 }
 
 func (e psrpcError) As(target any) bool {
