@@ -8,7 +8,7 @@ require (
 	github.com/frostbyte73/core v0.0.10
 	github.com/gammazero/deque v0.2.1
 	github.com/go-logr/logr v1.3.0
-	github.com/livekit/mageutil v0.0.0-20230125210925-54e8a70427c1
+	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
 	github.com/nats-io/nats.go v1.31.0
 	github.com/ory/dockertest/v3 v3.11.0
 	github.com/pkg/errors v0.9.1
@@ -19,6 +19,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	golang.org/x/mod v0.14.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.31.0
 )
@@ -57,7 +58,6 @@ require (
 	golang.org/x/crypto v0.22.0 // indirect
 	golang.org/x/sync v0.5.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
