@@ -3,13 +3,43 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/livekit/psrpc"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc"
 )
+
+func TestIsTimeout(t *testing.T) {
+	var cases = []struct {
+		Name string
+		Err  error
+		Exp  bool
+	}{
+		{Name: "unknown", Err: errors.New("test"), Exp: true},
+
+		{Name: "psrpc timeout", Err: psrpc.NewErrorf(psrpc.DeadlineExceeded, "test"), Exp: true},
+		{Name: "psrpc unavailable", Err: psrpc.NewErrorf(psrpc.Unavailable, "test"), Exp: true},
+		{Name: "psrpc internal", Err: psrpc.NewErrorf(psrpc.Internal, "test"), Exp: false},
+		{Name: "psrpc unknown", Err: psrpc.NewErrorf(psrpc.Unknown, "test"), Exp: false},
+
+		{Name: "grpc timeout", Err: status.Error(codes.DeadlineExceeded, "test"), Exp: true},
+		{Name: "grpc unavailable", Err: status.Error(codes.Unavailable, "test"), Exp: true},
+		{Name: "grpc internal", Err: status.Error(codes.Internal, "test"), Exp: false},
+		{Name: "grpc unknown", Err: status.Error(codes.Unknown, "test"), Exp: false},
+	}
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			require.Equal(t, c.Exp, isTimeout(c.Err))
+			require.Equal(t, c.Exp, isTimeout(fmt.Errorf("wrapped: %w", c.Err)))
+		})
+	}
+}
 
 func TestRetryBackoff(t *testing.T) {
 	ro := RetryOptions{
