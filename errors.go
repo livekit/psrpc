@@ -89,6 +89,17 @@ func (e ErrorCode) ToHTTP() int {
 	}
 }
 
+func GetErrorCode(err error) (ErrorCode, bool) {
+	var e Error
+	if errors.As(err, &e) {
+		return e.Code(), true
+	}
+	if st, ok := status.FromError(err); ok && st != nil {
+		return ErrorCodeFromGRPC(st.Code()), true
+	}
+	return Unknown, false
+}
+
 func ErrorCodeFromGRPC(code codes.Code) ErrorCode {
 	switch code {
 	case codes.OK:

@@ -16,7 +16,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -56,11 +55,12 @@ func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 }
 
 func isTimeout(err error) bool {
-	var e psrpc.Error
-	if !errors.As(err, &e) {
+	code, ok := psrpc.GetErrorCode(err)
+	if !ok {
+		// retry all internal errors that were not explicitly wrapped
 		return true
 	}
-	return e.Code() == psrpc.DeadlineExceeded || e.Code() == psrpc.Unavailable
+	return code == psrpc.DeadlineExceeded || code == psrpc.Unavailable
 }
 
 func getRetryWithBackoffParameters(o RetryOptions) func(err error, attempt int) (retry bool, timeout time.Duration, waitTime time.Duration) {
