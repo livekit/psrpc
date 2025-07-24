@@ -52,12 +52,7 @@ func ClientOptions(c Config) []psrpc.ClientOption {
 
 				m := make(map[string]string)
 				c.TextMapPropagator.Inject(ctx, propagation.MapCarrier(m))
-
-				kvs := make([]string, 0, 2*len(m))
-				for k, v := range m {
-					kvs = append(kvs, k, v)
-				}
-				ctx = metadata.AppendMetadataToOutgoingContext(ctx, kvs...)
+				ctx = metadata.NewContextWithOutgoingMetadata(ctx, m)
 
 				span.AddEvent("Outbound message")
 				resp, err := next(ctx, req)
@@ -75,11 +70,9 @@ func ServerOptions(c Config) []psrpc.ServerOption {
 	tracer := c.getTracer()
 	return []psrpc.ServerOption{
 		psrpc.WithServerRPCInterceptors(func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (proto.Message, error) {
-			var m map[string]string
 			if h := metadata.IncomingHeader(ctx); h != nil {
-				m = h.Metadata
+				ctx = c.TextMapPropagator.Extract(ctx, propagation.MapCarrier(h.Metadata))
 			}
-			ctx = c.TextMapPropagator.Extract(ctx, propagation.MapCarrier(m))
 
 			ctx, span := tracer.Start(ctx, "Recv."+info.Service+"."+info.Method,
 				trace.WithSpanKind(trace.SpanKindServer),

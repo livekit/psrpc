@@ -54,10 +54,25 @@ func IncomingHeader(ctx context.Context) *Header {
 }
 
 func NewContextWithOutgoingMetadata(ctx context.Context, md Metadata) context.Context {
-	return context.WithValue(ctx, metadataKey{}, ctxMD{md: md})
+	if len(md) == 0 {
+		return ctx
+	}
+	m, ok := ctx.Value(metadataKey{}).(ctxMD)
+	if ok && m.md != nil {
+		m.md = maps.Clone(m.md)
+		for k, v := range md {
+			m.md[k] = v
+		}
+	} else {
+		m.md = md
+	}
+	return context.WithValue(ctx, metadataKey{}, m)
 }
 
 func AppendMetadataToOutgoingContext(ctx context.Context, kv ...string) context.Context {
+	if len(kv) == 0 {
+		return ctx
+	}
 	md, ok := ctx.Value(metadataKey{}).(ctxMD)
 	if !ok || md.md == nil {
 		md = ctxMD{md: Metadata{}}
