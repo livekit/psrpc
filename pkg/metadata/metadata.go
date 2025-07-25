@@ -37,10 +37,12 @@ type ctxMD struct {
 type headerKey struct{}
 type metadataKey struct{}
 
+// NewContextWithIncomingHeader sets the incoming message header to the context.
 func NewContextWithIncomingHeader(ctx context.Context, head *Header) context.Context {
 	return context.WithValue(ctx, headerKey{}, head)
 }
 
+// IncomingHeader returns an incoming message header from the context (if any).
 func IncomingHeader(ctx context.Context) *Header {
 	head, ok := ctx.Value(headerKey{}).(*Header)
 	if !ok {
@@ -53,11 +55,33 @@ func IncomingHeader(ctx context.Context) *Header {
 	}
 }
 
+// NewContextWithOutgoingMetadata resets any existing outgoing metadata in the context to the one provided.
 func NewContextWithOutgoingMetadata(ctx context.Context, md Metadata) context.Context {
 	return context.WithValue(ctx, metadataKey{}, ctxMD{md: md})
 }
 
+// WithOutgoingMetadata adds outgoing metadata to the context.
+func WithOutgoingMetadata(ctx context.Context, md Metadata) context.Context {
+	if len(md) == 0 {
+		return ctx
+	}
+	m, ok := ctx.Value(metadataKey{}).(ctxMD)
+	if ok && m.md != nil {
+		m.md = maps.Clone(m.md)
+		for k, v := range md {
+			m.md[k] = v
+		}
+	} else {
+		m.md = md
+	}
+	return context.WithValue(ctx, metadataKey{}, m)
+}
+
+// AppendMetadataToOutgoingContext appends key-value pairs to the outgoing context.
 func AppendMetadataToOutgoingContext(ctx context.Context, kv ...string) context.Context {
+	if len(kv) == 0 {
+		return ctx
+	}
 	md, ok := ctx.Value(metadataKey{}).(ctxMD)
 	if !ok || md.md == nil {
 		md = ctxMD{md: Metadata{}}
@@ -69,6 +93,7 @@ func AppendMetadataToOutgoingContext(ctx context.Context, kv ...string) context.
 	return context.WithValue(ctx, metadataKey{}, ctxMD{md.md, added})
 }
 
+// OutgoingContextMetadata returns a copy of the outgoing metadata set on the context (if any).
 func OutgoingContextMetadata(ctx context.Context) Metadata {
 	md, ok := ctx.Value(metadataKey{}).(ctxMD)
 	if !ok {
