@@ -39,10 +39,10 @@ func (c *Config) getTracer() trace.Tracer {
 	)
 }
 
-func ClientOptions(c Config) []psrpc.ClientOption {
+func ClientOptions(c Config) psrpc.ClientOption {
 	c.defaults()
 	tracer := c.getTracer()
-	return []psrpc.ClientOption{
+	return psrpc.WithClientOptions(
 		psrpc.WithClientRPCInterceptors(func(info psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
 			return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (proto.Message, error) {
 				ctx, span := tracer.Start(ctx, "Sent."+info.Service+"."+info.Method,
@@ -62,13 +62,13 @@ func ClientOptions(c Config) []psrpc.ClientOption {
 				return resp, err
 			}
 		}),
-	}
+	)
 }
 
-func ServerOptions(c Config) []psrpc.ServerOption {
+func ServerOptions(c Config) psrpc.ServerOption {
 	c.defaults()
 	tracer := c.getTracer()
-	return []psrpc.ServerOption{
+	return psrpc.WithServerOptions(
 		psrpc.WithServerRPCInterceptors(func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (proto.Message, error) {
 			if h := metadata.IncomingHeader(ctx); h != nil {
 				ctx = c.TextMapPropagator.Extract(ctx, propagation.MapCarrier(h.Metadata))
@@ -86,7 +86,7 @@ func ServerOptions(c Config) []psrpc.ServerOption {
 
 			return resp, err
 		}),
-	}
+	)
 }
 
 func setSpanError(span trace.Span, err error) {
