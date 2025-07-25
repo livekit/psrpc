@@ -52,7 +52,7 @@ func ClientOptions(c Config) []psrpc.ClientOption {
 
 				m := make(map[string]string)
 				c.TextMapPropagator.Inject(ctx, propagation.MapCarrier(m))
-				ctx = metadata.NewContextWithOutgoingMetadata(ctx, m)
+				ctx = metadata.WithOutgoingMetadata(ctx, m)
 
 				span.AddEvent("Outbound message")
 				resp, err := next(ctx, req)
