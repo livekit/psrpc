@@ -103,7 +103,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	} else {
 		h.handler = func(ctx context.Context, req RequestType) (ResponseType, error) {
 			var response ResponseType
-			res, err := interceptor(ctx, req, i.RPCInfo, func(context.Context, proto.Message) (proto.Message, error) {
+			res, err := interceptor(ctx, req, i.RPCInfo, func(ctx context.Context, _ proto.Message) (proto.Message, error) {
 				return svcImpl(ctx, req)
 			})
 			if res != nil {
