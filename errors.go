@@ -84,6 +84,8 @@ func (e ErrorCode) ToHTTP() int {
 		return http.StatusServiceUnavailable
 	case Unauthenticated:
 		return http.StatusUnauthorized
+	case UnprocessableEntity:
+		return http.StatusUnprocessableEntity
 	default:
 		return http.StatusInternalServerError
 	}
@@ -303,6 +305,8 @@ const (
 	DataLoss ErrorCode = "data_loss"
 	// Similar to PermissionDenied, used when the caller is unidentified
 	Unauthenticated ErrorCode = "unauthenticated"
+	// Cannot consume the entity in the given format
+	UnprocessableEntity ErrorCode = "unprocessable_entity"
 )
 
 type psrpcError struct {
