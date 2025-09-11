@@ -376,6 +376,9 @@ func (t *psrpc) generateService(file *descriptor.FileDescriptorProto, service *d
 
 	t.sectionComment(servName + ` Server`)
 	t.generateServer(service)
+
+	t.sectionComment(servName + ` Unimplemented Server`)
+	t.generateUnimplementedServer(service)
 }
 
 func (t *psrpc) generateInterface(file *descriptor.FileDescriptorProto, service *descriptor.ServiceDescriptorProto, iface string) {
@@ -739,6 +742,30 @@ func (t *psrpc) generateServer(service *descriptor.ServiceDescriptorProto) {
 	t.P(`  s.rpc.Close(true)`)
 	t.P(`}`)
 	t.P()
+}
+
+func (t *psrpc) generateUnimplementedServer(service *descriptor.ServiceDescriptorProto) {
+	servName := fmt.Sprintf("Unimplemented%sServer", serviceNameCamelCased(service))
+	t.P(`type `, servName, ` struct{}`)
+	for _, method := range service.Method {
+		opts := t.getOptions(method)
+		methName := methodNameCamelCased(method)
+		inputType := t.goTypeName(method.GetInputType())
+		outputType := t.goTypeName(method.GetOutputType())
+
+		if opts.Stream {
+			t.P(`func (`, servName, `) `, methName, `(`, t.pkgs["psrpc"], `.ServerStream[*`, outputType, `, *`, inputType, `]) error { return psrpc.ErrUnimplemented }`)
+			if opts.Type == options.Routing_AFFINITY {
+				t.P(`func (`, servName, `) `, methName, `Affinity(context.Context) float32 { return -1 }`)
+			}
+		} else {
+			t.P(`func (`, servName, `) `, methName, `(`, t.pkgs["context"], `.Context, *`, inputType, `) (*`, outputType, `, error) { return nil, psrpc.ErrUnimplemented }`)
+			if opts.Type == options.Routing_AFFINITY {
+				t.P(`func (`, servName, `) `, methName, `Affinity(context.Context, *`, inputType, `) float32 { return -1 }`)
+			}
+		}
+		t.P()
+	}
 }
 
 func (t *psrpc) getOptions(method *descriptor.MethodDescriptorProto) *options.Options {
