@@ -32,6 +32,7 @@ var (
 	ErrRequestCanceled = NewErrorf(Canceled, "request canceled")
 	ErrRequestTimedOut = NewErrorf(DeadlineExceeded, "request timed out")
 	ErrNoResponse      = NewErrorf(Unavailable, "no response from servers")
+	ErrUnimplemented   = NewErrorf(Unimplemented, "method is not implemented")
 	ErrStreamEOF       = NewError(Unavailable, io.EOF)
 	ErrClientClosed    = NewErrorf(Canceled, "client is closed")
 	ErrServerClosed    = NewErrorf(Canceled, "server is closed")
