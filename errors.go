@@ -184,6 +184,10 @@ func (e ErrorCode) ToGRPC() codes.Code {
 		return codes.DataLoss
 	case Unauthenticated:
 		return codes.Unauthenticated
+	case UpstreamServerError:
+		return codes.Internal
+	case UpstreamClientError:
+		return codes.InvalidArgument
 	default:
 		return codes.Unknown
 	}
@@ -227,6 +231,10 @@ func (e ErrorCode) ToTwirp() twirp.ErrorCode {
 		return twirp.DataLoss
 	case Unauthenticated:
 		return twirp.Unauthenticated
+	case UpstreamServerError:
+		return twirp.Internal
+	case UpstreamClientError:
+		return twirp.InvalidArgument
 	default:
 		return twirp.Unknown
 	}
