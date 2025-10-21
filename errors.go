@@ -87,6 +87,10 @@ func (e ErrorCode) ToHTTP() int {
 		return http.StatusUnauthorized
 	case UnprocessableEntity:
 		return http.StatusUnprocessableEntity
+	case UpstreamServerError:
+		return http.StatusBadGateway
+	case UpstreamClientError:
+		return http.StatusFailedDependency
 	default:
 		return http.StatusInternalServerError
 	}
@@ -308,6 +312,10 @@ const (
 	Unauthenticated ErrorCode = "unauthenticated"
 	// Cannot consume the entity in the given format
 	UnprocessableEntity ErrorCode = "unprocessable_entity"
+	// Upstream server error
+	UpstreamServerError ErrorCode = "upstream_server_error"
+	// Upstread client error
+	UpstreamClientError ErrorCode = "upstream_client_error"
 )
 
 type psrpcError struct {
