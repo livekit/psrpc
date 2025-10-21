@@ -87,6 +87,10 @@ func (e ErrorCode) ToHTTP() int {
 		return http.StatusUnauthorized
 	case UnprocessableEntity:
 		return http.StatusUnprocessableEntity
+	case UpstreamServerError:
+		return http.StatusBadGateway
+	case UpstreamClientError:
+		return http.StatusFailedDependency
 	default:
 		return http.StatusInternalServerError
 	}
@@ -180,6 +184,10 @@ func (e ErrorCode) ToGRPC() codes.Code {
 		return codes.DataLoss
 	case Unauthenticated:
 		return codes.Unauthenticated
+	case UpstreamServerError:
+		return codes.Internal
+	case UpstreamClientError:
+		return codes.InvalidArgument
 	default:
 		return codes.Unknown
 	}
@@ -223,6 +231,10 @@ func (e ErrorCode) ToTwirp() twirp.ErrorCode {
 		return twirp.DataLoss
 	case Unauthenticated:
 		return twirp.Unauthenticated
+	case UpstreamServerError:
+		return twirp.Internal
+	case UpstreamClientError:
+		return twirp.InvalidArgument
 	default:
 		return twirp.Unknown
 	}
@@ -308,6 +320,10 @@ const (
 	Unauthenticated ErrorCode = "unauthenticated"
 	// Cannot consume the entity in the given format
 	UnprocessableEntity ErrorCode = "unprocessable_entity"
+	// Upstream server error
+	UpstreamServerError ErrorCode = "upstream_server_error"
+	// Upstread client error
+	UpstreamClientError ErrorCode = "upstream_client_error"
 )
 
 type psrpcError struct {
