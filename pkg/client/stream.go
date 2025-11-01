@@ -59,10 +59,11 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	claimChan := make(chan *internal.ClaimRequest, c.ChannelSize)
 	recvChan := make(chan *internal.Stream, c.ChannelSize)
+	closed := make(chan struct{})
 
 	c.mu.Lock()
 	c.claimRequests[requestID] = claimChan
-	c.streamChannels[streamID] = recvChan
+	c.streamChannels[streamID] = streamChannels{recvChan, closed}
 	c.mu.Unlock()
 
 	defer func() {
@@ -77,7 +78,7 @@ func OpenStream[SendType, RecvType proto.Message](
 		i,
 		streamID,
 		o.Timeout,
-		&clientStream{c: c, i: i},
+		&clientStream{c, i, closed},
 		getRequestInterceptors(c.StreamInterceptors, o.Interceptors),
 		make(chan RecvType, c.ChannelSize),
 		map[string]chan struct{}{requestID: ackChan},
@@ -153,9 +154,15 @@ func runClientStream[SendType, RecvType proto.Message](
 	}
 }
 
+type streamChannels struct {
+	recvChan chan *internal.Stream
+	closed   <-chan struct{}
+}
+
 type clientStream struct {
-	c *RPCClient
-	i *info.RequestInfo
+	c      *RPCClient
+	i      *info.RequestInfo
+	closed chan struct{}
 }
 
 func (s *clientStream) Send(ctx context.Context, msg *internal.Stream) (err error) {
@@ -169,4 +176,5 @@ func (s *clientStream) Close(streamID string) {
 	s.c.mu.Lock()
 	delete(s.c.streamChannels, streamID)
 	s.c.mu.Unlock()
+	close(s.closed)
 }

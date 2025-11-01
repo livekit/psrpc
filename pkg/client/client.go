@@ -32,10 +32,10 @@ type RPCClient struct {
 
 	bus bus.MessageBus
 
-	mu               sync.RWMutex
+	mu               sync.Mutex
 	claimRequests    map[string]chan *internal.ClaimRequest
 	responseChannels map[string]chan *internal.Response
-	streamChannels   map[string]chan *internal.Stream
+	streamChannels   map[string]streamChannels
 	closed           core.Fuse
 }
 
@@ -58,7 +58,7 @@ func NewRPCClient(
 		bus:               b,
 		claimRequests:     make(map[string]chan *internal.ClaimRequest),
 		responseChannels:  make(map[string]chan *internal.Response),
-		streamChannels:    make(map[string]chan *internal.Stream),
+		streamChannels:    make(map[string]streamChannels),
 	}
 	if c.ClientID != "" {
 		c.ID = c.ClientID
@@ -109,9 +109,9 @@ func NewRPCClient(
 					c.Close()
 					continue
 				}
-				c.mu.RLock()
+				c.mu.Lock()
 				claimChan, ok := c.claimRequests[claim.RequestId]
-				c.mu.RUnlock()
+				c.mu.Unlock()
 				if ok {
 					claimChan <- claim
 				}
@@ -121,9 +121,9 @@ func NewRPCClient(
 					c.Close()
 					continue
 				}
-				c.mu.RLock()
+				c.mu.Lock()
 				resChan, ok := c.responseChannels[res.RequestId]
-				c.mu.RUnlock()
+				c.mu.Unlock()
 				if ok {
 					resChan <- res
 				}
@@ -133,11 +133,14 @@ func NewRPCClient(
 					c.Close()
 					continue
 				}
-				c.mu.RLock()
-				streamChan, ok := c.streamChannels[msg.StreamId]
-				c.mu.RUnlock()
+				c.mu.Lock()
+				streamChans, ok := c.streamChannels[msg.StreamId]
+				c.mu.Unlock()
 				if ok {
-					streamChan <- msg
+					select {
+					case streamChans.recvChan <- msg:
+					case <-streamChans.closed:
+					}
 				}
 			}
 		}
