@@ -263,16 +263,13 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 		var subscribeErr, unsubscribeErr error
 		if len(subscribe) != 0 {
 			subscribeErr = r.ps.Subscribe(r.ctx, maps.Keys(subscribe)...)
-			logger.Error(subscribeErr, "RAJA adding subscriptions", "subscriptions", maps.Keys(subscribe)) // REMOVE
 		}
 		if len(unsubscribe) != 0 {
 			unsubscribeErr = r.ps.Unsubscribe(r.ctx, maps.Keys(unsubscribe)...)
-			logger.Error(unsubscribeErr, "RAJA removing subscriptions", "unsubscriptions", maps.Keys(unsubscribe)) // REMOVE
 		}
 
 		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
 			logger.Error(err, "redis subscription reconciliation failed")
-			logger.Error(err, " RAJA redis subscription reconciliation failed")
 			time.Sleep(reconcilerRetryInterval)
 		}
 
@@ -293,8 +290,6 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 	r.mu.Unlock()
 	return nil
 }
-
-func (r *redisReconcileSubscriptionsOp) flush() {}
 
 // ----------------------------------------------------
 
