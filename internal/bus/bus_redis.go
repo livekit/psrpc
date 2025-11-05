@@ -414,6 +414,15 @@ func (r *redisPublishQueue) worker() {
 		r.messages = nil
 		r.lock.Unlock()
 
+		// using a pipeline to handle redis servers with a high RTT
+		// (https://redis.io/docs/latest/develop/using-commands/pipelining/).
+		//
+		// This is doing oppotunistic batching + pipelining.
+		// When a message is published, this worker is signalled immediately and
+		// the message will be sent immediately. While the pipeline is executing,
+		// messages will get queued as the pipeline execution takes one round trip
+		// exchange with the server. The next round will batch all those queued
+		// messages. For small RTTs, this will send messages without any delay.
 		pipeline := r.rc.Pipeline()
 		for _, msg := range messages {
 			pipeline.Publish(r.ctx, msg.channel, msg.payload)
