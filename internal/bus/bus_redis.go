@@ -24,6 +24,7 @@ import (
 
 	"github.com/gammazero/deque"
 	"github.com/redis/go-redis/v9"
+	"github.com/zeebo/xxh3"
 	"go.uber.org/multierr"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
@@ -32,10 +33,13 @@ import (
 	"github.com/livekit/psrpc/internal/logger"
 )
 
-const lockExpiration = time.Second * 5
-const reconcilerRetryInterval = time.Second
-const minReadRetryInterval = time.Millisecond * 100
-const maxReadRetryInterval = time.Second
+const (
+	lockExpiration          = time.Second * 5
+	reconcilerRetryInterval = time.Second
+	minReadRetryInterval    = time.Millisecond * 100
+	maxReadRetryInterval    = time.Second
+	publishBuckets          = 17
+)
 
 type redisMessageBus struct {
 	rc  redis.UniversalClient
@@ -48,9 +52,10 @@ type redisMessageBus struct {
 
 	wakeup          chan struct{}
 	ops             *redisWriteOpQueue
-	publishOps      map[string]*redisWriteOpQueue
 	dirtyChannels   map[string]struct{}
 	currentChannels map[string]struct{}
+
+	publishQueues [publishBuckets]*redisPublishQueue
 }
 
 func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
@@ -64,9 +69,11 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 
 		wakeup:          make(chan struct{}, 1),
 		ops:             &redisWriteOpQueue{},
-		publishOps:      map[string]*redisWriteOpQueue{},
 		dirtyChannels:   map[string]struct{}{},
 		currentChannels: map[string]struct{}{},
+	}
+	for i := range len(r.publishQueues) {
+		r.publishQueues[i] = newRedisPublishQueue(r.ctx, r.rc)
 	}
 	go r.readWorker()
 	go r.writeWorker()
@@ -79,18 +86,8 @@ func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.
 		return err
 	}
 
-	r.mu.Lock()
-	ops, ok := r.publishOps[channel.Legacy]
-	if !ok {
-		ops = &redisWriteOpQueue{}
-		r.publishOps[channel.Legacy] = ops
-	}
-	ops.push(&redisPublishOp{r, channel.Legacy, b})
-	r.mu.Unlock()
-
-	if !ok {
-		r.enqueueWriteOp(&redisExecPublishOp{r, channel.Legacy, ops})
-	}
+	bucket := xxh3.HashString(channel.Legacy) % publishBuckets
+	r.publishQueues[bucket].Enqueue(channel.Legacy, b)
 	return nil
 }
 
@@ -202,6 +199,8 @@ func (r *redisMessageBus) writeWorker() {
 	}
 }
 
+// ----------------------------------------------
+
 type redisWriteOpQueue struct {
 	mu  sync.Mutex
 	ops deque.Deque[redisWriteOp]
@@ -232,41 +231,13 @@ func (q *redisWriteOpQueue) drain() {
 	q.mu.Unlock()
 }
 
+//-----------------------------------------------------
+
 type redisWriteOp interface {
 	run() error
 }
 
-type redisPublishOp struct {
-	*redisMessageBus
-	channel string
-	message []byte
-}
-
-func (r *redisPublishOp) run() error {
-	return r.rc.Publish(r.ctx, r.channel, r.message).Err()
-}
-
-type redisExecPublishOp struct {
-	*redisMessageBus
-	channel string
-	ops     *redisWriteOpQueue
-}
-
-func (r *redisExecPublishOp) run() error {
-	go r.exec()
-	return nil
-}
-
-func (r *redisExecPublishOp) exec() {
-	r.mu.Lock()
-	for !r.ops.empty() {
-		r.mu.Unlock()
-		r.ops.drain()
-		r.mu.Lock()
-	}
-	delete(r.publishOps, r.channel)
-	r.mu.Unlock()
-}
+// ----------------------------------------------------
 
 type redisReconcileSubscriptionsOp struct {
 	*redisMessageBus
@@ -292,13 +263,16 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 		var subscribeErr, unsubscribeErr error
 		if len(subscribe) != 0 {
 			subscribeErr = r.ps.Subscribe(r.ctx, maps.Keys(subscribe)...)
+			logger.Error(subscribeErr, "RAJA adding subscriptions", "subscriptions", maps.Keys(subscribe)) // REMOVE
 		}
 		if len(unsubscribe) != 0 {
 			unsubscribeErr = r.ps.Unsubscribe(r.ctx, maps.Keys(unsubscribe)...)
+			logger.Error(unsubscribeErr, "RAJA removing subscriptions", "unsubscriptions", maps.Keys(unsubscribe)) // REMOVE
 		}
 
 		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
 			logger.Error(err, "redis subscription reconciliation failed")
+			logger.Error(err, " RAJA redis subscription reconciliation failed")
 			time.Sleep(reconcilerRetryInterval)
 		}
 
@@ -320,6 +294,10 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 	return nil
 }
 
+func (r *redisReconcileSubscriptionsOp) flush() {}
+
+// ----------------------------------------------------
+
 type redisSubList struct {
 	subs []*redisSubscription
 	next int
@@ -338,6 +316,8 @@ func (r *redisSubList) dispatch(msg *redis.Message) {
 		sub.write(msg)
 	}
 }
+
+// ----------------------------------------------------
 
 type redisSubscription struct {
 	bus     *redisMessageBus
@@ -387,3 +367,67 @@ func (r *redisSubscription) Close() error {
 	close(r.msgChan)
 	return nil
 }
+
+// ----------------------------------------------------
+
+type redisPublishMessage struct {
+	channel string
+	payload []byte
+}
+
+type redisPublishQueue struct {
+	ctx context.Context
+	rc  redis.UniversalClient
+
+	lock     sync.Mutex
+	messages []redisPublishMessage
+	wakeup   chan struct{}
+}
+
+func newRedisPublishQueue(ctx context.Context, rc redis.UniversalClient) *redisPublishQueue {
+	r := &redisPublishQueue{
+		ctx:    ctx,
+		rc:     rc,
+		wakeup: make(chan struct{}, 1),
+	}
+
+	go r.worker()
+	return r
+}
+
+func (r *redisPublishQueue) Enqueue(channel string, payload []byte) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	r.messages = append(r.messages, redisPublishMessage{channel, payload})
+	select {
+	case r.wakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (r *redisPublishQueue) worker() {
+	for {
+		select {
+		case <-r.wakeup:
+		case <-r.ctx.Done():
+			return
+		}
+
+		r.lock.Lock()
+		messages := r.messages
+		r.messages = nil
+		r.lock.Unlock()
+
+		pipeline := r.rc.Pipeline()
+		for _, msg := range messages {
+			pipeline.Publish(r.ctx, msg.channel, msg.payload)
+		}
+		cmds, err := pipeline.Exec(r.ctx)
+		if err != nil {
+			logger.Error(err, "pipeline execution failed", "numCommands", len(cmds))
+		}
+	}
+}
+
+// ----------------------------------------------------
