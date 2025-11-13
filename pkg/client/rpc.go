@@ -79,6 +79,7 @@ func RequestSingle[ResponseType proto.Message](
 
 func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc.ClientRPCHandler {
 	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
+		fmt.Println("FF", len(opts))
 		o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
 		b, err := bus.SerializePayload(request)
