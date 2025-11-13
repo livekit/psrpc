@@ -69,6 +69,7 @@ func getRequestOpts(ctx context.Context, i *info.RequestInfo, options psrpc.Clie
 	}
 
 	for _, opt := range opts {
+		fmt.Println("O", o)
 		opt(o)
 	}
 
