@@ -55,7 +55,7 @@ func ClientOptions(c Config) psrpc.ClientOption {
 				ctx = metadata.WithOutgoingMetadata(ctx, m)
 
 				span.AddEvent("Outbound message")
-				resp, err := next(ctx, req)
+				resp, err := next(ctx, req, opts...)
 				span.AddEvent("Inbound message")
 				setSpanError(span, err)
 
