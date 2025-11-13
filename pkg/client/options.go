@@ -72,6 +72,8 @@ func getRequestOpts(ctx context.Context, i *info.RequestInfo, options psrpc.Clie
 		opt(o)
 	}
 
+	fmt.Println("getRequestOpts", *o)
+
 	return *o
 }
 

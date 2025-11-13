@@ -58,6 +58,8 @@ func RequestSingle[ResponseType proto.Message](
 		hook(ctx, request, i.RPCInfo)
 	}
 
+	fmt.Println("interceptor", opts)
+
 	reqInterceptors := getRequestInterceptors(
 		c.RpcInterceptors,
 		getRequestOpts(ctx, i, c.ClientOpts, opts...).Interceptors,
