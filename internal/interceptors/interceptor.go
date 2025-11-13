@@ -16,6 +16,7 @@ package interceptors
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -29,6 +30,7 @@ func ChainClientInterceptors[HandlerType any, InterceptorType ~func(psrpc.RPCInf
 	handler HandlerType,
 ) HandlerType {
 	for i := len(interceptors) - 1; i >= 0; i-- {
+		fmt.Println("interceptor")
 		handler = interceptors[i](requestInfo.RPCInfo, handler)
 	}
 	return handler
