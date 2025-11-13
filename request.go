@@ -15,6 +15,7 @@
 package psrpc
 
 import (
+	"fmt"
 	"time"
 
 	"golang.org/x/exp/slices"
@@ -44,6 +45,7 @@ type Claim struct {
 
 func WithRequestTimeout(timeout time.Duration) RequestOption {
 	return func(o *RequestOpts) {
+		fmt.Println("WithRequestTimeout", timeout)
 		o.Timeout = timeout
 	}
 }

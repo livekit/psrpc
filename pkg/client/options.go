@@ -45,6 +45,9 @@ func getRequestOpts(ctx context.Context, i *info.RequestInfo, options psrpc.Clie
 	o := &psrpc.RequestOpts{
 		Timeout: options.Timeout,
 	}
+
+	d, _ := ctx.Deadline()
+	fmt.Println("OPTS ctx", d, "o", o.Timeout)
 	if deadline, ok := ctx.Deadline(); ok {
 		if dt := time.Until(deadline); o.Timeout == 0 || o.Timeout > dt {
 			o.Timeout = dt

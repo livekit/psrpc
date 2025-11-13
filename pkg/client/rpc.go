@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -120,6 +121,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			return
 		}
 
+		fmt.Println("CTX Timeout", o.Timeout)
 		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 
