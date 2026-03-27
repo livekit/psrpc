@@ -103,10 +103,18 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 
 		attempt++
 
-		select {
-		case <-done:
-			return psrpc.ErrRequestCanceled
-		case <-time.After(waitTime):
+		if waitTime > 0 { // Avoid randomenss
+			select {
+			case <-done:
+				return psrpc.ErrRequestCanceled
+			case <-time.After(waitTime):
+			}
+		} else {
+			select {
+			case <-done:
+				return psrpc.ErrRequestCanceled
+			default:
+			}
 		}
 	}
 }
