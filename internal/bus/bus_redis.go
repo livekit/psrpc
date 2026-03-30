@@ -82,14 +82,14 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 	return r
 }
 
-func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
+func (r *redisMessageBus) Publish(ctx context.Context, channel Channel, msg proto.Message) error {
 	b, err := serialize(msg, "")
 	if err != nil {
 		return err
 	}
 
 	bucket := xxh3.HashString(channel.Legacy) % publishBuckets
-	return r.publishQueues[bucket].Enqueue(channel.Legacy, b)
+	return r.publishQueues[bucket].Enqueue(ctx, channel.Legacy, b)
 }
 
 func (r *redisMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
@@ -392,7 +392,7 @@ func newRedisPublishQueue(ctx context.Context, rc redis.UniversalClient) *redisP
 	return r
 }
 
-func (r *redisPublishQueue) Enqueue(channel string, payload []byte) error {
+func (r *redisPublishQueue) Enqueue(ctx context.Context, channel string, payload []byte) error {
 	result := make(chan error, 1)
 
 	r.lock.Lock()
@@ -404,7 +404,12 @@ func (r *redisPublishQueue) Enqueue(channel string, payload []byte) error {
 	default:
 	}
 
-	return <-result
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-result:
+		return err
+	}
 }
 
 func (r *redisPublishQueue) worker() {
