@@ -396,11 +396,7 @@ func (r *redisPublishQueue) Enqueue(channel string, payload []byte) error {
 	result := make(chan error, 1)
 
 	r.lock.Lock()
-	r.messages = append(r.messages, redisPublishMessage{
-		channel: channel,
-		payload: payload,
-		result:  result,
-	})
+	r.messages = append(r.messages, redisPublishMessage{channel, payload, result})
 	r.lock.Unlock()
 
 	select {
