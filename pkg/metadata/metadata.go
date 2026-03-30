@@ -67,9 +67,7 @@ func WithOutgoingMetadata(ctx context.Context, md Metadata) context.Context {
 	m, ok := ctx.Value(metadataKey{}).(ctxMD)
 	if ok && m.md != nil {
 		m.md = maps.Clone(m.md)
-		for k, v := range md {
-			m.md[k] = v
-		}
+		maps.Copy(m.md, md)
 	} else {
 		m.md = md
 	}
