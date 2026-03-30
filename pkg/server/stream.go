@@ -16,11 +16,12 @@ package server
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -265,7 +266,7 @@ func (h *streamHandler[RecvType, SendType]) close(force bool) {
 		h.draining.Store(true)
 
 		h.mu.Lock()
-		serverStreams := maps.Values(h.streams)
+		serverStreams := slices.Collect(maps.Values(h.streams))
 		h.mu.Unlock()
 
 		var wg sync.WaitGroup

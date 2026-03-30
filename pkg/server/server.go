@@ -17,10 +17,11 @@ package server
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/frostbyte73/core"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
@@ -163,7 +164,7 @@ func (s *RPCServer) Publish(ctx context.Context, rpc string, topic []string, msg
 func (s *RPCServer) Close(force bool) {
 	s.shutdown.Once(func() {
 		s.mu.RLock()
-		handlers := maps.Values(s.handlers)
+		handlers := slices.Collect(maps.Values(s.handlers))
 		s.mu.RUnlock()
 
 		var wg sync.WaitGroup

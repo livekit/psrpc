@@ -15,9 +15,8 @@
 package psrpc
 
 import (
+	"slices"
 	"time"
-
-	"golang.org/x/exp/slices"
 )
 
 type RequestOption func(*RequestOpts)

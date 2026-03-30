@@ -23,12 +23,12 @@ import (
 	"go/printer"
 	"go/token"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
-	"golang.org/x/exp/slices"
 	"golang.org/x/mod/semver"
 	"google.golang.org/protobuf/proto"
 	descriptor "google.golang.org/protobuf/types/descriptorpb"

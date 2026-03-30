@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 )
@@ -127,6 +128,13 @@ func TestRedisMessageBus(t *testing.T) {
 		require.False(t, ok)
 		_, ok = bus.RawRead(r2)
 		require.True(t, ok)
+	})
+
+	t.Run("publish with no subscribers returns no response", func(t *testing.T) {
+		b0 := srv.Connect(t)
+
+		err := b0.Publish(context.Background(), redisTestChannel("no-subscribers"), wrapperspb.String("test"))
+		require.ErrorIs(t, err, psrpc.ErrUnroutable)
 	})
 }
 

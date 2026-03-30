@@ -18,7 +18,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
+	"maps"
 	"math/rand"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,10 +29,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zeebo/xxh3"
 	"go.uber.org/multierr"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
 
+	psrpcerrors "github.com/livekit/psrpc/internal/errors"
 	"github.com/livekit/psrpc/internal/logger"
 )
 
@@ -87,8 +89,7 @@ func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.
 	}
 
 	bucket := xxh3.HashString(channel.Legacy) % publishBuckets
-	r.publishQueues[bucket].Enqueue(channel.Legacy, b)
-	return nil
+	return r.publishQueues[bucket].Enqueue(channel.Legacy, b)
 }
 
 func (r *redisMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
@@ -257,15 +258,15 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 				unsubscribe[c] = struct{}{}
 			}
 		}
-		maps.Clear(r.dirtyChannels)
+		clear(r.dirtyChannels)
 		r.mu.Unlock()
 
 		var subscribeErr, unsubscribeErr error
 		if len(subscribe) != 0 {
-			subscribeErr = r.ps.Subscribe(r.ctx, maps.Keys(subscribe)...)
+			subscribeErr = r.ps.Subscribe(r.ctx, slices.Collect(maps.Keys(subscribe))...)
 		}
 		if len(unsubscribe) != 0 {
-			unsubscribeErr = r.ps.Unsubscribe(r.ctx, maps.Keys(unsubscribe)...)
+			unsubscribeErr = r.ps.Unsubscribe(r.ctx, slices.Collect(maps.Keys(unsubscribe))...)
 		}
 
 		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
@@ -368,6 +369,7 @@ func (r *redisSubscription) Close() error {
 type redisPublishMessage struct {
 	channel string
 	payload []byte
+	result  chan error
 }
 
 type redisPublishQueue struct {
@@ -390,15 +392,23 @@ func newRedisPublishQueue(ctx context.Context, rc redis.UniversalClient) *redisP
 	return r
 }
 
-func (r *redisPublishQueue) Enqueue(channel string, payload []byte) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+func (r *redisPublishQueue) Enqueue(channel string, payload []byte) error {
+	result := make(chan error, 1)
 
-	r.messages = append(r.messages, redisPublishMessage{channel, payload})
+	r.lock.Lock()
+	r.messages = append(r.messages, redisPublishMessage{
+		channel: channel,
+		payload: payload,
+		result:  result,
+	})
+	r.lock.Unlock()
+
 	select {
 	case r.wakeup <- struct{}{}:
 	default:
 	}
+
+	return <-result
 }
 
 func (r *redisPublishQueue) worker() {
@@ -424,12 +434,25 @@ func (r *redisPublishQueue) worker() {
 		// exchange with the server. The next round will batch all those queued
 		// messages. For small RTTs, this will send messages without any delay.
 		pipeline := r.rc.Pipeline()
+		cmds := make([]*redis.IntCmd, 0, len(messages))
 		for _, msg := range messages {
-			pipeline.Publish(r.ctx, msg.channel, msg.payload)
+			cmds = append(cmds, pipeline.Publish(r.ctx, msg.channel, msg.payload))
 		}
-		cmds, err := pipeline.Exec(r.ctx)
-		if err != nil {
+		_, err := pipeline.Exec(r.ctx)
+		if err != nil && !errors.Is(err, redis.Nil) {
 			logger.Error(err, "pipeline execution failed", "numCommands", len(cmds))
+		}
+
+		for i, msg := range messages {
+			publishErr := err
+			if cmdErr := cmds[i].Err(); cmdErr != nil && !errors.Is(cmdErr, redis.Nil) {
+				publishErr = cmdErr
+			} else if cmds[i].Val() == 0 {
+				publishErr = psrpcerrors.ErrUnroutable
+			} else if errors.Is(publishErr, redis.Nil) {
+				publishErr = nil
+			}
+			msg.result <- publishErr
 		}
 	}
 }

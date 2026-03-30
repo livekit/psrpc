@@ -16,9 +16,8 @@ package metadata
 
 import (
 	"context"
+	"maps"
 	"time"
-
-	"golang.org/x/exp/maps"
 )
 
 type Metadata map[string]string
