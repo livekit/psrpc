@@ -15,11 +15,12 @@
 package bustest
 
 import (
+	"context"
 	"math/rand/v2"
 	"net"
 	"testing"
 
-	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v4"
 
 	"github.com/livekit/psrpc/internal/bus"
 )
@@ -34,7 +35,7 @@ type serverInfo struct {
 	Func ServerFunc
 }
 
-type ServerFunc func(t testing.TB, pool *dockertest.Pool) Server
+type ServerFunc func(t testing.TB, pool dockertest.Pool) Server
 
 func RegisterServer(name string, fnc ServerFunc) {
 	servers = append(servers, serverInfo{
@@ -43,8 +44,8 @@ func RegisterServer(name string, fnc ServerFunc) {
 	})
 }
 
-func waitTCPPort(t testing.TB, pool *dockertest.Pool, addr string) {
-	if err := pool.Retry(func() error {
+func waitTCPPort(t testing.TB, pool dockertest.Pool, addr string) {
+	if err := pool.Retry(context.Background(), 0, func() error {
 		conn, err := net.Dial("tcp", addr)
 		if err != nil {
 			t.Log(err)
@@ -57,12 +58,8 @@ func waitTCPPort(t testing.TB, pool *dockertest.Pool, addr string) {
 	}
 }
 
-func Docker(t testing.TB) *dockertest.Pool {
-	pool, err := dockertest.NewPool("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = pool.Client.Ping()
+func Docker(t testing.TB) dockertest.Pool {
+	pool, err := dockertest.NewPool(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

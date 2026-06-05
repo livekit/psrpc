@@ -1,12 +1,13 @@
 package bustest
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"testing"
 
 	"github.com/nats-io/nats.go"
-	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v4"
 
 	"github.com/livekit/psrpc/internal/bus"
 )
@@ -17,16 +18,17 @@ func init() {
 
 var natsLast = baseID
 
-func NewNATS(t testing.TB, pool *dockertest.Pool) Server {
-	c, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Name:       fmt.Sprintf("psrpc-nats-%d", atomic.AddUint32(&natsLast, 1)),
-		Repository: "nats", Tag: "latest",
-	})
+func NewNATS(t testing.TB, pool dockertest.Pool) Server {
+	ctx := context.Background()
+	c, err := pool.Run(ctx, "nats",
+		dockertest.WithTag("latest"),
+		dockertest.WithName(fmt.Sprintf("psrpc-nats-%d", atomic.AddUint32(&natsLast, 1))),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = pool.Purge(c)
+		_ = c.Close(context.Background())
 	})
 	addr := c.GetHostPort("4222/tcp")
 	waitTCPPort(t, pool, addr)
@@ -35,7 +37,7 @@ func NewNATS(t testing.TB, pool *dockertest.Pool) Server {
 
 	s := &natsServer{addr: "nats://" + addr}
 
-	err = pool.Retry(func() error {
+	err = pool.Retry(ctx, 0, func() error {
 		nc, err := s.connect()
 		if err != nil {
 			return err

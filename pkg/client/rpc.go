@@ -224,7 +224,7 @@ func selectServer(
 		case res := <-resChan:
 			// will only happen with malformed requests
 			if res.Error != "" {
-				resErr = psrpc.NewErrorf(psrpc.ErrorCode(res.Code), res.Error)
+				resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 			}
 		}
 	}

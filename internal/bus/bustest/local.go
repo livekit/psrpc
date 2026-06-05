@@ -3,13 +3,13 @@ package bustest
 import (
 	"testing"
 
-	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v4"
 
 	"github.com/livekit/psrpc/internal/bus"
 )
 
 func init() {
-	RegisterServer("Local", func(t testing.TB, pool *dockertest.Pool) Server {
+	RegisterServer("Local", func(t testing.TB, pool dockertest.Pool) Server {
 		return NewLocalBus()
 	})
 }
