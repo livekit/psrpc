@@ -273,7 +273,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Error = err.Error()
 			res.Code = string(psrpc.Unknown)
 		}
-	} else if response != nil {
+	} else if response.ProtoReflect().IsValid() {
 		b, err := bus.SerializePayload(response)
 		if err != nil {
 			res.Error = err.Error()
@@ -281,6 +281,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		} else {
 			res.RawResponse = b
 		}
+	} else if ir.Multi {
+		// ignore nil responses from multirpc methods
+		return nil
 	}
 
 	return s.bus.Publish(ctx, info.GetResponseChannel(s.Name, ir.ClientId), res)
