@@ -85,11 +85,16 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 
 		requestID := rand.NewRequestID()
 		now := time.Now()
+		// Clamp expiry to the caller's deadline so downstream hops don't outlive it.
+		expiry := now.Add(o.Timeout)
+		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
+			expiry = deadline
+		}
 		req := &internal.Request{
 			RequestId:  requestID,
 			ClientId:   c.ID,
 			SentAt:     now.UnixNano(),
-			Expiry:     now.Add(o.Timeout).UnixNano(),
+			Expiry:     expiry.UnixNano(),
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
