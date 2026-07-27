@@ -87,15 +87,13 @@ func WithServerOptions(opts ...ServerOption) ServerOption {
 type ClaimOutcome int
 
 const (
-	// ClaimGranted means this server won the claim and ran the handler.
+	// ClaimGranted: this server won the claim; the handler runs.
 	ClaimGranted ClaimOutcome = iota
-	// ClaimLostToPeer means another server won the claim. Expected on
-	// broadcast RPCs; on a queue RPC it means more than one member received
-	// the same request, which is worth knowing about.
+	// ClaimLostToPeer: another server won. Expected on broadcast RPCs; on a
+	// queue RPC it implies more than one member received the request.
 	ClaimLostToPeer
-	// ClaimAbandoned means this server bid and the client never answered.
-	// The client has already returned ErrNoResponse to its caller, so
-	// without this event the request leaves no trace anywhere.
+	// ClaimAbandoned: this server bid and the claim expired ungranted. The
+	// handler does not run, so the request is safe to retry.
 	ClaimAbandoned
 )
 
@@ -112,28 +110,25 @@ func (o ClaimOutcome) String() string {
 	}
 }
 
-// RequestObserver receives server-side request lifecycle events that occur
-// outside the interceptor chain. Interceptors wrap only the handler, so they
-// cannot observe a request that is dropped before dispatch or whose claim is
-// never granted -- precisely the cases where the client reports a failure and
-// the server records nothing.
+// RequestObserver receives server-side lifecycle events for requests that
+// never reach the handler, and so are invisible to ServerRPCInterceptor.
 //
-// Implementations must be non-blocking; they are called from the request read
-// loop and from claim negotiation.
+// Implementations must not block: OnRequestReceived and OnRequestExpired are
+// called on the request read loop, OnClaim on the claiming goroutine.
 type RequestObserver interface {
 	// OnRequestReceived fires once per request read off the bus, before the
 	// expiry check and before dispatch.
 	OnRequestReceived(info RPCInfo)
-	// OnRequestExpired fires when a request is discarded because it arrived
-	// after its expiry. The handler is not invoked.
+	// OnRequestExpired fires when a request is read after its expiry. The
+	// handler is not invoked; lateBy is the interval past expiry.
 	OnRequestExpired(info RPCInfo, lateBy time.Duration)
 	// OnClaim fires once the claim negotiation settles, with the time spent
 	// waiting for the client's decision.
 	OnClaim(info RPCInfo, outcome ClaimOutcome, wait time.Duration)
 }
 
-// WithServerObserver installs a RequestObserver for lifecycle events that the
-// interceptor chain cannot see.
+// WithServerObserver installs a RequestObserver. Nil is the default and
+// disables all lifecycle events.
 func WithServerObserver(observer RequestObserver) ServerOption {
 	return func(o *ServerOpts) {
 		o.RequestObserver = observer

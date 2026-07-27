@@ -140,8 +140,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 						}
 					}()
 				} else if o := s.RequestObserver; o != nil {
-					// Arrived past its expiry, so the handler is not invoked. Observed because
-					// a late drop is otherwise indistinguishable from a request that never arrived.
 					o.OnRequestExpired(h.i.RPCInfo, time.Since(time.Unix(0, ir.Expiry)))
 				}
 
@@ -235,7 +233,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	if err != nil {
 		return false, err
 	}
-	// We have bid; from here the outcome is the client's decision.
+	// Measured from bid publication, so wait is the client's decision latency.
 	claimedAt := time.Now()
 	observeClaim := func(outcome psrpc.ClaimOutcome) {
 		if o := s.RequestObserver; o != nil {
@@ -257,9 +255,8 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		}
 
 	case <-timeout.C:
-		// The client stopped waiting for a bid before ours was accepted. It has
-		// already returned ErrNoResponse upstream; this is the only record that
-		// a server did receive the request and did offer to serve it.
+		// Timer is set to request expiry, so this fires only after the client can
+		// no longer grant the claim.
 		observeClaim(psrpc.ClaimAbandoned)
 		return false, nil
 	}

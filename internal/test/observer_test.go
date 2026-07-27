@@ -65,8 +65,6 @@ func (o *recordingObserver) snapshot() (received, expired int, claims []psrpc.Cl
 	return o.received, o.expired, append([]psrpc.ClaimOutcome(nil), o.claims...)
 }
 
-// TestRequestObserverClaimGranted is the happy path: one request in, one claim
-// granted out.
 func TestRequestObserverClaimGranted(t *testing.T) {
 	obs := &recordingObserver{}
 	rpc := "observed_ok"
@@ -95,14 +93,8 @@ func TestRequestObserverClaimGranted(t *testing.T) {
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
 }
 
-// TestRequestObserverClaimAbandoned reproduces the failure mode that motivated
-// this observer: the client's selection window closes before the server's bid
-// is accepted. The client returns ErrNoResponse, and before this change the
-// server recorded nothing at all -- the request existed in no log, metric or
-// trace on either side.
-//
-// A slow affinity function delays the bid past the client's selection timeout,
-// which is the deterministic equivalent of a bid that was late or lost.
+// Slow affinity delays the bid past WithClientSelectTimeout, so the claim
+// expires ungranted while the request itself was delivered.
 func TestRequestObserverClaimAbandoned(t *testing.T) {
 	obs := &recordingObserver{}
 	rpc := "observed_abandoned"
@@ -136,20 +128,18 @@ func TestRequestObserverClaimAbandoned(t *testing.T) {
 		&internal.Request{}, psrpc.WithRequestTimeout(300*time.Millisecond))
 	require.ErrorIs(t, err, psrpc.ErrNoResponse, "client must give up before the bid lands")
 
-	// Wait for the server to finish negotiating: it publishes its bid, then
-	// waits for a ClaimResponse that will never arrive, until request expiry.
+	// Claim settles at request expiry, after the client has already given up.
 	require.Eventually(t, func() bool {
 		_, _, claims := obs.snapshot()
 		return len(claims) == 1
 	}, 2*time.Second, 10*time.Millisecond, "claim outcome must be observed")
 
 	received, expired, claims := obs.snapshot()
-	require.Equal(t, 1, received, "the request WAS delivered -- this is what distinguishes a lost bid from a lost request")
+	require.Equal(t, 1, received, "request was delivered")
 	require.Equal(t, 0, expired)
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimAbandoned}, claims)
 
-	// The exactly-once guarantee that makes retrying ErrNoResponse safe: the
-	// claim was never granted, so the handler must not have run.
+	// Claim never granted => handler must not run.
 	select {
 	case <-handlerRan:
 		t.Fatal("handler ran despite the claim never being granted")
@@ -157,8 +147,7 @@ func TestRequestObserverClaimAbandoned(t *testing.T) {
 	}
 }
 
-// noopMetrics satisfies middleware.MetricsObserver so these tests can exercise
-// WithServerMetrics without depending on a published implementation.
+// noopMetrics is a MetricsObserver that records nothing.
 type noopMetrics struct{}
 
 func (noopMetrics) OnUnaryRequest(middleware.MetricRole, psrpc.RPCInfo, time.Duration, error, int, int) {
@@ -170,16 +159,11 @@ func (noopMetrics) OnStreamRecv(middleware.MetricRole, psrpc.RPCInfo, error, int
 func (noopMetrics) OnStreamOpen(middleware.MetricRole, psrpc.RPCInfo)                            {}
 func (noopMetrics) OnStreamClose(middleware.MetricRole, psrpc.RPCInfo)                           {}
 
-// metricsAndRequestObserver satisfies both MetricsObserver and RequestObserver,
-// which is how a caller opts in to lifecycle events without a second option.
 type metricsAndRequestObserver struct {
 	*recordingObserver
 	noopMetrics
 }
 
-// TestWithServerMetricsWiresRequestObserver asserts that an observer passed to
-// WithServerMetrics also receives the lifecycle events when it implements
-// RequestObserver, so existing callers need no extra wiring.
 func TestWithServerMetricsWiresRequestObserver(t *testing.T) {
 	rec := &recordingObserver{}
 	obs := metricsAndRequestObserver{recordingObserver: rec}
@@ -209,8 +193,6 @@ func TestWithServerMetricsWiresRequestObserver(t *testing.T) {
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
 }
 
-// TestWithServerMetricsPlainObserver asserts a metrics-only observer is still
-// accepted, i.e. RequestObserver is genuinely optional.
 func TestWithServerMetricsPlainObserver(t *testing.T) {
 	rpc := "metrics_only"
 	b := bus.NewLocalMessageBus()

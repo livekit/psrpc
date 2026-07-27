@@ -65,10 +65,8 @@ func WithServerMetrics(observer MetricsObserver) psrpc.ServerOption {
 		psrpc.WithServerRPCInterceptors(newServerRPCMetricsInterceptor(observer)),
 		psrpc.WithServerStreamInterceptors(newStreamMetricsInterceptor(observer, ServerRole)),
 	}
-	// Request delivery, pre-dispatch expiry and claim settlement happen outside
-	// the interceptor chain, so an observer that reports them has to be reachable
-	// from the server itself. Wire it here so callers already supplying a metrics
-	// observer get those events without a second option.
+	// RequestObserver is optional on MetricsObserver: implementing it opts into
+	// lifecycle events without a separate WithServerObserver call.
 	if o, ok := observer.(psrpc.RequestObserver); ok {
 		opts = append(opts, psrpc.WithServerObserver(o))
 	}
