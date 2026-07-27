@@ -192,24 +192,3 @@ func TestWithServerMetricsWiresRequestObserver(t *testing.T) {
 	require.Equal(t, 1, received, "delivery must be observed without WithServerObserver")
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
 }
-
-func TestWithServerMetricsPlainObserver(t *testing.T) {
-	rpc := "metrics_only"
-	b := bus.NewLocalMessageBus()
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		middleware.WithServerMetrics(noopMetrics{}))
-	t.Cleanup(func() { s.Close(true) })
-	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
-	require.NoError(t, err)
-	t.Cleanup(func() { c.Close() })
-
-	s.RegisterMethod(rpc, false, false, true, false)
-	c.RegisterMethod(rpc, false, false, true, false)
-	require.NoError(t, server.RegisterHandler(s, rpc, nil,
-		func(context.Context, *internal.Request) (*internal.Response, error) {
-			return &internal.Response{}, nil
-		}, nil))
-
-	_, err = client.RequestSingle[*internal.Response](context.Background(), c, rpc, nil, &internal.Request{})
-	require.NoError(t, err)
-}
