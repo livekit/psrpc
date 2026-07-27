@@ -130,12 +130,19 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 				if ir == nil {
 					continue
 				}
+				if o := s.RequestObserver; o != nil {
+					o.OnRequestReceived(h.i.RPCInfo)
+				}
 				if time.Now().UnixNano() < ir.Expiry {
 					go func() {
 						if err := h.handleRequest(s, ir); err != nil {
 							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
 						}
 					}()
+				} else if o := s.RequestObserver; o != nil {
+					// Arrived past its expiry, so the handler is not invoked. Observed because
+					// a late drop is otherwise indistinguishable from a request that never arrived.
+					o.OnRequestExpired(h.i.RPCInfo, time.Since(time.Unix(0, ir.Expiry)))
 				}
 
 			case claim := <-claims:
@@ -228,6 +235,13 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	if err != nil {
 		return false, err
 	}
+	// We have bid; from here the outcome is the client's decision.
+	claimedAt := time.Now()
+	observeClaim := func(outcome psrpc.ClaimOutcome) {
+		if o := s.RequestObserver; o != nil {
+			o.OnClaim(h.i.RPCInfo, outcome, time.Since(claimedAt))
+		}
+	}
 
 	timeout := time.NewTimer(time.Duration(ir.Expiry - time.Now().UnixNano()))
 	defer timeout.Stop()
@@ -235,12 +249,18 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	select {
 	case claim := <-claimResponseChan:
 		if claim.ServerId == s.ID {
+			observeClaim(psrpc.ClaimGranted)
 			return true, nil
 		} else {
+			observeClaim(psrpc.ClaimLostToPeer)
 			return false, nil
 		}
 
 	case <-timeout.C:
+		// The client stopped waiting for a bid before ours was accepted. It has
+		// already returned ErrNoResponse upstream; this is the only record that
+		// a server did receive the request and did offer to serve it.
+		observeClaim(psrpc.ClaimAbandoned)
 		return false, nil
 	}
 }
