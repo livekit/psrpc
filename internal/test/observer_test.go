@@ -79,7 +79,7 @@ func TestRequestObserverClaimGranted(t *testing.T) {
 
 	s.RegisterMethod(rpc, false, false, true, false)
 	c.RegisterMethod(rpc, false, false, true, false)
-	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+	require.NoError(t, server.RegisterHandler(s, rpc, nil,
 		func(context.Context, *internal.Request) (*internal.Response, error) {
 			return &internal.Response{}, nil
 		}, nil))
@@ -113,7 +113,7 @@ func TestRequestObserverClaimAbandoned(t *testing.T) {
 	c.RegisterMethod(rpc, true, false, true, false)
 
 	handlerRan := make(chan struct{}, 1)
-	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+	require.NoError(t, server.RegisterHandler(s, rpc, nil,
 		func(context.Context, *internal.Request) (*internal.Response, error) {
 			handlerRan <- struct{}{}
 			return &internal.Response{}, nil
@@ -180,7 +180,7 @@ func TestWithServerMetricsWiresRequestObserver(t *testing.T) {
 
 	s.RegisterMethod(rpc, false, false, true, false)
 	c.RegisterMethod(rpc, false, false, true, false)
-	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+	require.NoError(t, server.RegisterHandler(s, rpc, nil,
 		func(context.Context, *internal.Request) (*internal.Response, error) {
 			return &internal.Response{}, nil
 		}, nil))
@@ -205,7 +205,7 @@ func TestWithServerMetricsPlainObserver(t *testing.T) {
 
 	s.RegisterMethod(rpc, false, false, true, false)
 	c.RegisterMethod(rpc, false, false, true, false)
-	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+	require.NoError(t, server.RegisterHandler(s, rpc, nil,
 		func(context.Context, *internal.Request) (*internal.Response, error) {
 			return &internal.Response{}, nil
 		}, nil))
