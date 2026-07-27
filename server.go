@@ -92,9 +92,9 @@ const (
 	// ClaimLostToPeer: another server won. Expected on broadcast RPCs; on a
 	// queue RPC it implies more than one member received the request.
 	ClaimLostToPeer
-	// ClaimAbandoned: this server bid and the claim expired ungranted. The
+	// ClaimTimedOut: this server bid and the claim expired ungranted. The
 	// handler does not run, so the request is safe to retry.
-	ClaimAbandoned
+	ClaimTimedOut
 )
 
 func (o ClaimOutcome) String() string {
@@ -103,8 +103,8 @@ func (o ClaimOutcome) String() string {
 		return "granted"
 	case ClaimLostToPeer:
 		return "lost_to_peer"
-	case ClaimAbandoned:
-		return "abandoned"
+	case ClaimTimedOut:
+		return "timed_out"
 	default:
 		return "invalid"
 	}

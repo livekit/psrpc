@@ -57,7 +57,7 @@ func (o *recordingObserver) snapshot() (received int, claims []psrpc.ClaimOutcom
 	return o.received, append([]psrpc.ClaimOutcome(nil), o.claims...)
 }
 
-// The abandoned leg relies on a slow affinity function to delay the bid past
+// The timed-out leg relies on a slow affinity function to delay the bid past
 // WithClientSelectTimeout, so the claim expires ungranted while the request
 // itself was delivered.
 func TestRequestObserver(t *testing.T) {
@@ -72,11 +72,11 @@ func TestRequestObserver(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { c.Close() })
 
-	const granted, abandoned = "observed_granted", "observed_abandoned"
-	for _, rpc := range []string{granted, abandoned} {
-		// affinityEnabled is set for abandoned only, so its affinity function
+	const granted, timedOut = "observed_granted", "observed_timed_out"
+	for _, rpc := range []string{granted, timedOut} {
+		// affinityEnabled is set for the timed-out RPC only, so its affinity function
 		// runs before the bid.
-		affinity := rpc == abandoned
+		affinity := rpc == timedOut
 		s.RegisterMethod(rpc, affinity, false, true, false)
 		c.RegisterMethod(rpc, affinity, false, true, false)
 	}
@@ -87,7 +87,7 @@ func TestRequestObserver(t *testing.T) {
 		}, nil))
 
 	handlerRan := make(chan struct{}, 1)
-	require.NoError(t, server.RegisterHandler(s, abandoned, nil,
+	require.NoError(t, server.RegisterHandler(s, timedOut, nil,
 		func(context.Context, *internal.Request) (*internal.Response, error) {
 			handlerRan <- struct{}{}
 			return &internal.Response{}, nil
@@ -101,11 +101,11 @@ func TestRequestObserver(t *testing.T) {
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, granted, nil, &internal.Request{})
 	require.NoError(t, err)
 
-	_, err = client.RequestSingle[*internal.Response](context.Background(), c, abandoned, nil,
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, timedOut, nil,
 		&internal.Request{}, psrpc.WithRequestTimeout(300*time.Millisecond))
 	require.ErrorIs(t, err, psrpc.ErrNoResponse, "client must give up before the bid lands")
 
-	// The abandoned claim settles at request expiry, after the client has
+	// The timed-out claim settles at request expiry, after the client has
 	// already given up.
 	require.Eventually(t, func() bool {
 		_, claims := obs.snapshot()
@@ -114,7 +114,7 @@ func TestRequestObserver(t *testing.T) {
 
 	received, claims := obs.snapshot()
 	require.Equal(t, 2, received, "both requests were delivered")
-	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted, psrpc.ClaimAbandoned}, claims)
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted, psrpc.ClaimTimedOut}, claims)
 
 	// Claim never granted => handler must not run.
 	select {

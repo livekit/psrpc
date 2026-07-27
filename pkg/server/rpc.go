@@ -257,7 +257,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	case <-timeout.C:
 		// Timer is set to request expiry, so this fires only after the client can
 		// no longer grant the claim.
-		observeClaim(psrpc.ClaimAbandoned)
+		observeClaim(psrpc.ClaimTimedOut)
 		return false, nil
 	}
 }
