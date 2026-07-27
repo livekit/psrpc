@@ -27,6 +27,7 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/middleware"
 	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
 )
@@ -154,6 +155,81 @@ func TestRequestObserverClaimAbandoned(t *testing.T) {
 		t.Fatal("handler ran despite the claim never being granted")
 	default:
 	}
+}
+
+// noopMetrics satisfies middleware.MetricsObserver so these tests can exercise
+// WithServerMetrics without depending on a published implementation.
+type noopMetrics struct{}
+
+func (noopMetrics) OnUnaryRequest(middleware.MetricRole, psrpc.RPCInfo, time.Duration, error, int, int) {
+}
+func (noopMetrics) OnMultiRequest(middleware.MetricRole, psrpc.RPCInfo, time.Duration, int, int, int, int) {
+}
+func (noopMetrics) OnStreamSend(middleware.MetricRole, psrpc.RPCInfo, time.Duration, error, int) {}
+func (noopMetrics) OnStreamRecv(middleware.MetricRole, psrpc.RPCInfo, error, int)                {}
+func (noopMetrics) OnStreamOpen(middleware.MetricRole, psrpc.RPCInfo)                            {}
+func (noopMetrics) OnStreamClose(middleware.MetricRole, psrpc.RPCInfo)                           {}
+
+// metricsAndRequestObserver satisfies both MetricsObserver and RequestObserver,
+// which is how a caller opts in to lifecycle events without a second option.
+type metricsAndRequestObserver struct {
+	*recordingObserver
+	noopMetrics
+}
+
+// TestWithServerMetricsWiresRequestObserver asserts that an observer passed to
+// WithServerMetrics also receives the lifecycle events when it implements
+// RequestObserver, so existing callers need no extra wiring.
+func TestWithServerMetricsWiresRequestObserver(t *testing.T) {
+	rec := &recordingObserver{}
+	obs := metricsAndRequestObserver{recordingObserver: rec}
+	rpc := "observed_via_metrics"
+	b := bus.NewLocalMessageBus()
+
+	// Note: WithServerMetrics only -- no WithServerObserver.
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		middleware.WithServerMetrics(obs))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod(rpc, false, false, true, false)
+	c.RegisterMethod(rpc, false, false, true, false)
+	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, rpc, nil, &internal.Request{})
+	require.NoError(t, err)
+
+	received, _, claims := rec.snapshot()
+	require.Equal(t, 1, received, "delivery must be observed without WithServerObserver")
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+}
+
+// TestWithServerMetricsPlainObserver asserts a metrics-only observer is still
+// accepted, i.e. RequestObserver is genuinely optional.
+func TestWithServerMetricsPlainObserver(t *testing.T) {
+	rpc := "metrics_only"
+	b := bus.NewLocalMessageBus()
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		middleware.WithServerMetrics(noopMetrics{}))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod(rpc, false, false, true, false)
+	c.RegisterMethod(rpc, false, false, true, false)
+	require.NoError(t, server.RegisterHandler[*internal.Request, *internal.Response](s, rpc, nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, rpc, nil, &internal.Request{})
+	require.NoError(t, err)
 }
 
 func TestClaimOutcomeString(t *testing.T) {
