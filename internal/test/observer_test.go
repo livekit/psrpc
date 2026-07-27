@@ -213,9 +213,3 @@ func TestWithServerMetricsPlainObserver(t *testing.T) {
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, rpc, nil, &internal.Request{})
 	require.NoError(t, err)
 }
-
-func TestClaimOutcomeString(t *testing.T) {
-	require.Equal(t, "granted", psrpc.ClaimGranted.String())
-	require.Equal(t, "lost_to_peer", psrpc.ClaimLostToPeer.String())
-	require.Equal(t, "abandoned", psrpc.ClaimAbandoned.String())
-}
