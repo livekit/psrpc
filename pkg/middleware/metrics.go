@@ -61,16 +61,10 @@ func WithClientMetrics(observer MetricsObserver) psrpc.ClientOption {
 }
 
 func WithServerMetrics(observer MetricsObserver) psrpc.ServerOption {
-	opts := []psrpc.ServerOption{
+	return psrpc.WithServerOptions(
 		psrpc.WithServerRPCInterceptors(newServerRPCMetricsInterceptor(observer)),
 		psrpc.WithServerStreamInterceptors(newStreamMetricsInterceptor(observer, ServerRole)),
-	}
-	// RequestObserver is optional on MetricsObserver: implementing it opts into
-	// lifecycle events without a separate WithServerObserver call.
-	if o, ok := observer.(psrpc.RequestObserver); ok {
-		opts = append(opts, psrpc.WithServerObserver(o))
-	}
-	return psrpc.WithServerOptions(opts...)
+	)
 }
 
 func newClientRPCMetricsInterceptor(observer MetricsObserver) psrpc.ClientRPCInterceptor {
