@@ -133,13 +133,20 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if i.RequireClaim {
 			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
 
+			// Selection must leave the response leg at least one selection window of the
+			// budget. A claim accepted with no time left to answer yields
+			// ErrRequestTimedOut, which — unlike ErrNoResponse — the caller cannot retry,
+			// because a server was authorized to run the handler. Spending the budget on
+			// retries would convert a safe failure into an unsafe one.
+			reserved := 2 * o.SelectionOpts.AffinityTimeout
+
 			// Republishing is exactly-once-preserving only while no claim has been
 			// accepted: no ClaimResponse has been sent, so no server has been authorized
 			// to run the handler and the request cannot have taken effect anywhere.
 			// ErrNoResponse is the only error that carries that guarantee — every other
 			// selection outcome means a claim was read.
 			for attempt := 1; attempt < o.SelectionOpts.MaxAttempts &&
-				errors.Is(err, psrpc.ErrNoResponse) && ctx.Err() == nil; attempt++ {
+				errors.Is(err, psrpc.ErrNoResponse) && time.Until(expiry) > reserved; attempt++ {
 
 				// The request id is unchanged so a claim from an earlier attempt still
 				// resolves, and the deadline is unchanged so retries cannot extend it.

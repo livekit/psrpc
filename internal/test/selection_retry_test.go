@@ -123,6 +123,17 @@ func dropAllRequests(msg proto.Message) (time.Duration, bool) {
 	return 0, ok
 }
 
+// countAndDropRequests drops every request, recording how many were published.
+func countAndDropRequests(published *int32) func(proto.Message) (time.Duration, bool) {
+	return func(msg proto.Message) (time.Duration, bool) {
+		if _, ok := msg.(*internal.Request); ok {
+			atomic.AddInt32(published, 1)
+			return 0, true
+		}
+		return 0, false
+	}
+}
+
 func TestSelectionRetry(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
 		testSelectionRetry(t, newBus)
@@ -160,12 +171,19 @@ func testSelectionRetry(t *testing.T, newBus func(t testing.TB) bus.MessageBus) 
 	// The server that bid late receives the republished request as well, and must run
 	// the handler exactly once across both deliveries.
 	t.Run("LateBidRunsHandlerExactlyOnce", func(t *testing.T) {
-		var bids int32
+		// Sampled when the caller accepts, not after the call returns: once the handler
+		// has run its claim entry is released, so a request still in flight may bid
+		// afterwards. That straggler is inert — no accept can follow it — and counting it
+		// would make the assertion racy.
+		var bids, bidsAtAccept int32
 		intercept := func(msg proto.Message) (time.Duration, bool) {
-			if _, ok := msg.(*internal.ClaimRequest); ok {
+			switch msg.(type) {
+			case *internal.ClaimRequest:
 				if atomic.AddInt32(&bids, 1) == 1 {
 					return retrySelectTimeout * 2, false
 				}
+			case *internal.ClaimResponse:
+				atomic.StoreInt32(&bidsAtAccept, atomic.LoadInt32(&bids))
 			}
 			return 0, false
 		}
@@ -182,8 +200,41 @@ func testSelectionRetry(t *testing.T, newBus func(t testing.TB) bus.MessageBus) 
 		require.NoError(t, err)
 		require.Equal(t, requestID, res.RequestId)
 		require.Equal(t, int32(1), atomic.LoadInt32(calls))
-		require.Equal(t, int32(1), atomic.LoadInt32(&bids),
-			"a server must bid at most once per request id, however often the request is redelivered")
+		require.Equal(t, int32(1), atomic.LoadInt32(&bidsAtAccept),
+			"a server must bid at most once per outstanding request id, however often the request is redelivered")
+	})
+
+	// Retries must not spend the budget the response leg needs. A claim accepted with
+	// no time left to answer fails with ErrRequestTimedOut, which the caller cannot
+	// safely retry, so a budget too small to hold another selection window plus a
+	// response is not retried at all.
+	t.Run("NoRetryWithoutBudgetForResponse", func(t *testing.T) {
+		var published int32
+		c, rpc, calls := newRetryFixture(t, newBus(t), countAndDropRequests(&published),
+			psrpc.WithClientSelectionAttempts(5),
+			psrpc.WithClientTimeout(retrySelectTimeout+retrySelectTimeout/2))
+
+		_, err := client.RequestSingle[*internal.Response](
+			context.Background(), c, rpc, nil, &internal.Request{RequestId: rand.NewRequestID()},
+		)
+		require.ErrorIs(t, err, psrpc.ErrNoResponse)
+		require.Equal(t, int32(1), atomic.LoadInt32(&published),
+			"a budget that cannot hold another selection window must not be retried")
+		require.Equal(t, int32(0), atomic.LoadInt32(calls))
+	})
+
+	// The reserve must not be so large that a generous budget stops retrying.
+	t.Run("AllAttemptsUsedWithAmpleBudget", func(t *testing.T) {
+		var published int32
+		c, rpc, calls := newRetryFixture(t, newBus(t), countAndDropRequests(&published),
+			psrpc.WithClientSelectionAttempts(5))
+
+		_, err := client.RequestSingle[*internal.Response](
+			context.Background(), c, rpc, nil, &internal.Request{RequestId: rand.NewRequestID()},
+		)
+		require.ErrorIs(t, err, psrpc.ErrNoResponse)
+		require.Equal(t, int32(5), atomic.LoadInt32(&published))
+		require.Equal(t, int32(0), atomic.LoadInt32(calls))
 	})
 
 	// Retries are bounded by the caller's deadline, not by the attempt count, so a
