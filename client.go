@@ -33,6 +33,7 @@ type ClientOpts struct {
 	ClientID             string
 	Timeout              time.Duration
 	SelectionTimeout     time.Duration
+	SelectionAttempts    int
 	ChannelSize          int
 	EnableStreams        bool
 	RequestHooks         []ClientRequestHook
@@ -57,6 +58,16 @@ func WithClientTimeout(timeout time.Duration) ClientOption {
 func WithClientSelectTimeout(timeout time.Duration) ClientOption {
 	return func(o *ClientOpts) {
 		o.SelectionTimeout = timeout
+	}
+}
+
+// WithClientSelectionAttempts bounds how many times a request is published while
+// no claim has been received. Only requests that require a claim are republished:
+// without the claim handshake there is no evidence that an unanswered request did
+// not reach a handler.
+func WithClientSelectionAttempts(attempts int) ClientOption {
+	return func(o *ClientOpts) {
+		o.SelectionAttempts = attempts
 	}
 }
 

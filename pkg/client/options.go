@@ -57,11 +57,13 @@ func getRequestOpts(ctx context.Context, i *info.RequestInfo, options psrpc.Clie
 		o.SelectionOpts = psrpc.SelectionOpts{
 			AffinityTimeout:     options.SelectionTimeout,
 			ShortCircuitTimeout: psrpc.DefaultAffinityShortCircuit,
+			MaxAttempts:         options.SelectionAttempts,
 		}
 	} else {
 		o.SelectionOpts = psrpc.SelectionOpts{
 			AffinityTimeout:      options.SelectionTimeout,
 			AcceptFirstAvailable: true,
+			MaxAttempts:          options.SelectionAttempts,
 		}
 	}
 

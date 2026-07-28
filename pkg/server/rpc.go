@@ -210,7 +210,14 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	claimResponseChan := make(chan *internal.ClaimResponse, 1)
 
+	// At most one claim attempt per request id per server. A republished request that
+	// lands on a server already bidding for it must not replace that bid's channel, or
+	// the accept would be delivered to one goroutine while the other holds the entry.
 	h.mu.Lock()
+	if _, ok := h.claims[ir.RequestId]; ok {
+		h.mu.Unlock()
+		return false, nil
+	}
 	h.claims[ir.RequestId] = claimResponseChan
 	h.mu.Unlock()
 

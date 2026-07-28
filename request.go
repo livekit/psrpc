@@ -35,6 +35,7 @@ type SelectionOpts struct {
 	AffinityTimeout      time.Duration                  // server selection deadline
 	ShortCircuitTimeout  time.Duration                  // deadline imposed after receiving first response
 	SelectionFunc        func([]*Claim) (string, error) // custom server selection function
+	MaxAttempts          int                            // if > 1, republish the request up to this many times while no claim has been received
 }
 
 type Claim struct {

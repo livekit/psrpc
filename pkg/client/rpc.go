@@ -120,16 +120,34 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			c.mu.Unlock()
 		}()
 
+		// The caller's deadline and the request's expiry are the same instant, so a
+		// responder is never authorized to run past the budget the caller allowed.
+		ctx, cancel := context.WithDeadline(ctx, expiry)
+		defer cancel()
+
 		if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
 			err = psrpc.NewError(psrpc.Internal, err)
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
-		defer cancel()
-
 		if i.RequireClaim {
 			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+
+			// Republishing is exactly-once-preserving only while no claim has been
+			// accepted: no ClaimResponse has been sent, so no server has been authorized
+			// to run the handler and the request cannot have taken effect anywhere.
+			// ErrNoResponse is the only error that carries that guarantee — every other
+			// selection outcome means a claim was read.
+			for attempt := 1; attempt < o.SelectionOpts.MaxAttempts &&
+				errors.Is(err, psrpc.ErrNoResponse) && ctx.Err() == nil; attempt++ {
+
+				// The request id is unchanged so a claim from an earlier attempt still
+				// resolves, and the deadline is unchanged so retries cannot extend it.
+				if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
+					return nil, psrpc.NewError(psrpc.Internal, err)
+				}
+				serverID, err = selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+			}
 			if err != nil {
 				return nil, err
 			}
