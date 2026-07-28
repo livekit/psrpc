@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/livekit/psrpc/internal/bus/bustest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/middleware"
 	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
 )
@@ -250,5 +252,84 @@ func testSelectionRetry(t *testing.T, newBus func(t testing.TB) bus.MessageBus) 
 		require.Error(t, err)
 		require.Less(t, time.Since(start), retryTimeout*2)
 		require.Equal(t, int32(0), atomic.LoadInt32(calls))
+	})
+}
+
+// The three narrow retry interceptors in the fleet gate on ErrNoResponse, the same
+// condition psrpc now applies internally. This pins the observable behaviour of both
+// against one scenario so the interceptors can be removed without a behaviour change.
+func TestSelectionRetryMatchesInterceptorRetry(t *testing.T) {
+	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
+		narrowInterceptor := middleware.WithRPCRetries(middleware.RetryOptions{
+			MaxAttempts: 2,
+			IsRecoverable: func(err error) bool {
+				return errors.Is(err, psrpc.ErrNoResponse)
+			},
+		})
+
+		for _, tc := range []struct {
+			name string
+			opt  psrpc.ClientOption
+		}{
+			{"interceptor", narrowInterceptor},
+			{"selection", psrpc.WithClientSelectionAttempts(2)},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var published int32
+				intercept := func(msg proto.Message) (time.Duration, bool) {
+					if _, ok := msg.(*internal.Request); ok {
+						return 0, atomic.AddInt32(&published, 1) == 1
+					}
+					return 0, false
+				}
+
+				c, rpc, calls := newRetryFixture(t, newBus(t), intercept, tc.opt)
+
+				requestID := rand.NewRequestID()
+				res, err := client.RequestSingle[*internal.Response](
+					context.Background(), c, rpc, nil, &internal.Request{RequestId: requestID},
+				)
+				require.NoError(t, err)
+				require.Equal(t, requestID, res.RequestId)
+				require.Equal(t, int32(1), atomic.LoadInt32(calls))
+				require.Equal(t, int32(2), atomic.LoadInt32(&published))
+			})
+		}
+	})
+}
+
+// Where the two mechanisms part company. The interceptor gives each attempt a fresh
+// timeout and counts only attempts, so it keeps republishing after the budget that
+// motivated the call is gone. psrpc spends only the caller's own budget.
+func TestSelectionRetryDivergesFromInterceptorOnBudget(t *testing.T) {
+	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
+		tightBudget := psrpc.WithClientTimeout(retrySelectTimeout + retrySelectTimeout/2)
+
+		for _, tc := range []struct {
+			name          string
+			opt           psrpc.ClientOption
+			wantPublished int32
+		}{
+			{"interceptor", middleware.WithRPCRetries(middleware.RetryOptions{
+				MaxAttempts: 5,
+				IsRecoverable: func(err error) bool {
+					return errors.Is(err, psrpc.ErrNoResponse)
+				},
+			}), 5},
+			{"selection", psrpc.WithClientSelectionAttempts(5), 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var published int32
+				c, rpc, calls := newRetryFixture(t, newBus(t), countAndDropRequests(&published),
+					tc.opt, tightBudget)
+
+				_, err := client.RequestSingle[*internal.Response](
+					context.Background(), c, rpc, nil, &internal.Request{RequestId: rand.NewRequestID()},
+				)
+				require.ErrorIs(t, err, psrpc.ErrNoResponse)
+				require.Equal(t, tc.wantPublished, atomic.LoadInt32(&published))
+				require.Equal(t, int32(0), atomic.LoadInt32(calls))
+			})
+		}
 	})
 }
