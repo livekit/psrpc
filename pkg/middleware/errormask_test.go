@@ -1,3 +1,17 @@
+// Copyright 2023 LiveKit, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package middleware
 
 import (
@@ -15,11 +29,10 @@ import (
 	"github.com/livekit/psrpc"
 )
 
-// driverErr stands in for the class of error this interceptor exists to contain: text
-// produced by a dependency, never written with a caller in mind.
+// driverErr is an example error that should not be returned to the caller
 var driverErr = errors.New(`ERROR: column "from_host" does not exist (SQLSTATE 42703)`)
 
-// internalMarkers are strings that must never appear in a caller-visible message
+// internalMarkers are strings that should never appear in a caller-visible message
 var internalMarkers = []string{"SQLSTATE", "42703", "from_host", "does not exist"}
 
 func requireNoInternalDetail(t *testing.T, msg string) {

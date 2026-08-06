@@ -22,27 +22,17 @@ import (
 	"github.com/livekit/psrpc"
 )
 
-// InternalErrorMessage is the only message a masked error carries.
 const InternalErrorMessage = "internal error"
 
-// Logger is the subset of a structured logger WithServerErrorMasking needs. It is
-// declared here rather than imported so that psrpc stays free of logging dependencies;
-// livekit/protocol's logger.Logger satisfies it as is.
 type Logger interface {
 	Warnw(msg string, err error, keysAndValues ...any)
 }
 
-// WithServerErrorMasking replaces any error a handler returns that was never given a
-// deliberate code with an opaque internal error, so that internal detail (database
-// driver text, file paths, hostnames) cannot reach the caller. The original error is
-// logged as a warning: masking is not meant to lose it, and a warning is the signal that
-// a handler has an unclassified error path someone should go and give a code to.
-//
-// Errors that already carry a code are returned untouched, on the assumption that a code
-// was chosen along with a message fit for the caller to read.
-//
-// Should always be the first interceptor, so that it is outermost and its return value is
-// the one that gets serialized.
+// WithServerErrorMasking replaces errors with no status code or an Unknown code
+// with an opaque internal error. grpc-go otherwise serializes an uncoded error as
+// codes.Unknown carrying the full error string, which may leak internal details to the caller.
+// Must be the first interceptor in the chain (outermost), such that the masking logic is
+// applied to the final error
 func WithServerErrorMasking(l Logger) psrpc.ServerRPCInterceptor {
 	return func(ctx context.Context, req proto.Message, info psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (proto.Message, error) {
 		res, err := handler(ctx, req)
@@ -54,26 +44,15 @@ func WithServerErrorMasking(l Logger) psrpc.ServerRPCInterceptor {
 
 		// The response is passed through untouched: this interceptor's job is to replace
 		// the error and nothing else. psrpc ignores the response whenever the error is
-		// non-nil, and res can only be whatever the handler itself returned.
-		//
-		// The masked error deliberately does not wrap its cause. sendResponse resolves the
-		// error to serialize by walking the Unwrap chain for a psrpc.Error, so a wrapped
-		// cause carrying a code would be found and sent instead of this one.
+		// non-nil, and res can only be whatever the handler itself returned
 		return res, psrpc.NewErrorf(psrpc.Internal, InternalErrorMessage)
 	}
 }
 
-// needsMasking reports whether err was never given a deliberate code.
-//
-// GetErrorCode reads the code a psrpc.Error was created with, and only falls back to a
-// gRPC status for errors from elsewhere. Reading the code back out of GRPCStatus instead
-// would run it through ErrorCode.ToGRPC, which maps every code it has no case for to
-// codes.Unknown and would therefore mask deliberately coded errors.
-//
-// Unknown counts as "no code" because that is what an unclassified error becomes in
-// transit: a server serializes it as its raw text with code Unknown, and
-// NewErrorFromResponse rebuilds it that way on the client. Masking on Unknown is what
-// stops an unclassified error leaked by one server from being relayed onward by the next.
+// needsMasking returns true if the error does not have a status code in its chain,
+// or if it's unknown. Unknown counts as "no code" because that is what an unclassified
+// error becomes once it has crossed a psrpc or gRPC boundary, so masking on it also
+// covers errors this service is relaying from another one
 func needsMasking(err error) bool {
 	if err == nil {
 		return false
