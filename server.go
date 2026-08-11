@@ -95,6 +95,9 @@ const (
 	// ClaimTimedOut: this server bid and the claim expired ungranted. The
 	// handler does not run, so the request is safe to retry.
 	ClaimTimedOut
+	// ClaimSkipped: the caller opted out and the handler ran without a claim.
+	// Reported with a zero wait, since no negotiation took place.
+	ClaimSkipped
 )
 
 func (o ClaimOutcome) String() string {
@@ -105,6 +108,8 @@ func (o ClaimOutcome) String() string {
 		return "lost_to_peer"
 	case ClaimTimedOut:
 		return "timed_out"
+	case ClaimSkipped:
+		return "skipped"
 	default:
 		return "invalid"
 	}

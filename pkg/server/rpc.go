@@ -189,11 +189,14 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		return err
 	}
 
-	// Queue is re-checked here because honoring SkipClaim on a broadcast rpc
-	// would let every server run the handler.
-	if h.i.RequireClaim && !(ir.SkipClaim && h.i.Queue) {
-		claimed, err := h.claimRequest(s, ctx, ir, req)
-		if err != nil {
+	if h.i.RequireClaim {
+		// Queue is re-checked here because honoring SkipClaim on a broadcast rpc
+		// would let every server run the handler.
+		if ir.SkipClaim && h.i.Queue {
+			if o := s.RequestObserver; o != nil {
+				o.OnClaim(h.i.RPCInfo, psrpc.ClaimSkipped, 0)
+			}
+		} else if claimed, err := h.claimRequest(s, ctx, ir, req); err != nil {
 			return err
 		} else if !claimed {
 			return nil

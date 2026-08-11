@@ -73,7 +73,8 @@ func TestSkipClaim(t *testing.T) {
 
 		received, claims := obs.snapshot()
 		require.Equal(t, 1, received)
-		require.Empty(t, claims, "queue RPC must not negotiate a claim")
+		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped}, claims,
+			"a skipped claim must still be observable")
 		require.EqualValues(t, 1, queuedCalls.Load(), "handler must run exactly once")
 
 		_, err = client.RequestSingle[*internal.Response](context.Background(), c, broadcast, nil, &internal.Request{})
@@ -81,7 +82,7 @@ func TestSkipClaim(t *testing.T) {
 
 		received, claims = obs.snapshot()
 		require.Equal(t, 2, received)
-		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
+		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped, psrpc.ClaimGranted}, claims,
 			"broadcast RPC must still claim")
 		require.EqualValues(t, 1, broadcastCalls.Load())
 	})
