@@ -100,9 +100,6 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
 			expiry = deadline
 		}
-		// The queue already chose the server; the claim only ratifies it.
-		skipClaim := i.Queue
-
 		req := &internal.Request{
 			RequestId:  requestID,
 			ClientId:   c.ID,
@@ -111,7 +108,8 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			SkipClaim:  skipClaim,
+			// The queue already chose the server; the claim only ratifies it.
+			SkipClaim: i.Queue,
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -145,7 +143,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		var res *internal.Response
 
 		if i.RequireClaim {
-			serverID, early, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, skipClaim)
+			serverID, early, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, i.Queue)
 			if err != nil {
 				return nil, err
 			}
