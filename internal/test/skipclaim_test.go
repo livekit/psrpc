@@ -32,9 +32,7 @@ import (
 	"github.com/livekit/psrpc/pkg/server"
 )
 
-// A queue subscription selects the server before any claim exists, so the
-// handshake is skipped there and kept everywhere else. Runs on every bus
-// because the property comes from SubscribeQueue, not from any one broker.
+// Run on every bus: the property comes from SubscribeQueue, not any one broker.
 func TestSkipClaim(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
 		const queued, broadcast = "skip_claim_queued", "skip_claim_broadcast"
@@ -49,7 +47,6 @@ func TestSkipClaim(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { c.Close() })
 
-		// Identical but for the queue flag, which is what decides the skip.
 		for _, rpc := range []string{queued, broadcast} {
 			queue := rpc == queued
 			s.RegisterMethod(rpc, false, false, true, queue)
@@ -68,8 +65,7 @@ func TestSkipClaim(t *testing.T) {
 				return &internal.Response{}, nil
 			}, nil))
 
-		// The redis bus reconciles subscriptions on a write worker, so a publish
-		// issued right after registration can miss them.
+		// The redis bus reconciles subscriptions asynchronously; publishing now races.
 		time.Sleep(time.Second)
 
 		_, err = client.RequestSingle[*internal.Response](context.Background(), c, queued, nil, &internal.Request{})
@@ -80,7 +76,6 @@ func TestSkipClaim(t *testing.T) {
 		require.Empty(t, claims, "queue RPC must not negotiate a claim")
 		require.EqualValues(t, 1, queuedCalls.Load(), "handler must run exactly once")
 
-		// The claim is still required where the bus broadcasts the request.
 		_, err = client.RequestSingle[*internal.Response](context.Background(), c, broadcast, nil, &internal.Request{})
 		require.NoError(t, err)
 
@@ -92,10 +87,7 @@ func TestSkipClaim(t *testing.T) {
 	})
 }
 
-// The routing type is either QUEUE or AFFINITY, so generated code never pairs
-// them. Registering the pair by hand is a configuration error: the queue has
-// already chosen the server, and the affinity decline path would drop the
-// request with no response.
+// Generated code cannot pair these, but RegisterHandler is exported.
 func TestQueueRejectsAffinityFunc(t *testing.T) {
 	b := bus.NewLocalMessageBus()
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
@@ -113,7 +105,38 @@ func TestQueueRejectsAffinityFunc(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, psrpc.InvalidArgument, code)
 
-	// Unchanged where the request is broadcast and bids decide the winner.
 	s.RegisterMethod("broadcast", true, false, true, false)
 	require.NoError(t, server.RegisterHandler(s, "broadcast", nil, handler, affinity))
+}
+
+// Same reasoning as the affinity function, but the caller sets these per request.
+func TestQueueRejectsAffinitySelection(t *testing.T) {
+	b := bus.NewLocalMessageBus()
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	c.RegisterMethod("queued", false, false, true, true)
+	for _, opts := range []psrpc.SelectionOpts{
+		{SelectionFunc: func([]*psrpc.Claim) (string, error) { return "", nil }},
+		{MinimumAffinity: 0.5},
+		{MaximumAffinity: 1},
+	} {
+		_, err := client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+			&internal.Request{}, psrpc.WithSelectionOpts(opts))
+		code, ok := psrpc.GetErrorCode(err)
+		require.True(t, ok)
+		require.Equal(t, psrpc.InvalidArgument, code)
+	}
+
+	// AcceptFirstAvailable and AffinityTimeout are defaulted in for every method.
+	c.RegisterMethod("plain", false, false, true, true)
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "plain", nil,
+		&internal.Request{}, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
+			AcceptFirstAvailable: true, AffinityTimeout: time.Millisecond * 50,
+		}))
+	require.NotErrorIs(t, err, psrpc.ErrRequestCanceled)
+	code, ok := psrpc.GetErrorCode(err)
+	require.True(t, ok)
+	require.NotEqual(t, psrpc.InvalidArgument, code, "no handler registered, but not a config error")
 }

@@ -77,6 +77,16 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
 		o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
+		// A queue rpc has one candidate bidding a hardcoded 1, so there is nothing
+		// for these to select on.
+		if i.Queue && (o.SelectionOpts.SelectionFunc != nil ||
+			o.SelectionOpts.MinimumAffinity > 0 ||
+			o.SelectionOpts.MaximumAffinity > 0) {
+			err = psrpc.NewErrorf(psrpc.InvalidArgument,
+				"%s: affinity selection is not valid on a queue rpc", i.Method)
+			return
+		}
+
 		b, err := bus.SerializePayload(request)
 		if err != nil {
 			err = psrpc.NewError(psrpc.MalformedRequest, err)
@@ -90,15 +100,8 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
 			expiry = deadline
 		}
-		// A queue subscription has already chosen the server, so the claim only
-		// ratifies that choice. Tell the server it may skip the handshake, but
-		// keep answering claims below so older servers still work. Selection
-		// options that depend on affinity are excluded: the request reached one
-		// server, and its bid is a hardcoded 1.
-		skipClaim := i.Queue &&
-			o.SelectionOpts.SelectionFunc == nil &&
-			o.SelectionOpts.MinimumAffinity <= 0 &&
-			o.SelectionOpts.MaximumAffinity <= 0
+		// The queue already chose the server; the claim only ratifies it.
+		skipClaim := i.Queue
 
 		req := &internal.Request{
 			RequestId:  requestID,
@@ -139,8 +142,6 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 
-		// Set when the server answered without claiming, which only a server that
-		// understood SkipClaim will do.
 		var res *internal.Response
 
 		if i.RequireClaim {
@@ -188,8 +189,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 	}
 }
 
-// selectServer waits for the claim negotiation to settle. It returns the winning
-// server, or — when skipClaim was requested and the server honored it — the
+// Returns either the winning server or, when the server honored skipClaim, the
 // response that arrived instead of a claim.
 func selectServer(
 	ctx context.Context,
@@ -254,8 +254,7 @@ func selectServer(
 
 		case res := <-resChan:
 			if skipClaim {
-				// The server handled the request without claiming. Hand the
-				// response back rather than consuming it here.
+				// Consuming it here would strand the response.
 				return "", res, nil
 			}
 			// will only happen with malformed requests

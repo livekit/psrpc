@@ -38,9 +38,7 @@ message Request {
   google.protobuf.Any request = 6;
   map<string, string> metadata = 7;
   bytes raw_request = 8;
-  // The caller will not answer a ClaimRequest for this request. Servers that
-  // understand the field may run the handler directly; older servers ignore it
-  // and claim as usual, which the caller still handles.
+  // Advisory: the caller still answers a claim, so older servers are unaffected.
   bool skip_claim = 9;
 }
 
