@@ -58,6 +58,16 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 	affinityFunc AffinityFunc[RequestType],
 ) (*rpcHandlerImpl[RequestType, ResponseType], error) {
 
+	// A queue subscription delivers each request to one server, so an affinity
+	// function has nothing to arbitrate and its decline path would drop the
+	// request with no response. Generated code cannot produce this pairing --
+	// the routing type is either QUEUE or AFFINITY -- so reject it rather than
+	// carry a runtime case for it.
+	if i.Queue && affinityFunc != nil {
+		return nil, psrpc.NewErrorf(psrpc.InvalidArgument,
+			"%s: affinity function is not valid on a queue rpc", i.Method)
+	}
+
 	ctx := context.Background()
 
 	var requestSub bus.Subscription[*internal.Request]
@@ -182,12 +192,11 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		return err
 	}
 
-	// On a queue RPC the bus already delivered to exactly one server, so the
-	// claim only ratifies that choice and the caller may opt out of it. Both
-	// conditions are re-checked here: honoring SkipClaim on a broadcast RPC, or
-	// with an affinity function that can still decline, would let every server
-	// run the handler.
-	if h.i.RequireClaim && !(ir.SkipClaim && h.i.Queue && h.affinityFunc == nil) {
+	// On a queue rpc the bus already delivered to exactly one server, so the
+	// claim only ratifies that choice and the caller may opt out of it. Queue is
+	// re-checked against this server's own view: honoring SkipClaim on a
+	// broadcast rpc would let every server run the handler.
+	if h.i.RequireClaim && !(ir.SkipClaim && h.i.Queue) {
 		claimed, err := h.claimRequest(s, ctx, ir, req)
 		if err != nil {
 			return err

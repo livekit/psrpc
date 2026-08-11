@@ -91,3 +91,29 @@ func TestSkipClaim(t *testing.T) {
 		require.EqualValues(t, 1, broadcastCalls.Load())
 	})
 }
+
+// The routing type is either QUEUE or AFFINITY, so generated code never pairs
+// them. Registering the pair by hand is a configuration error: the queue has
+// already chosen the server, and the affinity decline path would drop the
+// request with no response.
+func TestQueueRejectsAffinityFunc(t *testing.T) {
+	b := bus.NewLocalMessageBus()
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	t.Cleanup(func() { s.Close(true) })
+
+	handler := func(context.Context, *internal.Request) (*internal.Response, error) {
+		return &internal.Response{}, nil
+	}
+	affinity := func(context.Context, *internal.Request) float32 { return 1 }
+
+	s.RegisterMethod("queued", false, false, true, true)
+	err := server.RegisterHandler(s, "queued", nil, handler, affinity)
+	require.Error(t, err)
+	code, ok := psrpc.GetErrorCode(err)
+	require.True(t, ok)
+	require.Equal(t, psrpc.InvalidArgument, code)
+
+	// Unchanged where the request is broadcast and bids decide the winner.
+	s.RegisterMethod("broadcast", true, false, true, false)
+	require.NoError(t, server.RegisterHandler(s, "broadcast", nil, handler, affinity))
+}
