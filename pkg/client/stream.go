@@ -95,7 +95,7 @@ func OpenStream[SendType, RecvType proto.Message](
 	}
 
 	if i.RequireClaim {
-		serverID, err := selectServer(ctx, claimChan, nil, o.SelectionOpts)
+		serverID, _, err := selectServer(ctx, claimChan, nil, o.SelectionOpts, false)
 		if err != nil {
 			_ = cs.Close(err)
 			return nil, err

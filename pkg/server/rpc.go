@@ -182,7 +182,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		return err
 	}
 
-	if h.i.RequireClaim {
+	// On a queue RPC the bus already delivered to exactly one server, so the
+	// claim only ratifies that choice and the caller may opt out of it. Both
+	// conditions are re-checked here: honoring SkipClaim on a broadcast RPC, or
+	// with an affinity function that can still decline, would let every server
+	// run the handler.
+	if h.i.RequireClaim && !(ir.SkipClaim && h.i.Queue && h.affinityFunc == nil) {
 		claimed, err := h.claimRequest(s, ctx, ir, req)
 		if err != nil {
 			return err

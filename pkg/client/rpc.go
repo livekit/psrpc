@@ -90,6 +90,16 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
 			expiry = deadline
 		}
+		// A queue subscription has already chosen the server, so the claim only
+		// ratifies that choice. Tell the server it may skip the handshake, but
+		// keep answering claims below so older servers still work. Selection
+		// options that depend on affinity are excluded: the request reached one
+		// server, and its bid is a hardcoded 1.
+		skipClaim := i.Queue &&
+			o.SelectionOpts.SelectionFunc == nil &&
+			o.SelectionOpts.MinimumAffinity <= 0 &&
+			o.SelectionOpts.MaximumAffinity <= 0
+
 		req := &internal.Request{
 			RequestId:  requestID,
 			ClientId:   c.ID,
@@ -98,6 +108,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
+			SkipClaim:  skipClaim,
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -128,13 +139,19 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 
+		// Set when the server answered without claiming, which only a server that
+		// understood SkipClaim will do.
+		var res *internal.Response
+
 		if i.RequireClaim {
-			serverID, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+			serverID, early, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, skipClaim)
 			if err != nil {
 				return nil, err
 			}
 
-			if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
+			if early != nil {
+				res = early
+			} else if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
 				RequestId: requestID,
 				ServerId:  serverID,
 			}); err != nil {
@@ -143,23 +160,27 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			}
 		}
 
-		select {
-		case res := <-resChan:
-			if res.Error != "" {
-				err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
-			} else {
-				response, err = bus.DeserializePayload[ResponseType](res.RawResponse)
-				if err != nil {
-					err = psrpc.NewError(psrpc.MalformedResponse, err)
-				}
-			}
+		if res == nil {
+			select {
+			case res = <-resChan:
 
-		case <-ctx.Done():
-			err = ctx.Err()
-			if errors.Is(err, context.Canceled) {
-				err = psrpc.ErrRequestCanceled
-			} else if errors.Is(err, context.DeadlineExceeded) {
-				err = psrpc.ErrRequestTimedOut
+			case <-ctx.Done():
+				err = ctx.Err()
+				if errors.Is(err, context.Canceled) {
+					err = psrpc.ErrRequestCanceled
+				} else if errors.Is(err, context.DeadlineExceeded) {
+					err = psrpc.ErrRequestTimedOut
+				}
+				return
+			}
+		}
+
+		if res.Error != "" {
+			err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
+		} else {
+			response, err = bus.DeserializePayload[ResponseType](res.RawResponse)
+			if err != nil {
+				err = psrpc.NewError(psrpc.MalformedResponse, err)
 			}
 		}
 
@@ -167,12 +188,16 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 	}
 }
 
+// selectServer waits for the claim negotiation to settle. It returns the winning
+// server, or — when skipClaim was requested and the server honored it — the
+// response that arrived instead of a claim.
 func selectServer(
 	ctx context.Context,
 	claimChan chan *internal.ClaimRequest,
 	resChan chan *internal.Response,
 	opts psrpc.SelectionOpts,
-) (string, error) {
+	skipClaim bool,
+) (string, *internal.Response, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -195,22 +220,23 @@ func selectServer(
 		case <-ctx.Done():
 			switch {
 			case opts.SelectionFunc != nil:
-				return opts.SelectionFunc(claims)
+				id, err := opts.SelectionFunc(claims)
+				return id, nil, err
 			case serverID != "":
-				return serverID, nil
+				return serverID, nil, nil
 			case resErr != nil:
-				return "", resErr
+				return "", nil, resErr
 			case claimCount > 0:
-				return "", psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", claimCount)
+				return "", nil, psrpc.NewErrorf(psrpc.Unavailable, "no servers available (received %d responses)", claimCount)
 			default:
-				return "", psrpc.ErrNoResponse
+				return "", nil, psrpc.ErrNoResponse
 			}
 
 		case claim := <-claimChan:
 			claimCount++
 			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity) || opts.MinimumAffinity <= 0 {
 				if opts.AcceptFirstAvailable || opts.MaximumAffinity > 0 && claim.Affinity >= opts.MaximumAffinity {
-					return claim.ServerId, nil
+					return claim.ServerId, nil, nil
 				}
 
 				if opts.SelectionFunc != nil {
@@ -227,6 +253,11 @@ func selectServer(
 			}
 
 		case res := <-resChan:
+			if skipClaim {
+				// The server handled the request without claiming. Hand the
+				// response back rather than consuming it here.
+				return "", res, nil
+			}
 			// will only happen with malformed requests
 			if res.Error != "" {
 				resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
