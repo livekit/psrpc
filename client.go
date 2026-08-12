@@ -43,9 +43,10 @@ type ClientOpts struct {
 	SkipClaim            func() bool
 }
 
-// WithClientSkipClaim lets a queue rpc bypass the claim handshake while enabled.
-// Consulted per request so it can be revoked at runtime without a redeploy, and
-// disabled when unset. Ignored for a bus that does not declare ExclusiveQueuer.
+// WithClientSkipClaim lets a queue rpc bypass the claim handshake while enabled,
+// which is only sound if the bus delivers a queue subscription to exactly one
+// subscriber. Consulted per request so it can be revoked at runtime without a
+// redeploy, and disabled when unset.
 func WithClientSkipClaim(enabled func() bool) ClientOption {
 	return func(o *ClientOpts) {
 		o.SkipClaim = enabled

@@ -435,7 +435,3 @@ func (r *redisPublishQueue) worker() {
 }
 
 // ----------------------------------------------------
-
-// Every subscriber receives the message, then contends for a SetNX lock keyed
-// on it, so exactly one read returns it.
-func (r *redisMessageBus) QueueIsExclusive() bool { return true }

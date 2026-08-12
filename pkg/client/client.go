@@ -31,8 +31,6 @@ type RPCClient struct {
 	psrpc.ClientOpts
 
 	bus bus.MessageBus
-	// Whether this bus guarantees SubscribeQueue delivers to one subscriber.
-	queueExclusive bool
 
 	mu               sync.Mutex
 	claimRequests    map[string]chan *internal.ClaimRequest
@@ -62,7 +60,6 @@ func NewRPCClient(
 		responseChannels:  make(map[string]chan *internal.Response),
 		streamChannels:    make(map[string]streamChannels),
 	}
-	c.queueExclusive = bus.QueueIsExclusive(b)
 	if c.ClientID != "" {
 		c.ID = c.ClientID
 	}
@@ -154,8 +151,4 @@ func NewRPCClient(
 
 func (c *RPCClient) Close() {
 	c.closed.Break()
-}
-
-func skipClaimEnabled(enabled func() bool) bool {
-	return enabled != nil && enabled()
 }

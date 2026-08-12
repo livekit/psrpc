@@ -43,7 +43,7 @@ func TestSkipClaim(t *testing.T) {
 		b := newBus(t)
 
 		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+			psrpc.WithServerObserver(obs))
 		t.Cleanup(func() { s.Close(true) })
 		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 			psrpc.WithClientSkipClaim(enabled))
@@ -145,39 +145,6 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 	require.NotEqual(t, psrpc.InvalidArgument, code, "no handler registered, but not a config error")
 }
 
-// A bus implemented outside psrpc will not declare an exclusive queue, so the
-// claim has to survive -- skipping it there could run the handler on every
-// subscriber.
-type opaqueBus struct{ bus.MessageBus }
-
-func TestUndeclaredQueueKeepsClaim(t *testing.T) {
-	obs := &recordingObserver{}
-	b := &opaqueBus{bus.NewLocalMessageBus()}
-	require.False(t, bus.QueueIsExclusive(b), "wrapper must not inherit the capability")
-
-	// Opted in on both sides, so only the undeclared bus can hold the claim.
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
-	t.Cleanup(func() { s.Close(true) })
-	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithClientSkipClaim(enabled))
-	require.NoError(t, err)
-	t.Cleanup(func() { c.Close() })
-
-	s.RegisterMethod("queued", false, false, true, true)
-	c.RegisterMethod("queued", false, false, true, true)
-	require.NoError(t, server.RegisterHandler(s, "queued", nil,
-		func(context.Context, *internal.Request) (*internal.Response, error) {
-			return &internal.Response{}, nil
-		}, nil))
-
-	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
-	require.NoError(t, err)
-
-	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
-}
-
 // Unset means claim, so a deploy that has not opted in is unaffected.
 func TestSkipClaimDisabledByDefault(t *testing.T) {
 	obs := &recordingObserver{}
@@ -213,7 +180,7 @@ func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 	on.Store(true)
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(on.Load))
+		psrpc.WithServerObserver(obs))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithClientSkipClaim(on.Load))

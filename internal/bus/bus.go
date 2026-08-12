@@ -34,20 +34,6 @@ type MessageBus interface {
 	SubscribeQueue(ctx context.Context, channel Channel, channelSize int) (Reader, error)
 }
 
-// ExclusiveQueuer is implemented by a MessageBus whose SubscribeQueue delivers
-// each message to exactly one subscriber across every process. Optimizations
-// that rely on that guarantee are disabled for a bus that does not declare it,
-// so a bus implemented elsewhere keeps the conservative behavior by default.
-// A bus that wraps another must forward this.
-type ExclusiveQueuer interface {
-	QueueIsExclusive() bool
-}
-
-func QueueIsExclusive(b MessageBus) bool {
-	q, ok := b.(ExclusiveQueuer)
-	return ok && q.QueueIsExclusive()
-}
-
 type Reader interface {
 	read() ([]byte, bool)
 	Close() error

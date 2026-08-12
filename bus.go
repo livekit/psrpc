@@ -24,12 +24,6 @@ import (
 type Channel = bus.Channel
 type MessageBus bus.MessageBus
 
-// ExclusiveQueuer is implemented by a MessageBus whose SubscribeQueue delivers
-// each message to exactly one subscriber across every process. A bus that does
-// not declare it keeps the conservative behavior; a bus that wraps another must
-// forward this.
-type ExclusiveQueuer = bus.ExclusiveQueuer
-
 func NewLocalMessageBus() MessageBus {
 	return bus.NewLocalMessageBus()
 }

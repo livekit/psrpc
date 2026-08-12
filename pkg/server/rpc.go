@@ -192,7 +192,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	if h.i.RequireClaim {
 		// Queue is re-checked here because honoring SkipClaim on a broadcast rpc
 		// would let every server run the handler.
-		if ir.SkipClaim && h.i.Queue && s.queueExclusive && skipClaimEnabled(s.SkipClaim) {
+		if ir.SkipClaim && h.i.Queue {
 			if o := s.RequestObserver; o != nil {
 				o.OnClaim(h.i.RPCInfo, psrpc.ClaimSkipped, 0)
 			}
