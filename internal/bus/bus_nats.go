@@ -248,3 +248,6 @@ func (n *natsRouterSubscription) Close() error {
 	close(n.msgChan)
 	return nil
 }
+
+// A nats queue group delivers to one member of the group.
+func (n *natsMessageBus) QueueIsExclusive() bool { return true }

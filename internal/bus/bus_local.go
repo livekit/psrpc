@@ -191,3 +191,6 @@ func (l *localSubscription) Close() error {
 	close(l.msgChan)
 	return nil
 }
+
+// A queue sublist dispatches to one subscriber, and there is only one process.
+func (l *localMessageBus) QueueIsExclusive() bool { return true }

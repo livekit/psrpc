@@ -92,3 +92,5 @@ type testReader struct {
 func (r *testReader) read() ([]byte, bool) {
 	return r.readHandler()
 }
+
+func (l *testBus) QueueIsExclusive() bool { return QueueIsExclusive(l.bus) }

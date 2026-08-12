@@ -31,6 +31,8 @@ type RPCClient struct {
 	psrpc.ClientOpts
 
 	bus bus.MessageBus
+	// Whether a queue rpc may skip the claim handshake.
+	skipClaim bool
 
 	mu               sync.Mutex
 	claimRequests    map[string]chan *internal.ClaimRequest
@@ -60,6 +62,7 @@ func NewRPCClient(
 		responseChannels:  make(map[string]chan *internal.Response),
 		streamChannels:    make(map[string]streamChannels),
 	}
+	c.skipClaim = !c.AlwaysClaim && bus.QueueIsExclusive(b)
 	if c.ClientID != "" {
 		c.ID = c.ClientID
 	}

@@ -78,7 +78,8 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
 		// A queue rpc has one candidate bidding a hardcoded 1, so there is nothing
-		// for these to select on.
+		// for these to select on. Rejected regardless of whether the claim is
+		// skipped, since the incoherence is in the configuration.
 		if i.Queue && (o.SelectionOpts.SelectionFunc != nil ||
 			o.SelectionOpts.MinimumAffinity > 0 ||
 			o.SelectionOpts.MaximumAffinity > 0) {
@@ -109,7 +110,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
 			// The queue already chose the server; the claim only ratifies it.
-			SkipClaim: i.Queue,
+			SkipClaim: i.Queue && c.skipClaim,
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -143,7 +144,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		var res *internal.Response
 
 		if i.RequireClaim {
-			serverID, early, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, i.Queue)
+			serverID, early, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, req.SkipClaim)
 			if err != nil {
 				return nil, err
 			}

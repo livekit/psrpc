@@ -141,3 +141,61 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 	require.True(t, ok)
 	require.NotEqual(t, psrpc.InvalidArgument, code, "no handler registered, but not a config error")
 }
+
+// A bus implemented outside psrpc will not declare an exclusive queue, so the
+// claim has to survive -- skipping it there could run the handler on every
+// subscriber.
+type opaqueBus struct{ bus.MessageBus }
+
+func TestUndeclaredQueueKeepsClaim(t *testing.T) {
+	obs := &recordingObserver{}
+	b := &opaqueBus{bus.NewLocalMessageBus()}
+	require.False(t, bus.QueueIsExclusive(b), "wrapper must not inherit the capability")
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+}
+
+// WithClientAlwaysClaim overrides a bus that does declare it.
+func TestAlwaysClaimOverride(t *testing.T) {
+	obs := &recordingObserver{}
+	b := bus.NewLocalMessageBus()
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientAlwaysClaim())
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+}

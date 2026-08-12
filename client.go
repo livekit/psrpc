@@ -40,6 +40,16 @@ type ClientOpts struct {
 	RpcInterceptors      []ClientRPCInterceptor
 	MultiRPCInterceptors []ClientMultiRPCInterceptor
 	StreamInterceptors   []StreamInterceptor
+	AlwaysClaim          bool
+}
+
+// WithClientAlwaysClaim keeps the claim handshake on queue rpcs, which psrpc
+// otherwise skips. An escape hatch for a bus that reports an exclusive queue it
+// does not actually provide.
+func WithClientAlwaysClaim() ClientOption {
+	return func(o *ClientOpts) {
+		o.AlwaysClaim = true
+	}
 }
 
 func WithClientID(id string) ClientOption {
