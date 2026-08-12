@@ -110,7 +110,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
 			// The queue already chose the server; the claim only ratifies it.
-			SkipClaim: i.Queue && c.skipClaim,
+			SkipClaim: i.Queue && c.queueExclusive && skipClaimEnabled(c.SkipClaim),
 		}
 
 		var claimChan chan *internal.ClaimRequest

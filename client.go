@@ -40,15 +40,15 @@ type ClientOpts struct {
 	RpcInterceptors      []ClientRPCInterceptor
 	MultiRPCInterceptors []ClientMultiRPCInterceptor
 	StreamInterceptors   []StreamInterceptor
-	AlwaysClaim          bool
+	SkipClaim            func() bool
 }
 
-// WithClientAlwaysClaim keeps the claim handshake on queue rpcs, which psrpc
-// otherwise skips. An escape hatch for a bus that reports an exclusive queue it
-// does not actually provide.
-func WithClientAlwaysClaim() ClientOption {
+// WithClientSkipClaim lets a queue rpc bypass the claim handshake while enabled.
+// Consulted per request so it can be revoked at runtime without a redeploy, and
+// disabled when unset. Ignored for a bus that does not declare ExclusiveQueuer.
+func WithClientSkipClaim(enabled func() bool) ClientOption {
 	return func(o *ClientOpts) {
-		o.AlwaysClaim = true
+		o.SkipClaim = enabled
 	}
 }
 

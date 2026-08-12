@@ -32,6 +32,8 @@ import (
 	"github.com/livekit/psrpc/pkg/server"
 )
 
+func enabled() bool { return true }
+
 // Run on every bus: the property comes from SubscribeQueue, not any one broker.
 func TestSkipClaim(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
@@ -41,9 +43,10 @@ func TestSkipClaim(t *testing.T) {
 		b := newBus(t)
 
 		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithServerObserver(obs))
+			psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
 		t.Cleanup(func() { s.Close(true) })
-		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+			psrpc.WithClientSkipClaim(enabled))
 		require.NoError(t, err)
 		t.Cleanup(func() { c.Close() })
 
@@ -152,6 +155,34 @@ func TestUndeclaredQueueKeepsClaim(t *testing.T) {
 	b := &opaqueBus{bus.NewLocalMessageBus()}
 	require.False(t, bus.QueueIsExclusive(b), "wrapper must not inherit the capability")
 
+	// Opted in on both sides, so only the undeclared bus can hold the claim.
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientSkipClaim(enabled))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+}
+
+// Unset means claim, so a deploy that has not opted in is unaffected.
+func TestSkipClaimDisabledByDefault(t *testing.T) {
+	obs := &recordingObserver{}
+	b := bus.NewLocalMessageBus()
+
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs))
 	t.Cleanup(func() { s.Close(true) })
@@ -173,16 +204,19 @@ func TestUndeclaredQueueKeepsClaim(t *testing.T) {
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
 }
 
-// WithClientAlwaysClaim overrides a bus that does declare it.
-func TestAlwaysClaimOverride(t *testing.T) {
+// The kill switch: revoking mid-flight takes effect on the next request, with no
+// reconstruction of the client or server.
+func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 	obs := &recordingObserver{}
 	b := bus.NewLocalMessageBus()
+	var on atomic.Bool
+	on.Store(true)
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs))
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(on.Load))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithClientAlwaysClaim())
+		psrpc.WithClientSkipClaim(on.Load))
 	require.NoError(t, err)
 	t.Cleanup(func() { c.Close() })
 
@@ -193,9 +227,19 @@ func TestAlwaysClaimOverride(t *testing.T) {
 			return &internal.Response{}, nil
 		}, nil))
 
-	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
-	require.NoError(t, err)
+	send := func() {
+		_, err := client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+		require.NoError(t, err)
+	}
+
+	send()
+	on.Store(false)
+	send()
+	on.Store(true)
+	send()
 
 	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+	require.Equal(t, []psrpc.ClaimOutcome{
+		psrpc.ClaimSkipped, psrpc.ClaimGranted, psrpc.ClaimSkipped,
+	}, claims)
 }

@@ -37,8 +37,8 @@ type RPCServer struct {
 	psrpc.ServerOpts
 
 	bus bus.MessageBus
-	// Whether a queue rpc may skip the claim handshake.
-	skipClaim bool
+	// Whether this bus guarantees SubscribeQueue delivers to one subscriber.
+	queueExclusive bool
 
 	mu       sync.RWMutex
 	handlers map[string]rpcHandler
@@ -53,7 +53,7 @@ func NewRPCServer(sd *info.ServiceDefinition, b bus.MessageBus, opts ...psrpc.Se
 		bus:               b,
 		handlers:          make(map[string]rpcHandler),
 	}
-	s.skipClaim = bus.QueueIsExclusive(b)
+	s.queueExclusive = bus.QueueIsExclusive(b)
 	if s.ServerID != "" {
 		s.ID = s.ServerID
 	}
@@ -184,4 +184,8 @@ func (s *RPCServer) Close(force bool) {
 	if !force {
 		s.active.Wait()
 	}
+}
+
+func skipClaimEnabled(enabled func() bool) bool {
+	return enabled != nil && enabled()
 }

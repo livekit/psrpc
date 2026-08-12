@@ -33,6 +33,18 @@ type ServerOpts struct {
 	StreamInterceptors []StreamInterceptor
 	ChainedInterceptor ServerRPCInterceptor
 	RequestObserver    RequestObserver
+	SkipClaim          func() bool
+}
+
+// WithServerSkipClaim honors a caller's request to bypass the claim handshake on
+// a queue rpc while enabled. Consulted per request so it can be revoked at
+// runtime without a redeploy, and disabled when unset. A caller that asked to
+// skip still answers a claim, so revoking this is safe at any time. Ignored for
+// a bus that does not declare ExclusiveQueuer.
+func WithServerSkipClaim(enabled func() bool) ServerOption {
+	return func(o *ServerOpts) {
+		o.SkipClaim = enabled
+	}
 }
 
 func WithServerID(id string) ServerOption {
