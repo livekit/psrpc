@@ -190,19 +190,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	}
 
 	if h.i.RequireClaim {
-		// Queue is re-checked here because honoring SkipClaim on a broadcast rpc
-		// would let every server run the handler.
-		if ir.SkipClaim && h.i.Queue {
-			// Announced rather than negotiated. Failing here rather than handling
-			// anyway keeps the caller from timing out and retrying a request this
-			// server already ran.
-			if err := h.announceClaim(s, ctx, ir); err != nil {
-				return err
-			}
-			if o := s.RequestObserver; o != nil {
-				o.OnClaim(h.i.RPCInfo, psrpc.ClaimSkipped, 0)
-			}
-		} else if claimed, err := h.claimRequest(s, ctx, ir, req); err != nil {
+		if claimed, err := h.claimRequest(s, ctx, ir, req); err != nil {
 			return err
 		} else if !claimed {
 			return nil
@@ -212,20 +200,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	// call handler function and return response
 	response, err := h.handler(ctx, req)
 	return h.sendResponse(s, ctx, ir, response, err)
-}
-
-// Tells the caller a server has the request, without waiting to be granted it.
-func (h *rpcHandlerImpl[RequestType, ResponseType]) announceClaim(
-	s *RPCServer,
-	ctx context.Context,
-	ir *internal.Request,
-) error {
-	return s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
-		RequestId: ir.RequestId,
-		ServerId:  s.ID,
-		Affinity:  1,
-		Handling:  true,
-	})
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
@@ -245,25 +219,43 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		affinity = 1
 	}
 
-	claimResponseChan := make(chan *internal.ClaimResponse, 1)
+	// A queue subscription already chose this server, so the claim is announced
+	// rather than negotiated. Queue is re-checked because honoring SkipClaim on a
+	// broadcast rpc would let every server run the handler.
+	handling := ir.SkipClaim && h.i.Queue
 
-	h.mu.Lock()
-	h.claims[ir.RequestId] = claimResponseChan
-	h.mu.Unlock()
+	var claimResponseChan chan *internal.ClaimResponse
+	if !handling {
+		claimResponseChan = make(chan *internal.ClaimResponse, 1)
 
-	defer func() {
 		h.mu.Lock()
-		delete(h.claims, ir.RequestId)
+		h.claims[ir.RequestId] = claimResponseChan
 		h.mu.Unlock()
-	}()
+
+		defer func() {
+			h.mu.Lock()
+			delete(h.claims, ir.RequestId)
+			h.mu.Unlock()
+		}()
+	}
 
 	err := s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
 		RequestId: ir.RequestId,
 		ServerId:  s.ID,
 		Affinity:  affinity,
+		Handling:  handling,
 	})
 	if err != nil {
 		return false, err
+	}
+
+	// Failing above rather than handling anyway keeps the caller from timing out
+	// and retrying a request this server already ran.
+	if handling {
+		if o := s.RequestObserver; o != nil {
+			o.OnClaim(h.i.RPCInfo, psrpc.ClaimSkipped, 0)
+		}
+		return true, nil
 	}
 	// Measured from bid publication, so wait is the client's decision latency.
 	claimedAt := time.Now()
