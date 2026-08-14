@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
@@ -30,6 +31,7 @@ import (
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
+	"github.com/livekit/psrpc/testutils"
 )
 
 func enabled() bool { return true }
@@ -143,6 +145,42 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 	code, ok := psrpc.GetErrorCode(err)
 	require.True(t, ok)
 	require.NotEqual(t, psrpc.InvalidArgument, code, "no handler registered, but not a config error")
+}
+
+// A handler slower than the selection timeout but inside the request timeout.
+// The announcement is what lets the caller tell that apart from a request
+// nobody received, and the grant it replaces must not be sent.
+func TestSkipClaimSlowHandler(t *testing.T) {
+	var grants atomic.Int32
+	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if _, ok := msg.(*internal.ClaimResponse); ok {
+					grants.Add(1)
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientSkipClaim(enabled))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			// Past DefaultAffinityTimeout, inside DefaultClientTimeout.
+			time.Sleep(time.Millisecond * 1500)
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+	require.Zero(t, grants.Load(), "an announcement needs no grant")
 }
 
 // Unset means claim, so a deploy that has not opted in is unaffected.

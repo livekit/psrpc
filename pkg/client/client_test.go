@@ -88,34 +88,48 @@ func testAffinity(t *testing.T, opts psrpc.SelectionOpts, expectedID string) {
 			Affinity:  0.9,
 		}
 	}()
-	serverID, _, err := selectServer(context.Background(), c, nil, opts, false)
+	sel, err := selectServer(context.Background(), c, nil, opts)
 	require.NoError(t, err)
-	require.Equal(t, expectedID, serverID)
+	require.Equal(t, expectedID, sel.serverID)
 }
 
-// A caller that asked to skip the claim must still honor one, so that a server
-// predating the skip_claim field keeps working.
-func TestSelectServerSkipClaimHonorsClaim(t *testing.T) {
+// A bid from a server predating skip_claim must still be granted.
+func TestSelectServerGrantsABid(t *testing.T) {
 	claims := make(chan *internal.ClaimRequest, 1)
 	claims <- &internal.ClaimRequest{RequestId: "1", ServerId: "2", Affinity: 1}
 
-	serverID, res, err := selectServer(context.Background(), claims, make(chan *internal.Response, 1),
-		psrpc.SelectionOpts{AcceptFirstAvailable: true}, true)
+	sel, err := selectServer(context.Background(), claims, make(chan *internal.Response, 1),
+		psrpc.SelectionOpts{AcceptFirstAvailable: true})
 	require.NoError(t, err)
-	require.Nil(t, res, "a claim was answered, so there is no early response")
-	require.Equal(t, "2", serverID)
+	require.Equal(t, "2", sel.serverID)
+	require.False(t, sel.handling, "a bid still needs granting")
+	require.Nil(t, sel.res)
 }
 
-// A server that understood skip_claim responds without claiming, and the
-// response must be handed back rather than consumed during selection.
-func TestSelectServerSkipClaimReturnsResponse(t *testing.T) {
+// An announcement ends selection without a grant, whatever the affinity options
+// would otherwise have done.
+func TestSelectServerHonorsAnnouncement(t *testing.T) {
+	claims := make(chan *internal.ClaimRequest, 1)
+	claims <- &internal.ClaimRequest{RequestId: "1", ServerId: "2", Affinity: 1, Handling: true}
+
+	sel, err := selectServer(context.Background(), claims, make(chan *internal.Response, 1),
+		psrpc.SelectionOpts{MinimumAffinity: 2, AffinityTimeout: time.Second})
+	require.NoError(t, err)
+	require.Equal(t, "2", sel.serverID)
+	require.True(t, sel.handling)
+	require.Nil(t, sel.res)
+}
+
+// A response can beat the announcement, and must be handed back rather than
+// consumed during selection.
+func TestSelectServerReturnsEarlyResponse(t *testing.T) {
 	responses := make(chan *internal.Response, 1)
 	responses <- &internal.Response{RequestId: "1", ServerId: "2"}
 
-	serverID, res, err := selectServer(context.Background(), make(chan *internal.ClaimRequest, 1), responses,
-		psrpc.SelectionOpts{AcceptFirstAvailable: true}, true)
+	sel, err := selectServer(context.Background(), make(chan *internal.ClaimRequest, 1), responses,
+		psrpc.SelectionOpts{AcceptFirstAvailable: true})
 	require.NoError(t, err)
-	require.NotNil(t, res)
-	require.Equal(t, "2", res.ServerId)
-	require.Empty(t, serverID)
+	require.NotNil(t, sel.res)
+	require.Equal(t, "2", sel.res.ServerId)
+	require.Empty(t, sel.serverID)
 }

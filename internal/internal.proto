@@ -57,6 +57,9 @@ message ClaimRequest {
   string request_id = 1;
   string server_id = 2;
   float affinity = 3;
+  // Handling has begun and no ClaimResponse is awaited. Announced so the caller
+  // can tell a slow handler from a request nobody received.
+  bool handling = 4;
 }
 
 message ClaimResponse {

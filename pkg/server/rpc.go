@@ -193,6 +193,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 		// Queue is re-checked here because honoring SkipClaim on a broadcast rpc
 		// would let every server run the handler.
 		if ir.SkipClaim && h.i.Queue {
+			// Announced rather than negotiated. Failing here rather than handling
+			// anyway keeps the caller from timing out and retrying a request this
+			// server already ran.
+			if err := h.announceClaim(s, ctx, ir); err != nil {
+				return err
+			}
 			if o := s.RequestObserver; o != nil {
 				o.OnClaim(h.i.RPCInfo, psrpc.ClaimSkipped, 0)
 			}
@@ -206,6 +212,20 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	// call handler function and return response
 	response, err := h.handler(ctx, req)
 	return h.sendResponse(s, ctx, ir, response, err)
+}
+
+// Tells the caller a server has the request, without waiting to be granted it.
+func (h *rpcHandlerImpl[RequestType, ResponseType]) announceClaim(
+	s *RPCServer,
+	ctx context.Context,
+	ir *internal.Request,
+) error {
+	return s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
+		RequestId: ir.RequestId,
+		ServerId:  s.ID,
+		Affinity:  1,
+		Handling:  true,
+	})
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
