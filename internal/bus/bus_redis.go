@@ -42,9 +42,10 @@ const (
 )
 
 type redisMessageBus struct {
-	rc  redis.UniversalClient
-	ctx context.Context
-	ps  *redis.PubSub
+	rc     redis.UniversalClient
+	ctx    context.Context
+	ps     *redis.PubSub
+	prefix string
 
 	mu     sync.Mutex
 	subs   map[string]*redisSubList
@@ -58,12 +59,34 @@ type redisMessageBus struct {
 	publishQueues [publishBuckets]*redisPublishQueue
 }
 
-func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
+// RedisOption configures optional behavior of the redis MessageBus.
+type RedisOption func(*redisOpts)
+
+type redisOpts struct {
+	channelPrefix string
+}
+
+// WithChannelPrefix prepends prefix to every redis pubsub channel name
+// used by the bus, so multiple psrpc deployments can share one redis
+// instance without colliding on channel names.
+func WithChannelPrefix(prefix string) RedisOption {
+	return func(o *redisOpts) {
+		o.channelPrefix = prefix
+	}
+}
+
+func NewRedisMessageBus(rc redis.UniversalClient, opts ...RedisOption) MessageBus {
+	o := &redisOpts{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	ctx := context.Background()
 	r := &redisMessageBus{
 		rc:     rc,
 		ctx:    ctx,
 		ps:     rc.Subscribe(ctx),
+		prefix: o.channelPrefix,
 		subs:   map[string]*redisSubList{},
 		queues: map[string]*redisSubList{},
 
@@ -80,23 +103,28 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 	return r
 }
 
+func (r *redisMessageBus) chanName(channel Channel) string {
+	return r.prefix + channel.Legacy
+}
+
 func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
 	b, err := serialize(msg, "")
 	if err != nil {
 		return err
 	}
 
-	bucket := xxh3.HashString(channel.Legacy) % publishBuckets
-	r.publishQueues[bucket].Enqueue(channel.Legacy, b)
+	name := r.chanName(channel)
+	bucket := xxh3.HashString(name) % publishBuckets
+	r.publishQueues[bucket].Enqueue(name, b)
 	return nil
 }
 
 func (r *redisMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
-	return r.subscribe(ctx, channel.Legacy, size, r.subs, false)
+	return r.subscribe(ctx, r.chanName(channel), size, r.subs, false)
 }
 
 func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
-	return r.subscribe(ctx, channel.Legacy, size, r.queues, true)
+	return r.subscribe(ctx, r.chanName(channel), size, r.queues, true)
 }
 
 func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (Reader, error) {

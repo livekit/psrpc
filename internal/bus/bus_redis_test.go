@@ -21,6 +21,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -28,6 +29,13 @@ import (
 	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 )
+
+// redisPrefixServer exposes the extra bustest.redisServer methods needed to
+// test WithChannelPrefix, without widening the shared bustest.Server interface.
+type redisPrefixServer interface {
+	Addr() string
+	ConnectWithOptions(t testing.TB, opts ...bus.RedisOption) bus.MessageBus
+}
 
 func redisTestChannel(channel string) bus.Channel {
 	return bus.Channel{Legacy: channel}
@@ -91,6 +99,53 @@ func TestRedisMessageBus(t *testing.T) {
 		time.Sleep(time.Second)
 
 		require.EqualValues(t, 1, n.Load())
+	})
+
+	t.Run("channel prefix is applied on the wire and isolates subscribers", func(t *testing.T) {
+		rs := srv.(redisPrefixServer)
+
+		bA1 := rs.ConnectWithOptions(t, bus.WithChannelPrefix("tenantA:"))
+		bA2 := rs.ConnectWithOptions(t, bus.WithChannelPrefix("tenantA:"))
+		bB := rs.ConnectWithOptions(t, bus.WithChannelPrefix("tenantB:"))
+
+		rA, err := bA2.Subscribe(context.Background(), redisTestChannel("test"), 100)
+		require.NoError(t, err)
+		rB, err := bB.Subscribe(context.Background(), redisTestChannel("test"), 100)
+		require.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+
+		// the actual redis channel names must carry each bus's prefix; the
+		// shared test server may have other channels live from sibling
+		// subtests, so check containment rather than the full set.
+		rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{rs.Addr()}})
+		defer rc.Close()
+		channels, err := rc.PubSubChannels(context.Background(), "*").Result()
+		require.NoError(t, err)
+		require.Subset(t, channels, []string{"tenantA:test", "tenantB:test"})
+
+		src := wrapperspb.String("hello")
+		require.NoError(t, bA1.Publish(context.Background(), redisTestChannel("test"), src))
+
+		// same prefix: message is received
+		b, ok := bus.RawRead(rA)
+		require.True(t, ok)
+		dst, err := bus.Deserialize(b)
+		require.NoError(t, err)
+		require.Equal(t, src.Value, dst.(*wrapperspb.StringValue).Value)
+
+		// different prefix: message must not leak across the namespace
+		received := make(chan struct{})
+		go func() {
+			if _, ok := bus.RawRead(rB); ok {
+				close(received)
+			}
+		}()
+		select {
+		case <-received:
+			t.Fatal("subscriber with a different channel prefix received a message published under another prefix")
+		case <-time.After(500 * time.Millisecond):
+		}
 	})
 
 	t.Run("closed subscriptions are unreadable", func(t *testing.T) {

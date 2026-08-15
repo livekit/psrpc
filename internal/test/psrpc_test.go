@@ -93,7 +93,7 @@ func testRPC(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	require.NoError(t, err)
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverB, rpc, nil, addOne, nil)
 	require.NoError(t, err)
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	ctx := context.Background()
 	requestID := rand.NewRequestID()
@@ -116,7 +116,7 @@ func testRPC(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	require.NoError(t, err)
 	err = server.RegisterHandler[*internal.Request, *internal.Response](serverC, multiRpc, nil, returnError, nil)
 	require.NoError(t, err)
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	requestID = rand.NewRequestID()
 	resChan, err := client.RequestMulti[*internal.Response](
@@ -183,7 +183,7 @@ func testStream(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 
 	err = server.RegisterStreamHandler[*internal.Response, *internal.Response](serverA, rpc, nil, handlePing, nil)
 	require.NoError(t, err)
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	ctx := context.Background()
 	stream, err := client.OpenStream[*internal.Response, *internal.Response](
