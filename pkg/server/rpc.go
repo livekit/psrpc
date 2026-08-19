@@ -220,9 +220,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 	}
 
 	// A queue subscription already chose this server, so the claim is announced
-	// rather than negotiated. Queue is re-checked because honoring SkipClaim on a
-	// broadcast rpc would let every server run the handler.
-	handling := ir.SkipClaim && h.i.Queue
+	// rather than negotiated. Either side may elect to skip: the caller per
+	// request, or this server for everything it handles. Queue is re-checked
+	// because honoring a skip on a broadcast rpc would let every server run the
+	// handler.
+	serverSkip := s.SkipClaim != nil && s.SkipClaim()
+	handling := (ir.SkipClaim || serverSkip) && h.i.Queue
 
 	var claimResponseChan chan *internal.ClaimResponse
 	if !handling {
