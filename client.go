@@ -40,17 +40,6 @@ type ClientOpts struct {
 	RpcInterceptors      []ClientRPCInterceptor
 	MultiRPCInterceptors []ClientMultiRPCInterceptor
 	StreamInterceptors   []StreamInterceptor
-	SkipClaim            func() bool
-}
-
-// WithClientSkipClaim lets a queue rpc bypass the claim handshake while enabled,
-// which is only sound if the bus delivers a queue subscription to exactly one
-// subscriber. Consulted per request so it can be revoked at runtime without a
-// redeploy, and disabled when unset.
-func WithClientSkipClaim(enabled func() bool) ClientOption {
-	return func(o *ClientOpts) {
-		o.SkipClaim = enabled
-	}
 }
 
 func WithClientID(id string) ClientOption {

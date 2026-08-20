@@ -45,10 +45,9 @@ func TestSkipClaim(t *testing.T) {
 		b := newBus(t)
 
 		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithServerObserver(obs))
+			psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
 		t.Cleanup(func() { s.Close(true) })
-		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithClientSkipClaim(enabled))
+		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 		require.NoError(t, err)
 		t.Cleanup(func() { c.Close() })
 
@@ -162,10 +161,10 @@ func TestSkipClaimSlowHandler(t *testing.T) {
 			}
 		}))
 
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerSkipClaim(enabled))
 	t.Cleanup(func() { s.Close(true) })
-	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithClientSkipClaim(enabled))
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
 	t.Cleanup(func() { c.Close() })
 
@@ -218,103 +217,6 @@ func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 	on.Store(true)
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs))
-	t.Cleanup(func() { s.Close(true) })
-	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithClientSkipClaim(on.Load))
-	require.NoError(t, err)
-	t.Cleanup(func() { c.Close() })
-
-	s.RegisterMethod("queued", false, false, true, true)
-	c.RegisterMethod("queued", false, false, true, true)
-	require.NoError(t, server.RegisterHandler(s, "queued", nil,
-		func(context.Context, *internal.Request) (*internal.Response, error) {
-			return &internal.Response{}, nil
-		}, nil))
-
-	send := func() {
-		_, err := client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
-		require.NoError(t, err)
-	}
-
-	send()
-	on.Store(false)
-	send()
-	on.Store(true)
-	send()
-
-	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{
-		psrpc.ClaimSkipped, psrpc.ClaimGranted, psrpc.ClaimSkipped,
-	}, claims)
-}
-
-// The server-side gate, for callers that build their clients without passing
-// options through. Same property, decided at the other end: the client here is
-// plain, exactly as an un-upgraded caller would be.
-func TestServerSkipClaim(t *testing.T) {
-	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
-		const queued, broadcast = "server_skip_queued", "server_skip_broadcast"
-
-		obs := &recordingObserver{}
-		b := newBus(t)
-
-		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
-		t.Cleanup(func() { s.Close(true) })
-		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
-		require.NoError(t, err)
-		t.Cleanup(func() { c.Close() })
-
-		for _, rpc := range []string{queued, broadcast} {
-			queue := rpc == queued
-			s.RegisterMethod(rpc, false, false, true, queue)
-			c.RegisterMethod(rpc, false, false, true, queue)
-		}
-
-		var queuedCalls, broadcastCalls atomic.Int32
-		require.NoError(t, server.RegisterHandler(s, queued, nil,
-			func(context.Context, *internal.Request) (*internal.Response, error) {
-				queuedCalls.Add(1)
-				return &internal.Response{}, nil
-			}, nil))
-		require.NoError(t, server.RegisterHandler(s, broadcast, nil,
-			func(context.Context, *internal.Request) (*internal.Response, error) {
-				broadcastCalls.Add(1)
-				return &internal.Response{}, nil
-			}, nil))
-
-		// The redis bus reconciles subscriptions asynchronously; publishing now races.
-		time.Sleep(time.Second)
-
-		_, err = client.RequestSingle[*internal.Response](context.Background(), c, queued, nil, &internal.Request{})
-		require.NoError(t, err, "a client that never opted in must still complete")
-
-		received, claims := obs.snapshot()
-		require.Equal(t, 1, received)
-		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped}, claims)
-		require.EqualValues(t, 1, queuedCalls.Load(), "handler must run exactly once")
-
-		_, err = client.RequestSingle[*internal.Response](context.Background(), c, broadcast, nil, &internal.Request{})
-		require.NoError(t, err)
-
-		received, claims = obs.snapshot()
-		require.Equal(t, 2, received)
-		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped, psrpc.ClaimGranted}, claims,
-			"broadcast RPC must still claim")
-		require.EqualValues(t, 1, broadcastCalls.Load())
-	})
-}
-
-// The kill switch has to work from the server end too, since that is the only
-// end some deployments can reach.
-func TestServerSkipClaimRevokedAtRuntime(t *testing.T) {
-	obs := &recordingObserver{}
-	b := bus.NewLocalMessageBus()
-	var on atomic.Bool
-	on.Store(true)
-
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(on.Load))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
@@ -343,4 +245,42 @@ func TestServerSkipClaimRevokedAtRuntime(t *testing.T) {
 	require.Equal(t, []psrpc.ClaimOutcome{
 		psrpc.ClaimSkipped, psrpc.ClaimGranted, psrpc.ClaimSkipped,
 	}, claims)
+}
+
+// A caller too old to advertise must still be granted, even against a server
+// that has elected to skip. This is the property that makes a mixed-version
+// fleet safe: an announcement only ever reaches a caller that asked for one.
+func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
+	obs := &recordingObserver{}
+	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					// As a client predating the field would leave it.
+					req.SkipClaim = false
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
+		"a caller that did not advertise must be negotiated with")
 }

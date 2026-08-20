@@ -38,7 +38,9 @@ message Request {
   google.protobuf.Any request = 6;
   map<string, string> metadata = 7;
   bytes raw_request = 8;
-  // Advisory: the caller still answers a claim, so older servers are unaffected.
+  // Advertises that the caller can accept an announcement in place of a claim.
+  // The server decides whether to make one, so a caller too old to set this is
+  // never sent one.
   bool skip_claim = 9;
 }
 

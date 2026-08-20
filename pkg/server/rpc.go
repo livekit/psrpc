@@ -219,13 +219,13 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		affinity = 1
 	}
 
-	// A queue subscription already chose this server, so the claim is announced
-	// rather than negotiated. Either side may elect to skip: the caller per
-	// request, or this server for everything it handles. Queue is re-checked
-	// because honoring a skip on a broadcast rpc would let every server run the
-	// handler.
+	// A queue subscription already chose this server, so the claim can be
+	// announced rather than negotiated. Both ends have to agree: the caller
+	// advertises that it can accept an announcement, and this server elects to
+	// make one. Queue is re-checked because announcing on a broadcast rpc would
+	// let every server run the handler.
 	serverSkip := s.SkipClaim != nil && s.SkipClaim()
-	handling := (ir.SkipClaim || serverSkip) && h.i.Queue
+	handling := ir.SkipClaim && serverSkip && h.i.Queue
 
 	var claimResponseChan chan *internal.ClaimResponse
 	if !handling {

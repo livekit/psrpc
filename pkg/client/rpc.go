@@ -109,8 +109,10 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			// The queue already chose the server; the claim only ratifies it.
-			SkipClaim: i.Queue && c.SkipClaim != nil && c.SkipClaim(),
+			// Advertises that this caller can accept an announcement in place of
+			// a claim, which it always can. Whether one is made is the server's
+			// call; a caller too old to advertise is never sent one.
+			SkipClaim: i.Queue,
 		}
 
 		var claimChan chan *internal.ClaimRequest
