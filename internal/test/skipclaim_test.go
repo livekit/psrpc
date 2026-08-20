@@ -248,3 +248,42 @@ func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 		psrpc.ClaimSkipped, psrpc.ClaimGranted, psrpc.ClaimSkipped,
 	}, claims)
 }
+
+// The failure that motivated skipping selection: a handler that errors on
+// receipt publishes its response right behind the announcement, so a client
+// selecting between the two channels can take the response for a bid, stash it,
+// and then wait out the request timeout for a response it already consumed.
+// Looping makes the lost race certain rather than even money.
+func TestSkipClaimFastFailingHandler(t *testing.T) {
+	b := bus.NewLocalMessageBus()
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientSkipClaim(enabled))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return nil, psrpc.NewErrorf(psrpc.NotFound, "requested room does not exist")
+		}, nil))
+
+	const timeout = time.Second
+
+	for i := 0; i < 20; i++ {
+		start := time.Now()
+		_, err := client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+			&internal.Request{}, psrpc.WithRequestTimeout(timeout))
+
+		require.Error(t, err)
+		require.NotErrorIs(t, err, psrpc.ErrRequestTimedOut,
+			"the handler answered, so the caller must not time out")
+		code, ok := psrpc.GetErrorCode(err)
+		require.True(t, ok)
+		require.Equal(t, psrpc.NotFound, code, "the handler's error must reach the caller")
+		require.Less(t, time.Since(start), timeout/2, "the answer must not wait out the timeout")
+	}
+}

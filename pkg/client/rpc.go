@@ -245,7 +245,12 @@ func selectServer(
 
 		case claim := <-claimChan:
 			if claim.Handling {
-				// Announced, not bid: there is nothing to select between.
+				// Announced, not bid: there is nothing to select between. An error
+				// response already taken below is this request's answer; the caller
+				// cannot re-read it, so surface it rather than strand it.
+				if resErr != nil {
+					return selection{}, resErr
+				}
 				return selection{serverID: claim.ServerId, handling: true}, nil
 			}
 			claimCount++
