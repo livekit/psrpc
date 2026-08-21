@@ -95,7 +95,8 @@ func OpenStream[SendType, RecvType proto.Message](
 	}
 
 	if i.RequireClaim {
-		sel, err := selectServer(ctx, claimChan, nil, o.SelectionOpts)
+		// Streams negotiate on a nil resChan, so queue-ness cannot matter here.
+		sel, err := selectServer(ctx, claimChan, nil, o.SelectionOpts, false)
 		if err != nil {
 			_ = cs.Close(err)
 			return nil, err

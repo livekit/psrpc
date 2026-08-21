@@ -284,3 +284,55 @@ func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
 		"a caller that did not advertise must be negotiated with")
 }
+
+// CS-1992: a handler that errors on receipt publishes its response right
+// behind the announcement, on a different channel, and nothing orders their
+// delivery. When the response won the race it was stashed as a fallback while
+// the announcement sent the caller off to wait on a channel already drained,
+// turning an instant error into a request timeout. On a queue rpc the
+// responder is the only server that received the request, so any response is
+// the answer. Losing the race depends on scheduling, so the bus holds every
+// announcement back to force it.
+func TestSkipClaimFastFailingHandler(t *testing.T) {
+	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if _, ok := msg.(*internal.ClaimRequest); ok {
+					go func() {
+						time.Sleep(50 * time.Millisecond)
+						_ = next(ctx, channel, msg)
+					}()
+					return nil
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return nil, psrpc.NewErrorf(psrpc.NotFound, "requested room does not exist")
+		}, nil))
+
+	const timeout = time.Second
+
+	start := time.Now()
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+		&internal.Request{}, psrpc.WithRequestTimeout(timeout))
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, psrpc.ErrRequestTimedOut,
+		"the handler answered, so the caller must not time out")
+	code, ok := psrpc.GetErrorCode(err)
+	require.True(t, ok)
+	require.Equal(t, psrpc.NotFound, code, "the handler's error must reach the caller")
+	require.Less(t, time.Since(start), timeout/2, "the answer must not wait out the timeout")
+}

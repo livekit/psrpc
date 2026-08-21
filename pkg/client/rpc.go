@@ -146,7 +146,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		var res *internal.Response
 
 		if i.RequireClaim {
-			sel, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+			sel, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, i.Queue)
 			if err != nil {
 				return nil, err
 			}
@@ -210,6 +210,7 @@ func selectServer(
 	claimChan chan *internal.ClaimRequest,
 	resChan chan *internal.Response,
 	opts psrpc.SelectionOpts,
+	queue bool,
 ) (selection, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -270,12 +271,15 @@ func selectServer(
 			}
 
 		case res := <-resChan:
-			if res.Error == "" {
-				// Only a server that never waited to be granted answers this early,
-				// and consuming it here would strand the response.
+			// Only a server that never waited to be granted answers this early, and
+			// consuming it here would strand the response. On a queue rpc that
+			// server is the only one that received the request, so even an error is
+			// the request's answer -- an announcement racing behind it selects
+			// nothing. Held back only on broadcast, where an early error is one
+			// server rejecting a request it could not read and another may yet bid.
+			if res.Error == "" || queue {
 				return selection{res: res}, nil
 			}
-			// otherwise a malformed request, which is answered before any claim
 			resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 		}
 	}
