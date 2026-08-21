@@ -247,9 +247,8 @@ func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 	}, claims)
 }
 
-// A caller too old to advertise must still be granted, even against a server
-// that has elected to skip. This is the property that makes a mixed-version
-// fleet safe: an announcement only ever reaches a caller that asked for one.
+// A caller that does not advertise must be negotiated with, even by a server
+// that elected to skip.
 func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 	obs := &recordingObserver{}
 	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
@@ -285,14 +284,8 @@ func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 		"a caller that did not advertise must be negotiated with")
 }
 
-// CS-1992: a handler that errors on receipt publishes its response right
-// behind the announcement, on a different channel, and nothing orders their
-// delivery. When the response won the race it was stashed as a fallback while
-// the announcement sent the caller off to wait on a channel already drained,
-// turning an instant error into a request timeout. On a queue rpc the
-// responder is the only server that received the request, so any response is
-// the answer. Losing the race depends on scheduling, so the bus holds every
-// announcement back to force it.
+// CS-1992: an error response that beat the announcement was stashed while the
+// caller waited out the timeout. The bus delays announcements to force that order.
 func TestSkipClaimFastFailingHandler(t *testing.T) {
 	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
 		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {

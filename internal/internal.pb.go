@@ -150,9 +150,7 @@ type Request struct {
 	Request    *anypb.Any             `protobuf:"bytes,6,opt,name=request,proto3" json:"request,omitempty"`
 	Metadata   map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	RawRequest []byte                 `protobuf:"bytes,8,opt,name=raw_request,json=rawRequest,proto3" json:"raw_request,omitempty"`
-	// Advertises that the caller can accept an announcement in place of a claim.
-	// The server decides whether to make one, so a caller too old to set this is
-	// never sent one.
+	// Advertises that an announcement may replace the claim; the server decides.
 	SkipClaim     bool `protobuf:"varint,10,opt,name=skip_claim,json=skipClaim,proto3" json:"skip_claim,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

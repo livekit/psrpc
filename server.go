@@ -36,11 +36,8 @@ type ServerOpts struct {
 	SkipClaim          func() bool
 }
 
-// WithServerSkipClaim lets this server announce that it is handling a queue rpc
-// rather than negotiating a claim, for every request whose caller advertised
-// that it can accept one. Only sound if the bus delivers a queue subscription to
-// exactly one subscriber. Consulted per request so it can be revoked at runtime
-// without a redeploy, and disabled when unset.
+// WithServerSkipClaim answers advertised queue rpcs with an announcement rather
+// than a claim. Read per request, so revocable at runtime; off when unset.
 func WithServerSkipClaim(enabled func() bool) ServerOption {
 	return func(o *ServerOpts) {
 		o.SkipClaim = enabled

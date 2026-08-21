@@ -134,8 +134,7 @@ func TestSelectServerReturnsEarlyResponse(t *testing.T) {
 	require.Empty(t, sel.serverID)
 }
 
-// On a queue rpc an error response is the answer: the responder is the only
-// server that received the request, so nothing else can arrive (CS-1992).
+// CS-1992: on queue an error response is the answer, not a fallback.
 func TestSelectServerReturnsQueueError(t *testing.T) {
 	responses := make(chan *internal.Response, 1)
 	responses <- &internal.Response{RequestId: "1", ServerId: "2", Error: "not found", Code: "not_found"}
@@ -146,8 +145,7 @@ func TestSelectServerReturnsQueueError(t *testing.T) {
 	require.NotNil(t, sel.res, "the error response is the answer, not a fallback")
 }
 
-// On broadcast the same early error is one server rejecting a request it could
-// not read; another may yet bid, so it is held as the fallback answer.
+// On broadcast an early error is held back so a healthy bid can win.
 func TestSelectServerStashesBroadcastError(t *testing.T) {
 	responses := make(chan *internal.Response, 1)
 	responses <- &internal.Response{RequestId: "1", ServerId: "2", Error: "boom", Code: "internal"}

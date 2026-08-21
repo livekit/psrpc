@@ -38,14 +38,9 @@ message Request {
   google.protobuf.Any request = 6;
   map<string, string> metadata = 7;
   bytes raw_request = 8;
-  // Field 9 carried the caller's *election* of the skip, which pre-election
-  // servers honored unconditionally. Setting the advertisement there would
-  // switch those servers on with no opt-in, so it lives at 10, which they
-  // never read.
+  // 9 was the caller-elected skip, which older servers honor unconditionally.
   reserved 9;
-  // Advertises that the caller can accept an announcement in place of a claim.
-  // The server decides whether to make one, so a caller too old to set this is
-  // never sent one.
+  // Advertises that an announcement may replace the claim; the server decides.
   bool skip_claim = 10;
 }
 

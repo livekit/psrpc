@@ -109,9 +109,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			// Advertises that this caller can accept an announcement in place of
-			// a claim, which it always can. Whether one is made is the server's
-			// call; a caller too old to advertise is never sent one.
+			// Advertises that an announcement may replace the claim; making one is the server's call.
 			SkipClaim: i.Queue,
 		}
 
@@ -271,12 +269,8 @@ func selectServer(
 			}
 
 		case res := <-resChan:
-			// Only a server that never waited to be granted answers this early, and
-			// consuming it here would strand the response. On a queue rpc that
-			// server is the only one that received the request, so even an error is
-			// the request's answer -- an announcement racing behind it selects
-			// nothing. Held back only on broadcast, where an early error is one
-			// server rejecting a request it could not read and another may yet bid.
+			// On queue the sole responder's answer is final, error or not; on
+			// broadcast an early error may yet be outbid, so it is held back.
 			if res.Error == "" || queue {
 				return selection{res: res}, nil
 			}
