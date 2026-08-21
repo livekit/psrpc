@@ -88,7 +88,7 @@ func testAffinity(t *testing.T, opts psrpc.SelectionOpts, expectedID string) {
 			Affinity:  0.9,
 		}
 	}()
-	sel, err := selectServer(context.Background(), c, nil, opts)
+	sel, err := selectServer(context.Background(), c, nil, opts, false)
 	require.NoError(t, err)
 	require.Equal(t, expectedID, sel.serverID)
 }
@@ -99,7 +99,7 @@ func TestSelectServerGrantsABid(t *testing.T) {
 	claims <- &internal.ClaimRequest{RequestId: "1", ServerId: "2", Affinity: 1}
 
 	sel, err := selectServer(context.Background(), claims, make(chan *internal.Response, 1),
-		psrpc.SelectionOpts{AcceptFirstAvailable: true})
+		psrpc.SelectionOpts{AcceptFirstAvailable: true}, true)
 	require.NoError(t, err)
 	require.Equal(t, "2", sel.serverID)
 	require.False(t, sel.handling, "a bid still needs granting")
@@ -113,7 +113,7 @@ func TestSelectServerHonorsAnnouncement(t *testing.T) {
 	claims <- &internal.ClaimRequest{RequestId: "1", ServerId: "2", Affinity: 1, Handling: true}
 
 	sel, err := selectServer(context.Background(), claims, make(chan *internal.Response, 1),
-		psrpc.SelectionOpts{MinimumAffinity: 2, AffinityTimeout: time.Second})
+		psrpc.SelectionOpts{MinimumAffinity: 2, AffinityTimeout: time.Second}, true)
 	require.NoError(t, err)
 	require.Equal(t, "2", sel.serverID)
 	require.True(t, sel.handling)
@@ -127,9 +127,40 @@ func TestSelectServerReturnsEarlyResponse(t *testing.T) {
 	responses <- &internal.Response{RequestId: "1", ServerId: "2"}
 
 	sel, err := selectServer(context.Background(), make(chan *internal.ClaimRequest, 1), responses,
-		psrpc.SelectionOpts{AcceptFirstAvailable: true})
+		psrpc.SelectionOpts{AcceptFirstAvailable: true}, true)
 	require.NoError(t, err)
 	require.NotNil(t, sel.res)
 	require.Equal(t, "2", sel.res.ServerId)
 	require.Empty(t, sel.serverID)
+}
+
+// On a queue rpc an error response is the answer: the responder is the only
+// server that received the request, so nothing else can arrive (CS-1992).
+func TestSelectServerReturnsQueueError(t *testing.T) {
+	responses := make(chan *internal.Response, 1)
+	responses <- &internal.Response{RequestId: "1", ServerId: "2", Error: "not found", Code: "not_found"}
+
+	sel, err := selectServer(context.Background(), make(chan *internal.ClaimRequest, 1), responses,
+		psrpc.SelectionOpts{AcceptFirstAvailable: true}, true)
+	require.NoError(t, err)
+	require.NotNil(t, sel.res, "the error response is the answer, not a fallback")
+}
+
+// On broadcast the same early error is one server rejecting a request it could
+// not read; another may yet bid, so it is held as the fallback answer.
+func TestSelectServerStashesBroadcastError(t *testing.T) {
+	responses := make(chan *internal.Response, 1)
+	responses <- &internal.Response{RequestId: "1", ServerId: "2", Error: "boom", Code: "internal"}
+	claims := make(chan *internal.ClaimRequest, 1)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		claims <- &internal.ClaimRequest{RequestId: "1", ServerId: "3", Affinity: 1}
+	}()
+
+	sel, err := selectServer(context.Background(), claims, responses,
+		psrpc.SelectionOpts{AcceptFirstAvailable: true, AffinityTimeout: time.Second}, false)
+	require.NoError(t, err)
+	require.Equal(t, "3", sel.serverID, "a healthy bid must win over a stashed rejection")
+	require.Nil(t, sel.res)
 }
