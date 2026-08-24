@@ -38,8 +38,10 @@ message Request {
   google.protobuf.Any request = 6;
   map<string, string> metadata = 7;
   bytes raw_request = 8;
-  // Advisory: the caller still answers a claim, so older servers are unaffected.
-  bool skip_claim = 9;
+  // 9 was the caller-elected skip, which older servers honor unconditionally.
+  reserved 9;
+  // Advertises that an announcement may replace the claim; the server decides.
+  bool skip_claim = 10;
 }
 
 message Response {

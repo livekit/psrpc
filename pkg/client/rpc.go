@@ -109,8 +109,8 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			// The queue already chose the server; the claim only ratifies it.
-			SkipClaim: i.Queue && c.SkipClaim != nil && c.SkipClaim(),
+			// Advertises that an announcement may replace the claim; making one is the server's call.
+			SkipClaim: i.Queue,
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -144,7 +144,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		var res *internal.Response
 
 		if i.RequireClaim {
-			sel, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts)
+			sel, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, i.Queue)
 			if err != nil {
 				return nil, err
 			}
@@ -208,6 +208,7 @@ func selectServer(
 	claimChan chan *internal.ClaimRequest,
 	resChan chan *internal.Response,
 	opts psrpc.SelectionOpts,
+	queue bool,
 ) (selection, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -268,12 +269,11 @@ func selectServer(
 			}
 
 		case res := <-resChan:
-			if res.Error == "" {
-				// Only a server that never waited to be granted answers this early,
-				// and consuming it here would strand the response.
+			// On queue the sole responder's answer is final, error or not; on
+			// broadcast an early error may yet be outbid, so it is held back.
+			if res.Error == "" || queue {
 				return selection{res: res}, nil
 			}
-			// otherwise a malformed request, which is answered before any claim
 			resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 		}
 	}

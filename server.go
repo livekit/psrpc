@@ -33,6 +33,15 @@ type ServerOpts struct {
 	StreamInterceptors []StreamInterceptor
 	ChainedInterceptor ServerRPCInterceptor
 	RequestObserver    RequestObserver
+	SkipClaim          func() bool
+}
+
+// WithServerSkipClaim answers advertised queue rpcs with an announcement rather
+// than a claim. Read per request, so revocable at runtime; off when unset.
+func WithServerSkipClaim(enabled func() bool) ServerOption {
+	return func(o *ServerOpts) {
+		o.SkipClaim = enabled
+	}
 }
 
 func WithServerID(id string) ServerOption {
