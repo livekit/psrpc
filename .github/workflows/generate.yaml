@@ -12,24 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Test
+name: Generate
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches-ignore: [main]
 
 jobs:
-  test:
+  generate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Needed even though generate.yaml owns the committed output: internal/test
-      # gitignores **/*.psrpc.go, so the fixtures the tests compile against have to be
-      # generated here before anything builds.
+      # Pinned exactly: protoc stamps its version into every generated file, so a
+      # release bump rewrites the committed output. Moving this is a deliberate edit
+      # whose header churn is reviewable on its own.
       - name: Install Protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
@@ -44,7 +42,19 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      # testall regenerates the gitignored fixtures, then tests. Redis and NATS are
-      # started by the tests themselves via dockertest.
-      - name: Mage Test
-        run: go tool mage testall
+      # protoc-gen-go and mage come from the tool directives in go.mod, so generation
+      # runs the versions pinned there instead of whatever is latest today.
+      - name: Generate Protobuf
+        run: go tool mage proto
+
+      # Also generates the internal/test fixtures. Their *.pb.go is committed; the
+      # *.psrpc.go beside it is gitignored, built from this tree by protoc-gen-psrpc.
+      - name: Generate test fixtures
+        run: go tool mage generate
+
+      - name: Add changes
+        uses: EndBug/add-and-commit@290ea2c423ad77ca9c62ae0f5b224379612c0321 # v10.0.0
+        with:
+          add: '["internal", "testutils", "protoc-gen-psrpc/options"]'
+          default_author: github_actions
+          message: generated protobuf
