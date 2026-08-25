@@ -21,6 +21,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read # Only reads the checkout; setup-protoc's repo-token needs no more
+
 jobs:
   test:
     runs-on: ubuntu-latest
