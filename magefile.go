@@ -22,9 +22,25 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/livekit/mageutil"
 )
+
+// goToolPath builds a protoc plugin from the tool directives in go.mod and returns its
+// path, so generation uses the pinned version rather than whatever happens to be on PATH.
+func goToolPath(name string) (string, error) {
+	out, err := exec.Command("go", "tool", "-n", name).Output()
+	if err != nil {
+		return "", fmt.Errorf("resolving tool %s: %w", name, err)
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", fmt.Errorf("resolving tool %s: no path returned", name)
+	}
+	return path, nil
+}
 
 var Default = Test
 
@@ -39,7 +55,7 @@ func Proto() error {
 	if err != nil {
 		return err
 	}
-	protocGoPath, err := mageutil.GetToolPath("protoc-gen-go")
+	protocGoPath, err := goToolPath("protoc-gen-go")
 	if err != nil {
 		return err
 	}
@@ -55,7 +71,7 @@ func Proto() error {
 		cmd := exec.Command(protoc,
 			"--go_out", p.outputPath,
 			"--go_opt=paths=source_relative",
-			"--plugin=go="+protocGoPath,
+			"--plugin=protoc-gen-go="+protocGoPath,
 			"-I="+p.importPath,
 			p.filename,
 		)
@@ -71,8 +87,22 @@ func Proto() error {
 func Generate() error {
 	ctx := context.Background()
 
+	// protoc-gen-psrpc is deliberately built from this tree rather than pinned: these
+	// fixtures exist to exercise the plugin as it currently is.
 	err := mageutil.Run(ctx, "go install ./protoc-gen-psrpc")
 	if err != nil {
+		return err
+	}
+
+	// The go:generate lines below invoke protoc directly, so they pick their plugins off
+	// PATH. Put the pinned protoc-gen-go in front, so the fixtures are generated with the
+	// version in go.mod rather than whatever a contributor happens to have installed.
+	protocGoPath, err := goToolPath("protoc-gen-go")
+	if err != nil {
+		return err
+	}
+	newPath := filepath.Dir(protocGoPath) + string(os.PathListSeparator) + os.Getenv("PATH")
+	if err := os.Setenv("PATH", newPath); err != nil {
 		return err
 	}
 
