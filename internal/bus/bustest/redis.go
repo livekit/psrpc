@@ -78,3 +78,19 @@ func (s *redisServer) Connect(t testing.TB) bus.MessageBus {
 	}
 	return bus.NewRedisMessageBus(rc)
 }
+
+// Addr returns the redis server's host:port, for tests that need to talk
+// to it directly (e.g. to inspect the raw pubsub channels in use).
+func (s *redisServer) Addr() string {
+	return s.addr
+}
+
+// ConnectWithOptions is like Connect, but forwards opts to
+// bus.NewRedisMessageBus.
+func (s *redisServer) ConnectWithOptions(t testing.TB, opts ...bus.RedisOption) bus.MessageBus {
+	rc, err := s.connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bus.NewRedisMessageBus(rc, opts...)
+}

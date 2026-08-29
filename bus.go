@@ -23,6 +23,7 @@ import (
 
 type Channel = bus.Channel
 type MessageBus bus.MessageBus
+type RedisOption = bus.RedisOption
 
 func NewLocalMessageBus() MessageBus {
 	return bus.NewLocalMessageBus()
@@ -32,6 +33,13 @@ func NewNatsMessageBus(nc *nats.Conn) MessageBus {
 	return bus.NewNatsMessageBus(nc)
 }
 
-func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
-	return bus.NewRedisMessageBus(rc)
+func NewRedisMessageBus(rc redis.UniversalClient, opts ...RedisOption) MessageBus {
+	return bus.NewRedisMessageBus(rc, opts...)
+}
+
+// WithChannelPrefix prepends prefix to every redis pubsub channel name
+// used by the bus, so multiple psrpc deployments can share one redis
+// instance without colliding on channel names.
+func WithChannelPrefix(prefix string) RedisOption {
+	return bus.WithChannelPrefix(prefix)
 }
