@@ -120,7 +120,8 @@ type streamMetricsInterceptor struct {
 }
 
 func (s *streamMetricsInterceptor) Recv(msg proto.Message) (err error) {
-	defer func() { s.observer.OnStreamRecv(s.role, s.info, err, proto.Size(msg)) }()
+	size := proto.Size(msg)
+	defer func() { s.observer.OnStreamRecv(s.role, s.info, err, size) }()
 	return s.StreamHandler.Recv(msg)
 }
 
