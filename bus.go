@@ -15,6 +15,7 @@
 package psrpc
 
 import (
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
@@ -45,4 +46,30 @@ func NewNatsMessageBus(nc *nats.Conn, opts ...BusOption) MessageBus {
 
 func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
 	return bus.NewRedisMessageBus(rc, opts...)
+}
+
+// ClosableMessageBus is implemented by buses that own their broker
+// connections (AMQP, MQTT) and must be closed to release them.
+type ClosableMessageBus interface {
+	MessageBus
+	Close() error
+}
+
+// NewMqttMessageBus connects to the given MQTT broker URLs, e.g.
+// tcp://user:pass@localhost:1883 or ssl://host:8883. The broker must support
+// shared subscriptions ($share), which Mosquitto 2.x and EMQX do even for
+// 3.1.1 clients; unsupported brokers are detected and rejected at startup.
+// The returned bus must be closed.
+func NewMqttMessageBus(brokers []string, opts ...BusOption) (ClosableMessageBus, error) {
+	b, err := bus.NewMqttMessageBus(func() *mqtt.ClientOptions {
+		o := mqtt.NewClientOptions()
+		for _, b := range brokers {
+			o = o.AddBroker(b)
+		}
+		return o
+	}, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
