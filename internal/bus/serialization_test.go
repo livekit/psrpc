@@ -15,6 +15,8 @@
 package bus
 
 import (
+	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,10 +34,10 @@ func TestSerialization(t *testing.T) {
 		Multi:     true,
 	}
 
-	b, err := serialize(msg, "channel")
+	b, err := serialize(msg, "channel", nil)
 	require.NoError(t, err)
 
-	m, err := deserialize(b)
+	m, err := deserialize(b, 0)
 	require.NoError(t, err)
 
 	channel, err := deserializeChannel(b)
@@ -66,4 +68,109 @@ func TestRawSerialization(t *testing.T) {
 	msg1, err := DeserializePayload[*internal.Request](b)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, msg1), "expected deserialized payload to match source")
+}
+
+func compressibleRequest() *internal.Request {
+	return &internal.Request{
+		RequestId:  "reid",
+		ClientId:   "clid",
+		SentAt:     time.Now().UnixNano(),
+		Multi:      true,
+		RawRequest: []byte(strings.Repeat("psrpc ", 500)),
+	}
+}
+
+func TestSerializeCompressed(t *testing.T) {
+	msg := compressibleRequest()
+
+	plain, err := serialize(msg, "channel", nil)
+	require.NoError(t, err)
+
+	b, err := serialize(msg, "channel", testCompressor(6, 1))
+	require.NoError(t, err)
+	require.Less(t, len(b), len(plain))
+
+	var envelope internal.Msg
+	require.NoError(t, proto.Unmarshal(b, &envelope))
+	require.Equal(t, internal.Compression_COMPRESSION_GZIP, envelope.Compression)
+
+	channel, err := deserializeChannel(b)
+	require.NoError(t, err)
+	require.Equal(t, "channel", channel)
+
+	m, err := deserialize(b, 0)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, m))
+}
+
+func TestSerializeBelowThresholdStaysPlain(t *testing.T) {
+	msg := compressibleRequest()
+
+	b, err := serialize(msg, "channel", testCompressor(6, 1<<20))
+	require.NoError(t, err)
+
+	var envelope internal.Msg
+	require.NoError(t, proto.Unmarshal(b, &envelope))
+	require.Equal(t, internal.Compression_COMPRESSION_NONE, envelope.Compression)
+
+	m, err := deserialize(b, 0)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, m))
+}
+
+func TestSerializeIncompressibleStaysPlain(t *testing.T) {
+	raw := make([]byte, 4096)
+	_, err := rand.Read(raw)
+	require.NoError(t, err)
+
+	msg := &internal.Request{RequestId: "reid", RawRequest: raw}
+	b, err := serialize(msg, "channel", testCompressor(9, 1))
+	require.NoError(t, err)
+
+	var envelope internal.Msg
+	require.NoError(t, proto.Unmarshal(b, &envelope))
+	require.Equal(t, internal.Compression_COMPRESSION_NONE, envelope.Compression)
+
+	m, err := deserialize(b, 0)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, m))
+}
+
+func TestDeserializeUncompressedPeer(t *testing.T) {
+	msg := compressibleRequest()
+	value, err := proto.Marshal(msg)
+	require.NoError(t, err)
+
+	b, err := proto.Marshal(&internal.Msg{
+		TypeUrl: "type.googleapis.com/" + string(msg.ProtoReflect().Descriptor().FullName()),
+		Value:   value,
+		Channel: "channel",
+	})
+	require.NoError(t, err)
+
+	m, err := deserialize(b, 0)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(msg, m))
+}
+
+// proto3 enums are open, so an unknown codec survives unmarshal as a live value
+// rather than being dropped as an unknown field.
+func TestDeserializeUnknownCompression(t *testing.T) {
+	b, err := proto.Marshal(&internal.Msg{
+		TypeUrl:     "type.googleapis.com/internal.Request",
+		Value:       []byte("whatever"),
+		Compression: internal.Compression(99),
+	})
+	require.NoError(t, err)
+
+	_, err = deserialize(b, 0)
+	require.ErrorContains(t, err, "unrecognized message compression")
+}
+
+func TestDeserializeCompressedExceedsMaxSize(t *testing.T) {
+	b, err := serialize(compressibleRequest(), "channel", testCompressor(6, 1))
+	require.NoError(t, err)
+
+	_, err = deserialize(b, 64)
+	require.ErrorContains(t, err, "exceeds")
 }

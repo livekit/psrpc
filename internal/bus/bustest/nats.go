@@ -67,10 +67,10 @@ func (s *natsServer) connect() (*nats.Conn, error) {
 	return nc, nil
 }
 
-func (s *natsServer) Connect(t testing.TB) bus.MessageBus {
+func (s *natsServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
 	nc, err := s.connect()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bus.NewNatsMessageBus(nc)
+	return bus.NewNatsMessageBus(nc, opts...)
 }

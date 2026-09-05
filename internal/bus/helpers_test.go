@@ -9,5 +9,9 @@ func RawRead(r Reader) ([]byte, bool) {
 }
 
 func Deserialize(b []byte) (proto.Message, error) {
-	return deserialize(b)
+	return deserialize(b, 0)
+}
+
+func GetBusOpts(opts ...BusOption) BusOpts {
+	return getBusOpts(opts...)
 }

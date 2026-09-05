@@ -28,7 +28,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
-	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 )
 
@@ -36,7 +35,7 @@ func TestGeneratedService(t *testing.T) {
 	bustest.TestAll(t, testGeneratedService)
 }
 
-func testGeneratedService(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
+func testGeneratedService(t *testing.T, bus bustest.Connect) {
 	ctx := context.Background()
 	req := &MyRequest{}
 	update := &MyUpdate{}

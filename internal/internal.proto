@@ -23,6 +23,21 @@ message Msg {
   string type_url = 1;
   bytes value = 2;
   string channel = 3;
+  // Encoding of value.
+  Compression compression = 4;
+}
+
+enum Compression {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_GZIP = 1;
+}
+
+// Read view of Msg, minus channel. Field numbers must match Msg.
+message Content {
+  string type_url = 1;
+  bytes value = 2;
+  reserved 3;
+  Compression compression = 4;
 }
 
 message Channel {

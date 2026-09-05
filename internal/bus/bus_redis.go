@@ -56,16 +56,23 @@ type redisMessageBus struct {
 	currentChannels map[string]struct{}
 
 	publishQueues [publishBuckets]*redisPublishQueue
+
+	c       *compressor
+	maxSize int
 }
 
-func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
+func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
 	ctx := context.Background()
+	o := getBusOpts(opts...)
 	r := &redisMessageBus{
 		rc:     rc,
 		ctx:    ctx,
 		ps:     rc.Subscribe(ctx),
 		subs:   map[string]*redisSubList{},
 		queues: map[string]*redisSubList{},
+
+		c:       newCompressor(o.Compression),
+		maxSize: o.Compression.MaxDecompressedSize,
 
 		wakeup:          make(chan struct{}, 1),
 		ops:             &redisWriteOpQueue{},
@@ -80,8 +87,12 @@ func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
 	return r
 }
 
+func (r *redisMessageBus) maxDecompressedSize() int {
+	return r.maxSize
+}
+
 func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg, "")
+	b, err := serialize(msg, "", r.c)
 	if err != nil {
 		return err
 	}

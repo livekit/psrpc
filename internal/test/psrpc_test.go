@@ -24,7 +24,6 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
@@ -33,7 +32,7 @@ import (
 )
 
 func TestRPC(t *testing.T) {
-	bustest.TestAll(t, func(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
+	bustest.TestAll(t, func(t *testing.T, bus bustest.Connect) {
 		t.Run("RPC", func(t *testing.T) {
 			testRPC(t, bus)
 		})
@@ -43,7 +42,7 @@ func TestRPC(t *testing.T) {
 	})
 }
 
-func testRPC(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
+func testRPC(t *testing.T, bus bustest.Connect) {
 	serviceName := "test"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{
@@ -144,7 +143,7 @@ func testRPC(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
 	}
 }
 
-func testStream(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
+func testStream(t *testing.T, bus bustest.Connect) {
 	serviceName := "test_stream"
 
 	serverA := server.NewRPCServer(&info.ServiceDefinition{

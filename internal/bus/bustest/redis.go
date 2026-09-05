@@ -71,10 +71,10 @@ func (s *redisServer) connect() (redis.UniversalClient, error) {
 	return rc, nil
 }
 
-func (s *redisServer) Connect(t testing.TB) bus.MessageBus {
+func (s *redisServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
 	rc, err := s.connect()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bus.NewRedisMessageBus(rc)
+	return bus.NewRedisMessageBus(rc, opts...)
 }

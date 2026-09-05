@@ -38,7 +38,7 @@ func enabled() bool { return true }
 
 // Run on every bus: the property comes from SubscribeQueue, not any one broker.
 func TestSkipClaim(t *testing.T) {
-	bustest.TestAll(t, func(t *testing.T, newBus func(t testing.TB) bus.MessageBus) {
+	bustest.TestAll(t, func(t *testing.T, newBus bustest.Connect) {
 		const queued, broadcast = "skip_claim_queued", "skip_claim_broadcast"
 
 		obs := &recordingObserver{}

@@ -22,16 +22,27 @@ import (
 )
 
 type Channel = bus.Channel
-type MessageBus bus.MessageBus
+type MessageBus = bus.MessageBus
+type Reader = bus.Reader
 
-func NewLocalMessageBus() MessageBus {
-	return bus.NewLocalMessageBus()
+type BusOption = bus.BusOption
+type CompressionOpts = bus.CompressionOpts
+
+const DefaultCompressionThreshold = bus.DefaultCompressionThreshold
+
+// WithBusCompression gzips published payloads above a size threshold.
+func WithBusCompression(c CompressionOpts) BusOption {
+	return bus.WithBusCompression(c)
 }
 
-func NewNatsMessageBus(nc *nats.Conn) MessageBus {
-	return bus.NewNatsMessageBus(nc)
+func NewLocalMessageBus(opts ...BusOption) MessageBus {
+	return bus.NewLocalMessageBus(opts...)
 }
 
-func NewRedisMessageBus(rc redis.UniversalClient) MessageBus {
-	return bus.NewRedisMessageBus(rc)
+func NewNatsMessageBus(nc *nats.Conn, opts ...BusOption) MessageBus {
+	return bus.NewNatsMessageBus(nc, opts...)
+}
+
+func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
+	return bus.NewRedisMessageBus(rc, opts...)
 }
