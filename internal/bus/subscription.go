@@ -28,7 +28,7 @@ type subscription[MessageType proto.Message] struct {
 	c <-chan MessageType
 }
 
-func newSubscription[MessageType proto.Message](sub Reader, size int) Subscription[MessageType] {
+func newSubscription[MessageType proto.Message](sub Reader, size int, maxSize int) Subscription[MessageType] {
 	msgChan := make(chan MessageType, size)
 	go func() {
 		for {
@@ -38,7 +38,7 @@ func newSubscription[MessageType proto.Message](sub Reader, size int) Subscripti
 				return
 			}
 
-			p, err := deserialize(b)
+			p, err := deserialize(b, maxSize)
 			if err != nil {
 				continue
 			}

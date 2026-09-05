@@ -67,10 +67,12 @@ func Docker(t testing.TB) dockertest.Pool {
 }
 
 type Server interface {
-	Connect(t testing.TB) bus.MessageBus
+	Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus
 }
 
-func TestAll(t *testing.T, test func(t *testing.T, bus func(t testing.TB) bus.MessageBus)) {
+type Connect func(t testing.TB, opts ...bus.BusOption) bus.MessageBus
+
+func TestAll(t *testing.T, test func(t *testing.T, bus Connect)) {
 	pool := Docker(t)
 	for _, c := range servers {
 		c := c

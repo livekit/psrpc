@@ -29,17 +29,27 @@ type natsMessageBus struct {
 
 	mu      sync.Mutex
 	routers map[string]*natsRouter
+
+	c       *compressor
+	maxSize int
 }
 
-func NewNatsMessageBus(nc *nats.Conn) MessageBus {
+func NewNatsMessageBus(nc *nats.Conn, opts ...BusOption) MessageBus {
+	o := getBusOpts(opts...)
 	return &natsMessageBus{
 		nc:      nc,
 		routers: map[string]*natsRouter{},
+		c:       newCompressor(o.Compression),
+		maxSize: o.Compression.MaxDecompressedSize,
 	}
 }
 
+func (n *natsMessageBus) maxDecompressedSize() int {
+	return n.maxSize
+}
+
 func (n *natsMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg, channel.Local)
+	b, err := serialize(msg, channel.Local, n.c)
 	if err != nil {
 		return err
 	}

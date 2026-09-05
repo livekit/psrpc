@@ -36,11 +36,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Compression int32
+
+const (
+	Compression_COMPRESSION_NONE Compression = 0
+	Compression_COMPRESSION_GZIP Compression = 1
+)
+
+// Enum value maps for Compression.
+var (
+	Compression_name = map[int32]string{
+		0: "COMPRESSION_NONE",
+		1: "COMPRESSION_GZIP",
+	}
+	Compression_value = map[string]int32{
+		"COMPRESSION_NONE": 0,
+		"COMPRESSION_GZIP": 1,
+	}
+)
+
+func (x Compression) Enum() *Compression {
+	p := new(Compression)
+	*p = x
+	return p
+}
+
+func (x Compression) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Compression) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_proto_enumTypes[0].Descriptor()
+}
+
+func (Compression) Type() protoreflect.EnumType {
+	return &file_internal_proto_enumTypes[0]
+}
+
+func (x Compression) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Compression.Descriptor instead.
+func (Compression) EnumDescriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{0}
+}
+
 type Msg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TypeUrl       string                 `protobuf:"bytes,1,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
-	Value         []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	Channel       string                 `protobuf:"bytes,3,opt,name=channel,proto3" json:"channel,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	TypeUrl string                 `protobuf:"bytes,1,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	Value   []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Channel string                 `protobuf:"bytes,3,opt,name=channel,proto3" json:"channel,omitempty"`
+	// Encoding of value.
+	Compression   Compression `protobuf:"varint,4,opt,name=compression,proto3,enum=internal.Compression" json:"compression,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -96,6 +144,74 @@ func (x *Msg) GetChannel() string {
 	return ""
 }
 
+func (x *Msg) GetCompression() Compression {
+	if x != nil {
+		return x.Compression
+	}
+	return Compression_COMPRESSION_NONE
+}
+
+// Read view of Msg, minus channel. Field numbers must match Msg.
+type Content struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TypeUrl       string                 `protobuf:"bytes,1,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	Value         []byte                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	Compression   Compression            `protobuf:"varint,4,opt,name=compression,proto3,enum=internal.Compression" json:"compression,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Content) Reset() {
+	*x = Content{}
+	mi := &file_internal_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Content) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Content) ProtoMessage() {}
+
+func (x *Content) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Content.ProtoReflect.Descriptor instead.
+func (*Content) Descriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Content) GetTypeUrl() string {
+	if x != nil {
+		return x.TypeUrl
+	}
+	return ""
+}
+
+func (x *Content) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *Content) GetCompression() Compression {
+	if x != nil {
+		return x.Compression
+	}
+	return Compression_COMPRESSION_NONE
+}
+
 type Channel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,3,opt,name=channel,proto3" json:"channel,omitempty"`
@@ -105,7 +221,7 @@ type Channel struct {
 
 func (x *Channel) Reset() {
 	*x = Channel{}
-	mi := &file_internal_proto_msgTypes[1]
+	mi := &file_internal_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -117,7 +233,7 @@ func (x *Channel) String() string {
 func (*Channel) ProtoMessage() {}
 
 func (x *Channel) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[1]
+	mi := &file_internal_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -130,7 +246,7 @@ func (x *Channel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Channel.ProtoReflect.Descriptor instead.
 func (*Channel) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{1}
+	return file_internal_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Channel) GetChannel() string {
@@ -158,7 +274,7 @@ type Request struct {
 
 func (x *Request) Reset() {
 	*x = Request{}
-	mi := &file_internal_proto_msgTypes[2]
+	mi := &file_internal_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -170,7 +286,7 @@ func (x *Request) String() string {
 func (*Request) ProtoMessage() {}
 
 func (x *Request) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[2]
+	mi := &file_internal_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -183,7 +299,7 @@ func (x *Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Request.ProtoReflect.Descriptor instead.
 func (*Request) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{2}
+	return file_internal_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Request) GetRequestId() string {
@@ -265,7 +381,7 @@ type Response struct {
 
 func (x *Response) Reset() {
 	*x = Response{}
-	mi := &file_internal_proto_msgTypes[3]
+	mi := &file_internal_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +393,7 @@ func (x *Response) String() string {
 func (*Response) ProtoMessage() {}
 
 func (x *Response) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[3]
+	mi := &file_internal_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,7 +406,7 @@ func (x *Response) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Response.ProtoReflect.Descriptor instead.
 func (*Response) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{3}
+	return file_internal_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Response) GetRequestId() string {
@@ -363,7 +479,7 @@ type ClaimRequest struct {
 
 func (x *ClaimRequest) Reset() {
 	*x = ClaimRequest{}
-	mi := &file_internal_proto_msgTypes[4]
+	mi := &file_internal_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +491,7 @@ func (x *ClaimRequest) String() string {
 func (*ClaimRequest) ProtoMessage() {}
 
 func (x *ClaimRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[4]
+	mi := &file_internal_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +504,7 @@ func (x *ClaimRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimRequest.ProtoReflect.Descriptor instead.
 func (*ClaimRequest) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{4}
+	return file_internal_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ClaimRequest) GetRequestId() string {
@@ -429,7 +545,7 @@ type ClaimResponse struct {
 
 func (x *ClaimResponse) Reset() {
 	*x = ClaimResponse{}
-	mi := &file_internal_proto_msgTypes[5]
+	mi := &file_internal_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -441,7 +557,7 @@ func (x *ClaimResponse) String() string {
 func (*ClaimResponse) ProtoMessage() {}
 
 func (x *ClaimResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[5]
+	mi := &file_internal_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -454,7 +570,7 @@ func (x *ClaimResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimResponse.ProtoReflect.Descriptor instead.
 func (*ClaimResponse) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{5}
+	return file_internal_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ClaimResponse) GetRequestId() string {
@@ -490,7 +606,7 @@ type Stream struct {
 
 func (x *Stream) Reset() {
 	*x = Stream{}
-	mi := &file_internal_proto_msgTypes[6]
+	mi := &file_internal_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -502,7 +618,7 @@ func (x *Stream) String() string {
 func (*Stream) ProtoMessage() {}
 
 func (x *Stream) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[6]
+	mi := &file_internal_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +631,7 @@ func (x *Stream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Stream.ProtoReflect.Descriptor instead.
 func (*Stream) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{6}
+	return file_internal_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Stream) GetStreamId() string {
@@ -627,7 +743,7 @@ type StreamOpen struct {
 
 func (x *StreamOpen) Reset() {
 	*x = StreamOpen{}
-	mi := &file_internal_proto_msgTypes[7]
+	mi := &file_internal_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -639,7 +755,7 @@ func (x *StreamOpen) String() string {
 func (*StreamOpen) ProtoMessage() {}
 
 func (x *StreamOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[7]
+	mi := &file_internal_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -652,7 +768,7 @@ func (x *StreamOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamOpen.ProtoReflect.Descriptor instead.
 func (*StreamOpen) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{7}
+	return file_internal_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *StreamOpen) GetNodeId() string {
@@ -679,7 +795,7 @@ type StreamMessage struct {
 
 func (x *StreamMessage) Reset() {
 	*x = StreamMessage{}
-	mi := &file_internal_proto_msgTypes[8]
+	mi := &file_internal_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -691,7 +807,7 @@ func (x *StreamMessage) String() string {
 func (*StreamMessage) ProtoMessage() {}
 
 func (x *StreamMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[8]
+	mi := &file_internal_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -704,7 +820,7 @@ func (x *StreamMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamMessage.ProtoReflect.Descriptor instead.
 func (*StreamMessage) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{8}
+	return file_internal_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *StreamMessage) GetMessage() *anypb.Any {
@@ -729,7 +845,7 @@ type StreamAck struct {
 
 func (x *StreamAck) Reset() {
 	*x = StreamAck{}
-	mi := &file_internal_proto_msgTypes[9]
+	mi := &file_internal_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -741,7 +857,7 @@ func (x *StreamAck) String() string {
 func (*StreamAck) ProtoMessage() {}
 
 func (x *StreamAck) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[9]
+	mi := &file_internal_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -754,7 +870,7 @@ func (x *StreamAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamAck.ProtoReflect.Descriptor instead.
 func (*StreamAck) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{9}
+	return file_internal_proto_rawDescGZIP(), []int{10}
 }
 
 type StreamClose struct {
@@ -767,7 +883,7 @@ type StreamClose struct {
 
 func (x *StreamClose) Reset() {
 	*x = StreamClose{}
-	mi := &file_internal_proto_msgTypes[10]
+	mi := &file_internal_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +895,7 @@ func (x *StreamClose) String() string {
 func (*StreamClose) ProtoMessage() {}
 
 func (x *StreamClose) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_msgTypes[10]
+	mi := &file_internal_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +908,7 @@ func (x *StreamClose) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamClose.ProtoReflect.Descriptor instead.
 func (*StreamClose) Descriptor() ([]byte, []int) {
-	return file_internal_proto_rawDescGZIP(), []int{10}
+	return file_internal_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *StreamClose) GetError() string {
@@ -813,11 +929,16 @@ var File_internal_proto protoreflect.FileDescriptor
 
 const file_internal_proto_rawDesc = "" +
 	"\n" +
-	"\x0einternal.proto\x12\binternal\x1a\x19google/protobuf/any.proto\"P\n" +
+	"\x0einternal.proto\x12\binternal\x1a\x19google/protobuf/any.proto\"\x89\x01\n" +
 	"\x03Msg\x12\x19\n" +
 	"\btype_url\x18\x01 \x01(\tR\atypeUrl\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x12\x18\n" +
-	"\achannel\x18\x03 \x01(\tR\achannel\"#\n" +
+	"\achannel\x18\x03 \x01(\tR\achannel\x127\n" +
+	"\vcompression\x18\x04 \x01(\x0e2\x15.internal.CompressionR\vcompression\"y\n" +
+	"\aContent\x12\x19\n" +
+	"\btype_url\x18\x01 \x01(\tR\atypeUrl\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\x127\n" +
+	"\vcompression\x18\x04 \x01(\x0e2\x15.internal.CompressionR\vcompressionJ\x04\b\x03\x10\x04\"#\n" +
 	"\aChannel\x12\x18\n" +
 	"\achannel\x18\x03 \x01(\tR\achannel\"\xfc\x02\n" +
 	"\aRequest\x12\x1d\n" +
@@ -883,7 +1004,10 @@ const file_internal_proto_rawDesc = "" +
 	"\tStreamAck\"7\n" +
 	"\vStreamClose\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\x12\n" +
-	"\x04code\x18\x02 \x01(\tR\x04codeB#Z!github.com/livekit/psrpc/internalb\x06proto3"
+	"\x04code\x18\x02 \x01(\tR\x04code*9\n" +
+	"\vCompression\x12\x14\n" +
+	"\x10COMPRESSION_NONE\x10\x00\x12\x14\n" +
+	"\x10COMPRESSION_GZIP\x10\x01B#Z!github.com/livekit/psrpc/internalb\x06proto3"
 
 var (
 	file_internal_proto_rawDescOnce sync.Once
@@ -897,39 +1021,44 @@ func file_internal_proto_rawDescGZIP() []byte {
 	return file_internal_proto_rawDescData
 }
 
-var file_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_internal_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_internal_proto_goTypes = []any{
-	(*Msg)(nil),           // 0: internal.Msg
-	(*Channel)(nil),       // 1: internal.Channel
-	(*Request)(nil),       // 2: internal.Request
-	(*Response)(nil),      // 3: internal.Response
-	(*ClaimRequest)(nil),  // 4: internal.ClaimRequest
-	(*ClaimResponse)(nil), // 5: internal.ClaimResponse
-	(*Stream)(nil),        // 6: internal.Stream
-	(*StreamOpen)(nil),    // 7: internal.StreamOpen
-	(*StreamMessage)(nil), // 8: internal.StreamMessage
-	(*StreamAck)(nil),     // 9: internal.StreamAck
-	(*StreamClose)(nil),   // 10: internal.StreamClose
-	nil,                   // 11: internal.Request.MetadataEntry
-	nil,                   // 12: internal.StreamOpen.MetadataEntry
-	(*anypb.Any)(nil),     // 13: google.protobuf.Any
+	(Compression)(0),      // 0: internal.Compression
+	(*Msg)(nil),           // 1: internal.Msg
+	(*Content)(nil),       // 2: internal.Content
+	(*Channel)(nil),       // 3: internal.Channel
+	(*Request)(nil),       // 4: internal.Request
+	(*Response)(nil),      // 5: internal.Response
+	(*ClaimRequest)(nil),  // 6: internal.ClaimRequest
+	(*ClaimResponse)(nil), // 7: internal.ClaimResponse
+	(*Stream)(nil),        // 8: internal.Stream
+	(*StreamOpen)(nil),    // 9: internal.StreamOpen
+	(*StreamMessage)(nil), // 10: internal.StreamMessage
+	(*StreamAck)(nil),     // 11: internal.StreamAck
+	(*StreamClose)(nil),   // 12: internal.StreamClose
+	nil,                   // 13: internal.Request.MetadataEntry
+	nil,                   // 14: internal.StreamOpen.MetadataEntry
+	(*anypb.Any)(nil),     // 15: google.protobuf.Any
 }
 var file_internal_proto_depIdxs = []int32{
-	13, // 0: internal.Request.request:type_name -> google.protobuf.Any
-	11, // 1: internal.Request.metadata:type_name -> internal.Request.MetadataEntry
-	13, // 2: internal.Response.response:type_name -> google.protobuf.Any
-	13, // 3: internal.Response.error_details:type_name -> google.protobuf.Any
-	7,  // 4: internal.Stream.open:type_name -> internal.StreamOpen
-	8,  // 5: internal.Stream.message:type_name -> internal.StreamMessage
-	9,  // 6: internal.Stream.ack:type_name -> internal.StreamAck
-	10, // 7: internal.Stream.close:type_name -> internal.StreamClose
-	12, // 8: internal.StreamOpen.metadata:type_name -> internal.StreamOpen.MetadataEntry
-	13, // 9: internal.StreamMessage.message:type_name -> google.protobuf.Any
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 0: internal.Msg.compression:type_name -> internal.Compression
+	0,  // 1: internal.Content.compression:type_name -> internal.Compression
+	15, // 2: internal.Request.request:type_name -> google.protobuf.Any
+	13, // 3: internal.Request.metadata:type_name -> internal.Request.MetadataEntry
+	15, // 4: internal.Response.response:type_name -> google.protobuf.Any
+	15, // 5: internal.Response.error_details:type_name -> google.protobuf.Any
+	9,  // 6: internal.Stream.open:type_name -> internal.StreamOpen
+	10, // 7: internal.Stream.message:type_name -> internal.StreamMessage
+	11, // 8: internal.Stream.ack:type_name -> internal.StreamAck
+	12, // 9: internal.Stream.close:type_name -> internal.StreamClose
+	14, // 10: internal.StreamOpen.metadata:type_name -> internal.StreamOpen.MetadataEntry
+	15, // 11: internal.StreamMessage.message:type_name -> google.protobuf.Any
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_init() }
@@ -937,7 +1066,7 @@ func file_internal_proto_init() {
 	if File_internal_proto != nil {
 		return
 	}
-	file_internal_proto_msgTypes[6].OneofWrappers = []any{
+	file_internal_proto_msgTypes[7].OneofWrappers = []any{
 		(*Stream_Open)(nil),
 		(*Stream_Message)(nil),
 		(*Stream_Ack)(nil),
@@ -948,13 +1077,14 @@ func file_internal_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_rawDesc), len(file_internal_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   13,
+			NumEnums:      1,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_internal_proto_goTypes,
 		DependencyIndexes: file_internal_proto_depIdxs,
+		EnumInfos:         file_internal_proto_enumTypes,
 		MessageInfos:      file_internal_proto_msgTypes,
 	}.Build()
 	File_internal_proto = out.File

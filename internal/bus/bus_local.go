@@ -23,19 +23,28 @@ import (
 
 type localMessageBus struct {
 	sync.RWMutex
-	subs   map[string]*localSubList
-	queues map[string]*localSubList
+	subs    map[string]*localSubList
+	queues  map[string]*localSubList
+	c       *compressor
+	maxSize int
 }
 
-func NewLocalMessageBus() MessageBus {
+func NewLocalMessageBus(opts ...BusOption) MessageBus {
+	o := getBusOpts(opts...)
 	return &localMessageBus{
-		subs:   make(map[string]*localSubList),
-		queues: make(map[string]*localSubList),
+		subs:    make(map[string]*localSubList),
+		queues:  make(map[string]*localSubList),
+		c:       newCompressor(o.Compression),
+		maxSize: o.Compression.MaxDecompressedSize,
 	}
 }
 
+func (l *localMessageBus) maxDecompressedSize() int {
+	return l.maxSize
+}
+
 func (l *localMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg, "")
+	b, err := serialize(msg, "", l.c)
 	if err != nil {
 		return err
 	}

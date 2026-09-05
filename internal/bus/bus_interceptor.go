@@ -61,6 +61,10 @@ func (l *testBus) Publish(ctx context.Context, channel Channel, msg proto.Messag
 	return l.publishHandler(ctx, channel, msg)
 }
 
+func (l *testBus) maxDecompressedSize() int {
+	return maxDecompressedSize(l.bus)
+}
+
 func (l *testBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
 	r, err := l.bus.Subscribe(ctx, channel, size)
 	if err != nil {

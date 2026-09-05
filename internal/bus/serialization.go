@@ -21,17 +21,29 @@ import (
 	"github.com/livekit/psrpc/internal"
 )
 
-func serialize(msg proto.Message, channel string) ([]byte, error) {
+func serialize(msg proto.Message, channel string, c *compressor) ([]byte, error) {
 	value, err := proto.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}
 
-	return proto.Marshal(&internal.Msg{
+	m := &internal.Msg{
 		TypeUrl: "type.googleapis.com/" + string(msg.ProtoReflect().Descriptor().FullName()),
 		Value:   value,
 		Channel: channel,
-	})
+	}
+
+	if c != nil {
+		if buf := c.compress(value); buf != nil {
+			// Marshal copies the payload out, so the buffer is only borrowed
+			// until this function returns.
+			defer c.release(buf)
+			m.Value = buf.Bytes()
+			m.Compression = c.compression
+		}
+	}
+
+	return proto.Marshal(m)
 }
 
 func deserializeChannel(b []byte) (string, error) {
@@ -47,16 +59,22 @@ func deserializeChannel(b []byte) (string, error) {
 	return c.Channel, nil
 }
 
-func deserialize(b []byte) (proto.Message, error) {
-	a := &anypb.Any{}
+func deserialize(b []byte, maxSize int) (proto.Message, error) {
+	m := &internal.Content{}
 	opt := proto.UnmarshalOptions{
 		DiscardUnknown: true,
 	}
-	err := opt.Unmarshal(b, a)
+	err := opt.Unmarshal(b, m)
 	if err != nil {
 		return nil, err
 	}
 
+	value, err := decompress(m.Value, m.Compression, maxSize)
+	if err != nil {
+		return nil, err
+	}
+
+	a := &anypb.Any{TypeUrl: m.TypeUrl, Value: value}
 	return a.UnmarshalNew()
 }
 

@@ -37,12 +37,37 @@ func busTestChannel(channel string) bus.Channel {
 }
 
 func TestMessageBus(t *testing.T) {
-	bustest.TestAll(t, func(t *testing.T, bus func(t testing.TB) bus.MessageBus) {
-		b := bus(t)
-		t.Run("testSubscribe", func(t *testing.T) { testSubscribe(t, b) })
-		t.Run("testSubscribeQueue", func(t *testing.T) { testSubscribeQueue(t, b) })
-		t.Run("testSubscribeClose", func(t *testing.T) { testSubscribeClose(t, b) })
+	bustest.TestAll(t, func(t *testing.T, newBus bustest.Connect) {
+		for _, c := range []struct {
+			name string
+			opts []bus.BusOption
+		}{
+			{name: "plain"},
+			// Threshold 1 puts every message on the compressed path.
+			{name: "gzip", opts: []bus.BusOption{bus.WithBusCompression(bus.CompressionOpts{
+				Quality:   6,
+				Threshold: 1,
+			})}},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				b := newBus(t, c.opts...)
+				t.Run("testSubscribe", func(t *testing.T) { testSubscribe(t, b) })
+				t.Run("testSubscribeQueue", func(t *testing.T) { testSubscribeQueue(t, b) })
+				t.Run("testSubscribeClose", func(t *testing.T) { testSubscribeClose(t, b) })
+			})
+		}
 	})
+}
+
+func TestGetBusOpts(t *testing.T) {
+	require.Equal(t, bus.DefaultCompressionThreshold, bus.GetBusOpts().Compression.Threshold)
+
+	o := bus.GetBusOpts(bus.WithBusCompression(bus.CompressionOpts{Quality: 6})).Compression
+	require.Equal(t, 6, o.Quality)
+	require.Equal(t, bus.DefaultCompressionThreshold, o.Threshold)
+
+	o = bus.GetBusOpts(bus.WithBusCompression(bus.CompressionOpts{Quality: 1, Threshold: 42})).Compression
+	require.Equal(t, 42, o.Threshold)
 }
 
 func testSubscribe(t *testing.T, b bus.MessageBus) {
@@ -77,8 +102,10 @@ func testSubscribeQueue(t *testing.T, b bus.MessageBus) {
 	require.NoError(t, err)
 	time.Sleep(time.Millisecond * 100)
 
+	// Payload must differ per run: the redis queue dedup lock keys on its hash
+	// alone, and an earlier run's lock outlives the test.
 	require.NoError(t, b.Publish(ctx, busTestChannel(channel), &internal.Request{
-		RequestId: "2",
+		RequestId: channel,
 	}))
 
 	received := 0

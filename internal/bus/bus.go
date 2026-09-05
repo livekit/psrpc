@@ -21,7 +21,8 @@ import (
 )
 
 const (
-	DefaultChannelSize = 100
+	DefaultChannelSize          = 100
+	DefaultCompressionThreshold = 1024
 )
 
 type Channel struct {
@@ -51,7 +52,7 @@ func Subscribe[MessageType proto.Message](
 		return nil, err
 	}
 
-	return newSubscription[MessageType](sub, channelSize), nil
+	return newSubscription[MessageType](sub, channelSize, maxDecompressedSize(bus)), nil
 }
 
 func SubscribeQueue[MessageType proto.Message](
@@ -66,5 +67,14 @@ func SubscribeQueue[MessageType proto.Message](
 		return nil, err
 	}
 
-	return newSubscription[MessageType](sub, channelSize), nil
+	return newSubscription[MessageType](sub, channelSize, maxDecompressedSize(bus)), nil
+}
+
+// Read off the bus rather than the interface: MessageBus is implemented outside
+// this package and cannot be widened.
+func maxDecompressedSize(b MessageBus) int {
+	if l, ok := b.(interface{ maxDecompressedSize() int }); ok {
+		return l.maxDecompressedSize()
+	}
+	return 0
 }
