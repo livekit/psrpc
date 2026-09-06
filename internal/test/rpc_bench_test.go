@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
@@ -27,7 +26,7 @@ func TestRPCBench(t *testing.T) {
 	bustest.TestAll(t, benchRPC)
 }
 
-func benchRPC(t *testing.T, busFunc func(t testing.TB) bus.MessageBus) {
+func benchRPC(t *testing.T, busFunc bustest.Connect) {
 	const (
 		seqN    = 500
 		concW   = 8

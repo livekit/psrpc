@@ -28,8 +28,8 @@ type rabbitMQServer struct {
 	url string
 }
 
-func (s *rabbitMQServer) Connect(t testing.TB) bus.MessageBus {
-	b, err := bus.NewAmqpMessageBus(s.url)
+func (s *rabbitMQServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
+	b, err := bus.NewAmqpMessageBus(s.url, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

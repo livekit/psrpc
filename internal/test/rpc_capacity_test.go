@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/bus/bustest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
@@ -51,7 +50,7 @@ func TestRPCSoak(t *testing.T) {
 
 // benchPair wires an echo RPC server and an RPC client over two separate bus
 // instances, mirroring two processes talking to the same broker.
-func benchPair(t *testing.T, busFunc func(t testing.TB) bus.MessageBus) *client.RPCClient {
+func benchPair(t *testing.T, busFunc bustest.Connect) *client.RPCClient {
 	serviceName := "bench_" + rand.NewString()
 	rpc := "echo"
 
@@ -110,7 +109,7 @@ func runLoad(ctx context.Context, c *client.RPCClient, workers int, d time.Durat
 	return count.Load(), lats, errs.Load()
 }
 
-func benchCapacity(t *testing.T, busFunc func(t testing.TB) bus.MessageBus) {
+func benchCapacity(t *testing.T, busFunc bustest.Connect) {
 	workers := envInts("BENCH_WORKERS", []int{1, 8, 32, 128})
 	rounds := envInt("BENCH_ROUNDS", 4)
 	secs := envDuration("BENCH_SECS", 8*time.Second)
@@ -136,7 +135,7 @@ func benchCapacity(t *testing.T, busFunc func(t testing.TB) bus.MessageBus) {
 	}
 }
 
-func benchSoak(t *testing.T, busFunc func(t testing.TB) bus.MessageBus) {
+func benchSoak(t *testing.T, busFunc bustest.Connect) {
 	workers := envInt("BENCH_SOAK_WORKERS", 16)
 	dur := envDuration("BENCH_SOAK_SECS", 10*time.Minute)
 
