@@ -79,10 +79,10 @@ type mqttServer struct {
 	url string
 }
 
-func (s *mqttServer) Connect(t testing.TB) bus.MessageBus {
+func (s *mqttServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
 	b, err := bus.NewMqttMessageBus(func() *mqtt.ClientOptions {
 		return mqtt.NewClientOptions().AddBroker(s.url)
-	})
+	}, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

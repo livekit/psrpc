@@ -3,9 +3,11 @@ module github.com/livekit/psrpc
 go 1.25.5
 
 require (
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/frostbyte73/core v0.1.1
 	github.com/gammazero/deque v1.2.1
 	github.com/go-logr/logr v1.4.3
+	github.com/klauspost/compress v1.18.6
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
 	github.com/nats-io/nats.go v1.52.0
 	github.com/ory/dockertest/v4 v4.0.0
@@ -35,11 +37,9 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
