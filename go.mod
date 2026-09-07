@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/frostbyte73/core v0.1.1
 	github.com/gammazero/deque v1.2.1
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/klauspost/compress v1.18.6
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
 	github.com/nats-io/nats.go v1.52.0
