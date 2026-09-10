@@ -15,6 +15,8 @@
 package bus
 
 import (
+	"sync"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -25,16 +27,29 @@ type Subscription[MessageType proto.Message] interface {
 
 type subscription[MessageType proto.Message] struct {
 	Reader
-	c <-chan MessageType
+	c         <-chan MessageType
+	done      chan struct{}
+	complete  chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func newSubscription[MessageType proto.Message](sub Reader, size int, maxSize int) Subscription[MessageType] {
 	msgChan := make(chan MessageType, size)
+	s := &subscription[MessageType]{
+		Reader:   sub,
+		c:        msgChan,
+		done:     make(chan struct{}),
+		complete: make(chan struct{}),
+	}
 	go func() {
+		defer func() {
+			close(msgChan)
+			close(s.complete)
+		}()
 		for {
 			b, ok := sub.read()
 			if !ok {
-				close(msgChan)
 				return
 			}
 
@@ -42,16 +57,30 @@ func newSubscription[MessageType proto.Message](sub Reader, size int, maxSize in
 			if err != nil {
 				continue
 			}
-			msgChan <- p.(MessageType)
+			msg, ok := p.(MessageType)
+			if !ok {
+				continue
+			}
+			select {
+			case msgChan <- msg:
+			case <-s.done:
+				return
+			}
 		}
 	}()
 
-	return &subscription[MessageType]{
-		Reader: sub,
-		c:      msgChan,
-	}
+	return s
 }
 
 func (s *subscription[MessageType]) Channel() <-chan MessageType {
 	return s.c
+}
+
+func (s *subscription[MessageType]) Close() error {
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.closeErr = s.Reader.Close()
+	})
+	<-s.complete
+	return s.closeErr
 }
