@@ -123,6 +123,7 @@ func (m *multiRPC[ResponseType]) handleResponses(
 	opts psrpc.RequestOpts,
 ) {
 	timer := time.NewTimer(opts.Timeout)
+	defer timer.Stop()
 	for {
 		select {
 		case res := <-resChan:
@@ -151,14 +152,21 @@ func (m *multiRPC[ResponseType]) handleResponses(
 		case <-ctx.Done():
 			m.handler.Close()
 			return
+
+		case <-m.c.closed.Watch():
+			m.handler.Close()
+			return
 		}
 	}
 }
 
 func (m *multiRPC[ResponseType]) Recv(msg proto.Message, err error) {
-	m.resChan <- &psrpc.Response[ResponseType]{
+	select {
+	case m.resChan <- &psrpc.Response[ResponseType]{
 		Result: msg.(ResponseType),
 		Err:    err,
+	}:
+	case <-m.c.closed.Watch():
 	}
 }
 
