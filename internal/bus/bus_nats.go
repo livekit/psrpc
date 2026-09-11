@@ -164,18 +164,19 @@ func (n *natsSubscription) write(msg *nats.Msg) {
 }
 
 func (n *natsSubscription) read() ([]byte, bool) {
-	msg, ok := <-n.msgChan
-	if !ok {
+	select {
+	case msg := <-n.msgChan:
+		return msg.Data, true
+	case <-n.ctx.Done():
 		return nil, false
 	}
-	return msg.Data, true
 }
 
 func (n *natsSubscription) Close() error {
+	// Unsubscribe does not wait for an in-flight NATS callback. Keep msgChan
+	// open and use cancellation to unblock both read and write.
 	n.cancel()
-	err := n.sub.Unsubscribe()
-	close(n.msgChan)
-	return err
+	return n.sub.Unsubscribe()
 }
 
 type natsRouter struct {
