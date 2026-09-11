@@ -15,6 +15,6 @@
 package version
 
 const (
-	Version          = "v0.7.6"
+	Version          = "v0.7.7"
 	PsrpcVersion_0_7 = true
 )

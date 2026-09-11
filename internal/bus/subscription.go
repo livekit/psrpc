@@ -26,8 +26,8 @@ type Subscription[MessageType proto.Message] interface {
 }
 
 type subscription[MessageType proto.Message] struct {
-	Reader
-	c         <-chan MessageType
+	sub       Reader
+	c         chan MessageType
 	done      chan struct{}
 	complete  chan struct{}
 	closeOnce sync.Once
@@ -35,41 +35,41 @@ type subscription[MessageType proto.Message] struct {
 }
 
 func newSubscription[MessageType proto.Message](sub Reader, size int, maxSize int) Subscription[MessageType] {
-	msgChan := make(chan MessageType, size)
 	s := &subscription[MessageType]{
-		Reader:   sub,
-		c:        msgChan,
+		sub:      sub,
+		c:        make(chan MessageType, size),
 		done:     make(chan struct{}),
 		complete: make(chan struct{}),
 	}
-	go func() {
-		defer func() {
-			close(msgChan)
-			close(s.complete)
-		}()
-		for {
-			b, ok := sub.read()
-			if !ok {
-				return
-			}
-
-			p, err := deserialize(b, maxSize)
-			if err != nil {
-				continue
-			}
-			msg, ok := p.(MessageType)
-			if !ok {
-				continue
-			}
-			select {
-			case msgChan <- msg:
-			case <-s.done:
-				return
-			}
-		}
-	}()
-
+	go s.forward(maxSize)
 	return s
+}
+
+func (s *subscription[MessageType]) forward(maxSize int) {
+	defer close(s.complete)
+	defer close(s.c)
+
+	for {
+		b, ok := s.sub.read()
+		if !ok {
+			return
+		}
+
+		p, err := deserialize(b, maxSize)
+		if err != nil {
+			continue
+		}
+		msg, ok := p.(MessageType)
+		if !ok {
+			continue
+		}
+
+		select {
+		case s.c <- msg:
+		case <-s.done:
+			return
+		}
+	}
 }
 
 func (s *subscription[MessageType]) Channel() <-chan MessageType {
@@ -79,8 +79,8 @@ func (s *subscription[MessageType]) Channel() <-chan MessageType {
 func (s *subscription[MessageType]) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.done)
-		s.closeErr = s.Reader.Close()
+		s.closeErr = s.sub.Close()
+		<-s.complete
 	})
-	<-s.complete
 	return s.closeErr
 }

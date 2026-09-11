@@ -336,5 +336,4 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
 		h.onCompleted()
 		close(h.complete)
 	})
-	<-h.complete
 }

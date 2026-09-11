@@ -16,6 +16,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ import (
 type controlledReader struct {
 	messages   chan []byte
 	reads      chan struct{}
+	closeErr   error
 	closeCalls atomic.Int32
 }
 
@@ -51,7 +53,7 @@ func (r *controlledReader) Close() error {
 	if r.closeCalls.Add(1) == 1 {
 		close(r.messages)
 	}
-	return nil
+	return r.closeErr
 }
 
 func TestSubscriptionIgnoresUnexpectedMessageType(t *testing.T) {
@@ -86,8 +88,8 @@ func TestSubscriptionCloseIsIdempotent(t *testing.T) {
 	select {
 	case _, ok := <-sub.Channel():
 		require.False(t, ok)
-	case <-time.After(time.Second):
-		t.Fatal("subscription channel did not close")
+	default:
+		t.Fatal("subscription channel was not closed before Close returned")
 	}
 }
 
@@ -115,13 +117,14 @@ func TestSubscriptionCloseUnblocksBlockedDelivery(t *testing.T) {
 	select {
 	case _, ok = <-sub.Channel():
 		require.False(t, ok)
-	case <-time.After(time.Second):
-		t.Fatal("subscription channel did not close after blocked delivery was canceled")
+	default:
+		t.Fatal("subscription channel was not closed before Close returned")
 	}
 }
 
 func TestSubscriptionConcurrentCloseCallsReaderOnce(t *testing.T) {
 	r := newControlledReader(0)
+	r.closeErr = errors.New("close failed")
 	sub := newSubscription[*internal.Request](r, 1, 0)
 
 	const callers = 16
@@ -136,14 +139,14 @@ func TestSubscriptionConcurrentCloseCallsReaderOnce(t *testing.T) {
 	close(start)
 
 	for range callers {
-		require.NoError(t, <-errs)
+		require.ErrorIs(t, <-errs, r.closeErr)
 	}
 	require.Equal(t, int32(1), r.closeCalls.Load())
 
 	select {
 	case _, ok := <-sub.Channel():
 		require.False(t, ok)
-	case <-time.After(time.Second):
-		t.Fatal("subscription channel did not close")
+	default:
+		t.Fatal("subscription channel was not closed before Close returned")
 	}
 }
