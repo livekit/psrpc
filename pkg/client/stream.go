@@ -37,6 +37,9 @@ func OpenStream[SendType, RecvType proto.Message](
 	topic []string,
 	opts ...psrpc.RequestOption,
 ) (psrpc.ClientStream[SendType, RecvType], error) {
+	if c.closed.IsBroken() {
+		return nil, psrpc.ErrClientClosed
+	}
 
 	i := c.GetInfo(rpc, topic)
 	o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
@@ -96,7 +99,7 @@ func OpenStream[SendType, RecvType proto.Message](
 
 	if i.RequireClaim {
 		// nil resChan, so queue-ness is moot
-		sel, err := selectServer(ctx, claimChan, nil, o.SelectionOpts, false)
+		sel, err := selectServerUntil(ctx, claimChan, nil, o.SelectionOpts, false, c.closed.Watch())
 		if err != nil {
 			_ = cs.Close(err)
 			return nil, err
@@ -125,6 +128,10 @@ func OpenStream[SendType, RecvType proto.Message](
 		}
 		_ = cs.Close(err)
 		return nil, err
+
+	case <-c.closed.Watch():
+		_ = cs.Close(psrpc.ErrClientClosed)
+		return nil, psrpc.ErrClientClosed
 	}
 }
 

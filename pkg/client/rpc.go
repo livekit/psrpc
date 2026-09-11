@@ -144,7 +144,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		var res *internal.Response
 
 		if i.RequireClaim {
-			sel, err := selectServer(ctx, claimChan, resChan, o.SelectionOpts, i.Queue)
+			sel, err := selectServerUntil(ctx, claimChan, resChan, o.SelectionOpts, i.Queue, c.closed.Watch())
 			if err != nil {
 				return nil, err
 			}
@@ -179,6 +179,10 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 					err = psrpc.ErrRequestTimedOut
 				}
 				return
+
+			case <-c.closed.Watch():
+				err = psrpc.ErrClientClosed
+				return
 			}
 		}
 
@@ -210,6 +214,17 @@ func selectServer(
 	opts psrpc.SelectionOpts,
 	queue bool,
 ) (selection, error) {
+	return selectServerUntil(ctx, claimChan, resChan, opts, queue, nil)
+}
+
+func selectServerUntil(
+	ctx context.Context,
+	claimChan chan *internal.ClaimRequest,
+	resChan chan *internal.Response,
+	opts psrpc.SelectionOpts,
+	queue bool,
+	closed <-chan struct{},
+) (selection, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -229,6 +244,9 @@ func selectServer(
 
 	for {
 		select {
+		case <-closed:
+			return selection{}, psrpc.ErrClientClosed
+
 		case <-ctx.Done():
 			switch {
 			case opts.SelectionFunc != nil:
