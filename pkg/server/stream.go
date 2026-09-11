@@ -284,7 +284,6 @@ func (h *streamHandler[RecvType, SendType]) close(force bool) {
 		h.onCompleted()
 		close(h.complete)
 	})
-	<-h.complete
 }
 
 type serverStream[SendType, RecvType proto.Message] struct {
