@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,12 +73,12 @@ func testRPC(t *testing.T, bus bustest.Connect) {
 
 	retErr := psrpc.NewErrorf(psrpc.Internal, "foo")
 
-	counter := 0
+	var counter atomic.Int32
 	errCount := 0
 	rpc := "add_one"
 	multiRpc := "add_one_multi"
 	addOne := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
-		counter++
+		counter.Add(1)
 		return &internal.Response{RequestId: req.RequestId}, nil
 	}
 	returnError := func(ctx context.Context, req *internal.Request) (*internal.Response, error) {
@@ -101,7 +102,7 @@ func testRPC(t *testing.T, bus bustest.Connect) {
 	)
 
 	require.NoError(t, err)
-	require.Equal(t, 1, counter)
+	require.Equal(t, int32(1), counter.Load())
 	require.Equal(t, res.RequestId, requestID)
 
 	serverA.RegisterMethod(multiRpc, false, true, false, false)
@@ -127,7 +128,7 @@ func testRPC(t *testing.T, bus bustest.Connect) {
 		select {
 		case res := <-resChan:
 			if res == nil {
-				require.Equal(t, 3, counter)
+				require.Equal(t, int32(3), counter.Load())
 				require.Equal(t, 1, errCount)
 				return
 			}
