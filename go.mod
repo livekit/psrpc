@@ -5,8 +5,8 @@ go 1.25.5
 require (
 	github.com/frostbyte73/core v0.1.1
 	github.com/gammazero/deque v1.2.1
-	github.com/go-logr/logr v1.4.3
-	github.com/klauspost/compress v1.18.6
+	github.com/go-logr/logr v1.4.4
+	github.com/klauspost/compress v1.19.2
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
 	github.com/nats-io/nats.go v1.52.0
 	github.com/ory/dockertest/v4 v4.0.0
@@ -22,8 +22,8 @@ require (
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b
 	golang.org/x/mod v0.36.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
-	google.golang.org/grpc v1.83.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -51,9 +51,9 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
-	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
