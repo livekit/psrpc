@@ -15,7 +15,6 @@
 package psrpc
 
 import (
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 
@@ -55,19 +54,13 @@ type ClosableMessageBus interface {
 	Close() error
 }
 
-// NewMqttMessageBus connects to the given MQTT broker URLs, e.g.
-// tcp://user:pass@localhost:1883 or ssl://host:8883. The broker must support
-// shared subscriptions ($share), which Mosquitto 2.x and EMQX do even for
-// 3.1.1 clients; unsupported brokers are detected and rejected at startup.
-// The returned bus must be closed.
-func NewMqttMessageBus(brokers []string, opts ...BusOption) (ClosableMessageBus, error) {
-	b, err := bus.NewMqttMessageBus(func() *mqtt.ClientOptions {
-		o := mqtt.NewClientOptions()
-		for _, b := range brokers {
-			o = o.AddBroker(b)
-		}
-		return o
-	}, opts...)
+// NewMqttMessageBus connects to an MQTT 5 broker, e.g.
+// tcp://user:pass@localhost:1883 or ssl://host:8883. The broker must
+// support MQTT 5 shared subscriptions ($share). clientID is the MQTT
+// client identifier; if empty a random id is generated. The returned
+// bus must be closed.
+func NewMqttMessageBus(brokerURL string, clientID string, opts ...BusOption) (ClosableMessageBus, error) {
+	b, err := bus.NewMqttMessageBus(brokerURL, clientID, opts...)
 	if err != nil {
 		return nil, err
 	}

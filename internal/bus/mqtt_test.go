@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
@@ -21,14 +20,12 @@ import (
 // '|'-to-'/' mapping and the escaping of '+' in pkg/info's u+XXXX escapes
 // are not covered by TestMessageBus.
 func TestMqttChannelNameMapping(t *testing.T) {
-	url := os.Getenv("MQTT_URL")
-	if url == "" {
+	brokerURL := os.Getenv("MQTT_URL")
+	if brokerURL == "" {
 		t.Skip("MQTT_URL not set; skipping MQTT channel name mapping test")
 	}
 
-	b, err := bus.NewMqttMessageBus(func() *mqtt.ClientOptions {
-		return mqtt.NewClientOptions().AddBroker(url)
-	})
+	b, err := bus.NewMqttMessageBus(brokerURL, "psrpc-test")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.Close() })
 
@@ -60,10 +57,8 @@ func TestMqttChannelNameMapping(t *testing.T) {
 }
 
 // TestMqttReconnection severs the bus's connections mid-flight and expects
-// paho to re-dial, the reconciler to re-establish subscriptions, and both
-// existing and newly created subscriptions to keep receiving afterwards.
-// Subscribing while the broker connection is down must succeed like it does
-// on the Redis bus, not fail.
+// autopaho to re-dial, subscriptions to persist thanks to SessionExpiryInterval,
+// and both existing and newly created subscriptions to keep receiving afterwards.
 func TestMqttReconnection(t *testing.T) {
 	brokerURL := os.Getenv("MQTT_URL")
 	if brokerURL == "" {
@@ -77,10 +72,7 @@ func TestMqttReconnection(t *testing.T) {
 	proxy := startTCPProxy(t, u.Host)
 	u.Host = proxy.addr()
 
-	// Short keepalive so the severed connection is noticed quickly.
-	b, err := bus.NewMqttMessageBus(func() *mqtt.ClientOptions {
-		return mqtt.NewClientOptions().AddBroker(u.String()).SetKeepAlive(time.Second * 2)
-	})
+	b, err := bus.NewMqttMessageBus(u.String(), "psrpc-test-reconnect")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.Close() })
 
@@ -94,7 +86,7 @@ func TestMqttReconnection(t *testing.T) {
 	waitForRequest(t, sub, "before")
 
 	proxy.sever()
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Millisecond * 500)
 
 	// Subscribing during the outage is accepted and delivers once the bus
 	// has reconnected.
@@ -102,8 +94,7 @@ func TestMqttReconnection(t *testing.T) {
 	sub2, err := bus.Subscribe[*internal.Request](ctx, b, channel2, bus.DefaultChannelSize)
 	require.NoError(t, err)
 
-	// QoS 0 deliveries racing the resubscription can be dropped, so keep
-	// publishing until one makes it through.
+	// QoS 0 deliveries racing reconnection can be dropped.
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		require.True(t, time.Now().Before(deadline), "no delivery after reconnection")

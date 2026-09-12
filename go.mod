@@ -3,7 +3,7 @@ module github.com/livekit/psrpc
 go 1.25.5
 
 require (
-	github.com/eclipse/paho.mqtt.golang v1.5.1
+	github.com/eclipse/paho.golang v0.23.0
 	github.com/frostbyte73/core v0.1.1
 	github.com/gammazero/deque v1.2.1
 	github.com/go-logr/logr v1.4.3
@@ -21,9 +21,9 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b
-	golang.org/x/mod v0.36.0
+	golang.org/x/mod v0.38.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
-	google.golang.org/grpc v1.81.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -53,10 +53,10 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
-	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
