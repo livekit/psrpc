@@ -46,3 +46,23 @@ func NewNatsMessageBus(nc *nats.Conn, opts ...BusOption) MessageBus {
 func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
 	return bus.NewRedisMessageBus(rc, opts...)
 }
+
+// ClosableMessageBus is implemented by buses that own their broker
+// connections (AMQP, MQTT) and must be closed to release them.
+type ClosableMessageBus interface {
+	MessageBus
+	Close() error
+}
+
+// NewMqttMessageBus connects to an MQTT 5 broker, e.g.
+// tcp://user:pass@localhost:1883 or ssl://host:8883. The broker must
+// support MQTT 5 shared subscriptions ($share). clientID is the MQTT
+// client identifier; if empty a random id is generated. The returned
+// bus must be closed.
+func NewMqttMessageBus(brokerURL string, clientID string, opts ...BusOption) (ClosableMessageBus, error) {
+	b, err := bus.NewMqttMessageBus(brokerURL, clientID, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
