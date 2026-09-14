@@ -8,7 +8,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/klauspost/compress v1.19.2
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
-	github.com/nats-io/nats.go v1.52.0
+	github.com/nats-io/nats.go v1.53.1
 	github.com/ory/dockertest/v4 v4.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.20.0
