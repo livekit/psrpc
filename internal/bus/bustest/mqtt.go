@@ -10,6 +10,7 @@ import (
 	"github.com/ory/dockertest/v4"
 
 	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/rand"
 )
 
 func init() {
@@ -50,7 +51,11 @@ type mqttServer struct {
 }
 
 func (s *mqttServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
-	b, err := bus.NewMqttMessageBus(s.url, "psrpc-bustest", opts...)
+	// A unique client id per bus: several buses are alive concurrently in one
+	// test (server + client), and a broker disconnects an existing session
+	// when a new connection reuses its client id — the buses would flap each
+	// other's connections forever.
+	b, err := bus.NewMqttMessageBus(s.url, "psrpc-bustest-"+rand.NewString(), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
