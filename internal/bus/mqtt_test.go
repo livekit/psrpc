@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,4 +112,61 @@ func TestMqttReconnection(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond * 200)
 	}
+}
+
+// TestMqttSubscribeChurn races concurrent subscribe/unsubscribe churn on one
+// topic and then expects a fresh subscription to keep receiving. This is the
+// regression test for the wire-path ordering: the UNSUBSCRIBE issued when a
+// subscriber list drains must never cancel the SUBSCRIBE of a replacement
+// list, no matter how the two interleave on wireMu.
+func TestMqttSubscribeChurn(t *testing.T) {
+	brokerURL := os.Getenv("MQTT_URL")
+	if brokerURL == "" {
+		t.Skip("MQTT_URL not set; skipping MQTT subscribe churn test")
+	}
+
+	b, err := bus.NewMqttMessageBus(brokerURL, "psrpc-test-churn")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+
+	channel := bus.Channel{Legacy: "livekit|" + rand.NewString() + "|REQ"}
+	ctx := context.Background()
+
+	// Warm the topic: a first subscriber forces the broker SUBSCRIBE.
+	warm, err := bus.Subscribe[*internal.Request](ctx, b, channel, bus.DefaultChannelSize)
+	require.NoError(t, err)
+	require.NoError(t, warm.Close())
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for g := 0; g < 2; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				s, err := bus.Subscribe[*internal.Request](ctx, b, channel, bus.DefaultChannelSize)
+				if err != nil {
+					continue
+				}
+				s.Close()
+			}
+		}()
+	}
+	time.Sleep(300 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+
+	// Let any in-flight wire operations quiesce behind wireMu.
+	time.Sleep(100 * time.Millisecond)
+
+	sub, err := bus.Subscribe[*internal.Request](ctx, b, channel, bus.DefaultChannelSize)
+	require.NoError(t, err)
+	require.NoError(t, b.Publish(ctx, channel, &internal.Request{RequestId: "churn"}))
+	waitForRequest(t, sub, "churn")
+	require.NoError(t, sub.Close())
 }
