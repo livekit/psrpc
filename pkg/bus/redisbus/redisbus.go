@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bus
+// Package redisbus provides a psrpc bus backed by Redis pub/sub.
+package redisbus
 
 import (
 	"context"
@@ -28,9 +29,9 @@ import (
 	"go.uber.org/multierr"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc/internal/logger"
+	"github.com/livekit/psrpc/pkg/bus"
 )
 
 const (
@@ -41,7 +42,7 @@ const (
 	publishBuckets          = 17
 )
 
-type redisMessageBus struct {
+type transport struct {
 	rc  redis.UniversalClient
 	ctx context.Context
 	ps  *redis.PubSub
@@ -56,23 +57,17 @@ type redisMessageBus struct {
 	currentChannels map[string]struct{}
 
 	publishQueues [publishBuckets]*redisPublishQueue
-
-	c       *compressor
-	maxSize int
 }
 
-func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
+// rc is borrowed, not owned: closing it is the caller's job.
+func New(rc redis.UniversalClient, opts ...bus.BusOption) bus.MessageBus {
 	ctx := context.Background()
-	o := getBusOpts(opts...)
-	r := &redisMessageBus{
+	r := &transport{
 		rc:     rc,
 		ctx:    ctx,
 		ps:     rc.Subscribe(ctx),
 		subs:   map[string]*redisSubList{},
 		queues: map[string]*redisSubList{},
-
-		c:       newCompressor(o.Compression),
-		maxSize: o.Compression.MaxDecompressedSize,
 
 		wakeup:          make(chan struct{}, 1),
 		ops:             &redisWriteOpQueue{},
@@ -84,33 +79,24 @@ func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus 
 	}
 	go r.readWorker()
 	go r.writeWorker()
-	return r
+	return bus.New(r, opts...)
 }
 
-func (r *redisMessageBus) maxDecompressedSize() int {
-	return r.maxSize
-}
-
-func (r *redisMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg, "", r.c)
-	if err != nil {
-		return err
-	}
-
+func (r *transport) Publish(_ context.Context, channel bus.Channel, b []byte) error {
 	bucket := xxh3.HashString(channel.Legacy) % publishBuckets
 	r.publishQueues[bucket].Enqueue(channel.Legacy, b)
 	return nil
 }
 
-func (r *redisMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
+func (r *transport) Subscribe(ctx context.Context, channel bus.Channel, size int) (bus.Reader, error) {
 	return r.subscribe(ctx, channel.Legacy, size, r.subs, false)
 }
 
-func (r *redisMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
+func (r *transport) SubscribeQueue(ctx context.Context, channel bus.Channel, size int) (bus.Reader, error) {
 	return r.subscribe(ctx, channel.Legacy, size, r.queues, true)
 }
 
-func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (Reader, error) {
+func (r *transport) subscribe(ctx context.Context, channel string, size int, subLists map[string]*redisSubList, queue bool) (bus.Reader, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	sub := &redisSubscription{
 		bus:     r,
@@ -135,7 +121,7 @@ func (r *redisMessageBus) subscribe(ctx context.Context, channel string, size in
 	return sub, nil
 }
 
-func (r *redisMessageBus) unsubscribe(channel string, queue bool, sub *redisSubscription) {
+func (r *transport) unsubscribe(channel string, queue bool, sub *redisSubscription) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -163,7 +149,7 @@ func (r *redisMessageBus) unsubscribe(channel string, queue bool, sub *redisSubs
 	}
 }
 
-func (r *redisMessageBus) readWorker() {
+func (r *transport) readWorker() {
 	var delay time.Duration
 	for {
 		msg, err := r.ps.ReceiveMessage(r.ctx)
@@ -191,12 +177,12 @@ func (r *redisMessageBus) readWorker() {
 	}
 }
 
-func (r *redisMessageBus) reconcileSubscriptions(channel string) {
+func (r *transport) reconcileSubscriptions(channel string) {
 	r.dirtyChannels[channel] = struct{}{}
 	r.enqueueWriteOp(&redisReconcileSubscriptionsOp{r})
 }
 
-func (r *redisMessageBus) enqueueWriteOp(op redisWriteOp) {
+func (r *transport) enqueueWriteOp(op redisWriteOp) {
 	r.ops.push(op)
 	select {
 	case r.wakeup <- struct{}{}:
@@ -204,7 +190,7 @@ func (r *redisMessageBus) enqueueWriteOp(op redisWriteOp) {
 	}
 }
 
-func (r *redisMessageBus) writeWorker() {
+func (r *transport) writeWorker() {
 	for range r.wakeup {
 		r.ops.drain()
 	}
@@ -251,7 +237,7 @@ type redisWriteOp interface {
 // ----------------------------------------------------
 
 type redisReconcileSubscriptionsOp struct {
-	*redisMessageBus
+	*transport
 }
 
 func (r *redisReconcileSubscriptionsOp) run() error {
@@ -326,7 +312,7 @@ func (r *redisSubList) dispatch(msg *redis.Message) {
 // ----------------------------------------------------
 
 type redisSubscription struct {
-	bus     *redisMessageBus
+	bus     *transport
 	ctx     context.Context
 	cancel  context.CancelFunc
 	channel string
@@ -341,7 +327,7 @@ func (r *redisSubscription) write(msg *redis.Message) {
 	}
 }
 
-func (r *redisSubscription) read() ([]byte, bool) {
+func (r *redisSubscription) Read() ([]byte, bool) {
 	for {
 		var msg *redis.Message
 		var ok bool

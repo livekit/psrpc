@@ -1,28 +1,30 @@
-package bustest
+// Package natstest registers a Docker-backed NATS broker with bustest. Import it
+// for side effects.
+package natstest
 
 import (
 	"context"
-	"fmt"
-	"sync/atomic"
 	"testing"
 
 	"github.com/nats-io/nats.go"
 	"github.com/ory/dockertest/v4"
 
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus/bustest/dockerutil"
+	"github.com/livekit/psrpc/pkg/bus/natsbus"
 )
 
 func init() {
-	RegisterServer("NATS", NewNATS)
+	bustest.RegisterServer("NATS", New)
 }
 
-var natsLast = baseID
-
-func NewNATS(t testing.TB, pool dockertest.Pool) Server {
+func New(t testing.TB) bustest.Server {
 	ctx := context.Background()
+	pool := dockerutil.Pool(t)
 	c, err := pool.Run(ctx, "nats",
 		dockertest.WithTag("latest"),
-		dockertest.WithName(fmt.Sprintf("psrpc-nats-%d", atomic.AddUint32(&natsLast, 1))),
+		dockertest.WithName(dockerutil.Name("nats")),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +33,7 @@ func NewNATS(t testing.TB, pool dockertest.Pool) Server {
 		_ = c.Close(context.Background())
 	})
 	addr := c.GetHostPort("4222/tcp")
-	waitTCPPort(t, pool, addr)
+	dockerutil.WaitTCPPort(t, pool, addr)
 
 	t.Log("NATS running on", addr)
 
@@ -72,5 +74,5 @@ func (s *natsServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bus.NewNatsMessageBus(nc, opts...)
+	return natsbus.New(nc, opts...)
 }

@@ -24,14 +24,15 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/localbus"
 	"github.com/livekit/psrpc/pkg/info"
 )
 
 func TestOpenStreamRejectsClosedClient(t *testing.T) {
 	sd := &info.ServiceDefinition{Name: "test", ID: "client"}
 	sd.RegisterMethod("stream", false, false, false, false)
-	c, err := NewRPCClientWithStreams(sd, bus.NewLocalMessageBus())
+	c, err := NewRPCClientWithStreams(sd, localbus.New())
 	require.NoError(t, err)
 	c.Close()
 
@@ -43,7 +44,7 @@ func TestOpenStreamRejectsClosedClient(t *testing.T) {
 
 func TestOpenStreamStopsWhileWaitingForAckWhenClientCloses(t *testing.T) {
 	openPublished := make(chan struct{})
-	b := bus.NewTestBus(bus.NewLocalMessageBus(), func(o *bus.TestBusOpts) {
+	b := bus.NewTestBus(localbus.New(), func(o *bus.TestBusOpts) {
 		o.PublishInterceptors = append(o.PublishInterceptors, func(next bus.PublishHandler) bus.PublishHandler {
 			return func(ctx context.Context, channel bus.Channel, msg proto.Message) error {
 				err := next(ctx, channel, msg)
@@ -95,7 +96,7 @@ func TestOpenStreamStopsWhileWaitingForAckWhenClientCloses(t *testing.T) {
 func TestRequestSingleStopsWhenClientCloses(t *testing.T) {
 	sd := &info.ServiceDefinition{Name: "test", ID: "client"}
 	sd.RegisterMethod("rpc", false, false, false, false)
-	c, err := NewRPCClient(sd, bus.NewLocalMessageBus())
+	c, err := NewRPCClient(sd, localbus.New())
 	require.NoError(t, err)
 
 	errChan := make(chan error, 1)
@@ -127,7 +128,7 @@ func TestRequestSingleStopsDuringServerSelectionWhenClientCloses(t *testing.T) {
 	sd.RegisterMethod("rpc", true, false, true, false)
 	c, err := NewRPCClient(
 		sd,
-		bus.NewLocalMessageBus(),
+		localbus.New(),
 		psrpc.WithClientSelectTimeout(time.Minute),
 	)
 	require.NoError(t, err)
@@ -166,7 +167,7 @@ func TestRequestSingleStopsDuringServerSelectionWhenClientCloses(t *testing.T) {
 func TestRequestMultiStopsWhenClientCloses(t *testing.T) {
 	sd := &info.ServiceDefinition{Name: "test", ID: "client"}
 	sd.RegisterMethod("multi", false, true, false, false)
-	c, err := NewRPCClient(sd, bus.NewLocalMessageBus())
+	c, err := NewRPCClient(sd, localbus.New())
 	require.NoError(t, err)
 
 	responses, err := RequestMulti[*internal.Response](

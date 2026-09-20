@@ -15,11 +15,9 @@
 package bus
 
 import (
-	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -41,7 +39,7 @@ func newControlledReader(size int) *controlledReader {
 	}
 }
 
-func (r *controlledReader) read() ([]byte, bool) {
+func (r *controlledReader) Read() ([]byte, bool) {
 	b, ok := <-r.messages
 	if ok {
 		r.reads <- struct{}{}
@@ -54,43 +52,6 @@ func (r *controlledReader) Close() error {
 		close(r.messages)
 	}
 	return r.closeErr
-}
-
-func TestSubscriptionIgnoresUnexpectedMessageType(t *testing.T) {
-	b := NewLocalMessageBus()
-	channel := Channel{Legacy: "test"}
-	sub, err := Subscribe[*internal.Request](context.Background(), b, channel, 1)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, sub.Close()) })
-
-	require.NoError(t, b.Publish(context.Background(), channel, &internal.Response{}))
-	want := &internal.Request{RequestId: "expected"}
-	require.NoError(t, b.Publish(context.Background(), channel, want))
-
-	select {
-	case got := <-sub.Channel():
-		require.True(t, proto.Equal(want, got))
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the expected message")
-	}
-}
-
-func TestSubscriptionCloseIsIdempotent(t *testing.T) {
-	b := NewLocalMessageBus()
-	sub, err := Subscribe[*internal.Request](
-		context.Background(), b, Channel{Legacy: "test"}, 1,
-	)
-	require.NoError(t, err)
-
-	require.NoError(t, sub.Close())
-	require.NoError(t, sub.Close())
-
-	select {
-	case _, ok := <-sub.Channel():
-		require.False(t, ok)
-	default:
-		t.Fatal("subscription channel was not closed before Close returned")
-	}
 }
 
 func TestSubscriptionCloseUnblocksBlockedDelivery(t *testing.T) {

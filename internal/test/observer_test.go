@@ -24,7 +24,7 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus/localbus"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/rand"
@@ -62,7 +62,7 @@ func (o *recordingObserver) snapshot() (received int, claims []psrpc.ClaimOutcom
 // itself was delivered.
 func TestRequestObserver(t *testing.T) {
 	obs := &recordingObserver{}
-	b := bus.NewLocalMessageBus()
+	b := localbus.New()
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs))

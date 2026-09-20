@@ -1,29 +1,31 @@
-package bustest
+// Package redistest registers a Docker-backed Redis broker with bustest. Import it
+// for side effects.
+package redistest
 
 import (
 	"context"
-	"fmt"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ory/dockertest/v4"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus/bustest/dockerutil"
+	"github.com/livekit/psrpc/pkg/bus/redisbus"
 )
 
 func init() {
-	RegisterServer("Redis", NewRedis)
+	bustest.RegisterServer("Redis", New)
 }
 
-var redisLast = baseID
-
-func NewRedis(t testing.TB, pool dockertest.Pool) Server {
+func New(t testing.TB) bustest.Server {
 	ctx := context.Background()
+	pool := dockerutil.Pool(t)
 	c, err := pool.Run(ctx, "redis",
 		dockertest.WithTag("latest"),
-		dockertest.WithName(fmt.Sprintf("psrpc-redis-%d", atomic.AddUint32(&redisLast, 1))),
+		dockertest.WithName(dockerutil.Name("redis")),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +34,7 @@ func NewRedis(t testing.TB, pool dockertest.Pool) Server {
 		_ = c.Close(context.Background())
 	})
 	addr := c.GetHostPort("6379/tcp")
-	waitTCPPort(t, pool, addr)
+	dockerutil.WaitTCPPort(t, pool, addr)
 
 	t.Log("Redis running on", addr)
 
@@ -76,5 +78,5 @@ func (s *redisServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBu
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bus.NewRedisMessageBus(rc, opts...)
+	return redisbus.New(rc, opts...)
 }

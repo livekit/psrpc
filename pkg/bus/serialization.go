@@ -46,7 +46,9 @@ func serialize(msg proto.Message, channel string, c *compressor) ([]byte, error)
 	return proto.Marshal(m)
 }
 
-func deserializeChannel(b []byte) (string, error) {
+// Reads Channel.Local back out of a serialized payload without decoding the
+// message.
+func DecodeLocalChannel(b []byte) (string, error) {
 	c := &internal.Channel{}
 	opt := proto.UnmarshalOptions{
 		DiscardUnknown: true,
@@ -59,7 +61,8 @@ func deserializeChannel(b []byte) (string, error) {
 	return c.Channel, nil
 }
 
-func deserialize(b []byte, maxSize int) (proto.Message, error) {
+// maxSize caps the result after decompression; zero is unlimited.
+func Deserialize(b []byte, maxSize int) (proto.Message, error) {
 	m := &internal.Content{}
 	opt := proto.UnmarshalOptions{
 		DiscardUnknown: true,

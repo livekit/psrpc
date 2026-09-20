@@ -50,12 +50,12 @@ func (s *subscription[MessageType]) forward(maxSize int) {
 	defer close(s.c)
 
 	for {
-		b, ok := s.sub.read()
+		b, ok := s.sub.Read()
 		if !ok {
 			return
 		}
 
-		p, err := deserialize(b, maxSize)
+		p, err := Deserialize(b, maxSize)
 		if err != nil {
 			continue
 		}

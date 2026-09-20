@@ -142,7 +142,7 @@ func BenchmarkSerialize(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if _, err = deserialize(buf, 0); err != nil {
+				if _, err = Deserialize(buf, 0); err != nil {
 					b.Fatal(err)
 				}
 			}

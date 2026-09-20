@@ -25,8 +25,10 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus/localbus"
+	_ "github.com/livekit/psrpc/pkg/bus/natsbus/natstest"
+	_ "github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/rand"
@@ -94,7 +96,7 @@ func TestSkipClaim(t *testing.T) {
 
 // Generated code cannot pair these, but RegisterHandler is exported.
 func TestQueueRejectsAffinityFunc(t *testing.T) {
-	b := bus.NewLocalMessageBus()
+	b := localbus.New()
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	t.Cleanup(func() { s.Close(true) })
 
@@ -116,7 +118,7 @@ func TestQueueRejectsAffinityFunc(t *testing.T) {
 
 // Same reasoning as the affinity function, but the caller sets these per request.
 func TestQueueRejectsAffinitySelection(t *testing.T) {
-	b := bus.NewLocalMessageBus()
+	b := localbus.New()
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
 	t.Cleanup(func() { c.Close() })
@@ -151,7 +153,7 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 // nobody received, and the grant it replaces must not be sent.
 func TestSkipClaimSlowHandler(t *testing.T) {
 	var grants atomic.Int32
-	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+	b := testutils.NewTestBus(localbus.New(),
 		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
 			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
 				if _, ok := msg.(*internal.ClaimResponse); ok {
@@ -185,7 +187,7 @@ func TestSkipClaimSlowHandler(t *testing.T) {
 // Unset means claim, so a deploy that has not opted in is unaffected.
 func TestSkipClaimDisabledByDefault(t *testing.T) {
 	obs := &recordingObserver{}
-	b := bus.NewLocalMessageBus()
+	b := localbus.New()
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs))
@@ -212,7 +214,7 @@ func TestSkipClaimDisabledByDefault(t *testing.T) {
 // reconstruction of the client or server.
 func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 	obs := &recordingObserver{}
-	b := bus.NewLocalMessageBus()
+	b := localbus.New()
 	var on atomic.Bool
 	on.Store(true)
 
@@ -251,7 +253,7 @@ func TestSkipClaimRevokedAtRuntime(t *testing.T) {
 // that elected to skip.
 func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 	obs := &recordingObserver{}
-	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+	b := testutils.NewTestBus(localbus.New(),
 		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
 			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
 				if req, ok := msg.(*internal.Request); ok {
@@ -287,7 +289,7 @@ func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 // CS-1992: an error response that beat the announcement was stashed while the
 // caller waited out the timeout. The bus delays announcements to force that order.
 func TestSkipClaimFastFailingHandler(t *testing.T) {
-	b := testutils.NewTestBus(bus.NewLocalMessageBus(),
+	b := testutils.NewTestBus(localbus.New(),
 		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
 			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
 				if _, ok := msg.(*internal.ClaimRequest); ok {

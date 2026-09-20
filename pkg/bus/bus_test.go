@@ -22,8 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/bustest"
+	_ "github.com/livekit/psrpc/pkg/bus/natsbus/natstest"
+	_ "github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 	"github.com/livekit/psrpc/pkg/rand"
 )
 
