@@ -25,7 +25,9 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus/bustest"
+	_ "github.com/livekit/psrpc/pkg/bus/natsbus/natstest"
+	_ "github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/rand"

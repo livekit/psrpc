@@ -5,13 +5,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ory/dockertest/v4"
-
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/localbus"
 )
 
 func init() {
-	RegisterServer("Local", func(t testing.TB, pool dockertest.Pool) Server {
+	RegisterServer("Local", func(t testing.TB) Server {
 		return NewLocalBus()
 	})
 }
@@ -43,7 +42,7 @@ func (s *localBus) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
 	if b, ok := s.bus[k]; ok {
 		return b
 	}
-	b := bus.NewLocalMessageBus(opts...)
+	b := localbus.New(opts...)
 	s.bus[k] = b
 	return b
 }

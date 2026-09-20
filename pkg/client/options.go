@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/livekit/psrpc"
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
 	"github.com/livekit/psrpc/pkg/info"
 )
 

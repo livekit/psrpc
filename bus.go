@@ -15,15 +15,15 @@
 package psrpc
 
 import (
-	"github.com/nats-io/nats.go"
-	"github.com/redis/go-redis/v9"
-
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/localbus"
 )
 
 type Channel = bus.Channel
 type MessageBus = bus.MessageBus
 type Reader = bus.Reader
+
+type Transport = bus.Transport
 
 type BusOption = bus.BusOption
 type CompressionOpts = bus.CompressionOpts
@@ -35,14 +35,8 @@ func WithBusCompression(c CompressionOpts) BusOption {
 	return bus.WithBusCompression(c)
 }
 
+// Aliased here, unlike the broker-backed buses, because localbus adds nothing
+// to this package's dependency closure.
 func NewLocalMessageBus(opts ...BusOption) MessageBus {
-	return bus.NewLocalMessageBus(opts...)
-}
-
-func NewNatsMessageBus(nc *nats.Conn, opts ...BusOption) MessageBus {
-	return bus.NewNatsMessageBus(nc, opts...)
-}
-
-func NewRedisMessageBus(rc redis.UniversalClient, opts ...BusOption) MessageBus {
-	return bus.NewRedisMessageBus(rc, opts...)
+	return localbus.New(opts...)
 }

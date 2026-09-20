@@ -12,43 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bus
+// Package localbus provides an in-process psrpc bus.
+package localbus
 
 import (
 	"context"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
+	"github.com/livekit/psrpc/pkg/bus"
 )
 
-type localMessageBus struct {
+type transport struct {
 	sync.RWMutex
-	subs    map[string]*localSubList
-	queues  map[string]*localSubList
-	c       *compressor
-	maxSize int
+	subs   map[string]*subList
+	queues map[string]*subList
 }
 
-func NewLocalMessageBus(opts ...BusOption) MessageBus {
-	o := getBusOpts(opts...)
-	return &localMessageBus{
-		subs:    make(map[string]*localSubList),
-		queues:  make(map[string]*localSubList),
-		c:       newCompressor(o.Compression),
-		maxSize: o.Compression.MaxDecompressedSize,
-	}
+// Only publishers and subscribers sharing the returned value can reach each
+// other.
+func New(opts ...bus.BusOption) bus.MessageBus {
+	return bus.New(&transport{
+		subs:   make(map[string]*subList),
+		queues: make(map[string]*subList),
+	}, opts...)
 }
 
-func (l *localMessageBus) maxDecompressedSize() int {
-	return l.maxSize
-}
-
-func (l *localMessageBus) Publish(_ context.Context, channel Channel, msg proto.Message) error {
-	b, err := serialize(msg, "", l.c)
-	if err != nil {
-		return err
-	}
-
+func (l *transport) Publish(_ context.Context, channel bus.Channel, b []byte) error {
 	l.RLock()
 	subs := l.subs[channel.Legacy]
 	queues := l.queues[channel.Legacy]
@@ -63,53 +52,53 @@ func (l *localMessageBus) Publish(_ context.Context, channel Channel, msg proto.
 	return nil
 }
 
-func (l *localMessageBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
+func (l *transport) Subscribe(ctx context.Context, channel bus.Channel, size int) (bus.Reader, error) {
 	return l.subscribe(ctx, l.subs, channel.Legacy, size, false)
 }
 
-func (l *localMessageBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
+func (l *transport) SubscribeQueue(ctx context.Context, channel bus.Channel, size int) (bus.Reader, error) {
 	return l.subscribe(ctx, l.queues, channel.Legacy, size, true)
 }
 
-func (l *localMessageBus) subscribe(ctx context.Context, subLists map[string]*localSubList, channel string, size int, queue bool) (Reader, error) {
+func (l *transport) subscribe(ctx context.Context, subLists map[string]*subList, channel string, size int, queue bool) (bus.Reader, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	subList := subLists[channel]
-	if subList == nil {
-		subList = &localSubList{queue: queue}
-		subList.onUnsubscribe = func(index int) {
-			// lock localMessageBus before localSubList
+	sl := subLists[channel]
+	if sl == nil {
+		sl = &subList{queue: queue}
+		sl.onUnsubscribe = func(index int) {
+			// lock transport before subList
 			l.Lock()
-			subList.Lock()
+			sl.Lock()
 
-			subList.subs[index] = nil
-			subList.subCount--
-			if subList.subCount == 0 {
+			sl.subs[index] = nil
+			sl.subCount--
+			if sl.subCount == 0 {
 				delete(subLists, channel)
 			}
 
-			subList.Unlock()
+			sl.Unlock()
 			l.Unlock()
 		}
-		subLists[channel] = subList
+		subLists[channel] = sl
 	}
 
-	return subList.create(ctx, size), nil
+	return sl.create(ctx, size), nil
 }
 
-type localSubList struct {
-	sync.RWMutex  // locking while holding localMessageBus lock is allowed
-	subs          []*localSubscription
+type subList struct {
+	sync.RWMutex  // locking while holding transport lock is allowed
+	subs          []*subscription
 	subCount      int
 	queue         bool
 	next          int
 	onUnsubscribe func(int)
 }
 
-func (l *localSubList) create(ctx context.Context, size int) *localSubscription {
+func (l *subList) create(ctx context.Context, size int) *subscription {
 	ctx, cancel := context.WithCancel(ctx)
-	sub := &localSubscription{
+	sub := &subscription{
 		ctx:     ctx,
 		cancel:  cancel,
 		msgChan: make(chan []byte, size),
@@ -142,7 +131,7 @@ func (l *localSubList) create(ctx context.Context, size int) *localSubscription 
 	return sub
 }
 
-func (l *localSubList) dispatch(b []byte) {
+func (l *subList) dispatch(b []byte) {
 	if l.queue {
 		l.Lock()
 		defer l.Unlock()
@@ -172,21 +161,21 @@ func (l *localSubList) dispatch(b []byte) {
 	}
 }
 
-type localSubscription struct {
+type subscription struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	msgChan chan []byte
 	onClose func()
 }
 
-func (l *localSubscription) write(b []byte) {
+func (l *subscription) write(b []byte) {
 	select {
 	case l.msgChan <- b:
 	case <-l.ctx.Done():
 	}
 }
 
-func (l *localSubscription) read() ([]byte, bool) {
+func (l *subscription) Read() ([]byte, bool) {
 	msg, ok := <-l.msgChan
 	if !ok {
 		return nil, false
@@ -194,7 +183,7 @@ func (l *localSubscription) read() ([]byte, bool) {
 	return msg, true
 }
 
-func (l *localSubscription) Close() error {
+func (l *subscription) Close() error {
 	l.cancel()
 	l.onClose()
 	close(l.msgChan)

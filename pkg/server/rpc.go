@@ -26,8 +26,8 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
-	"github.com/livekit/psrpc/internal/bus"
 	"github.com/livekit/psrpc/internal/logger"
+	"github.com/livekit/psrpc/pkg/bus"
 	"github.com/livekit/psrpc/pkg/info"
 	"github.com/livekit/psrpc/pkg/metadata"
 )

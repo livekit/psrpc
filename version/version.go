@@ -15,6 +15,10 @@
 package version
 
 const (
-	Version          = "v0.7.7"
+	Version = "v0.8.0"
+
+	// Generated code references the constant for the minor version it was built
+	// against, so each stays until that output is no longer supported.
 	PsrpcVersion_0_7 = true
+	PsrpcVersion_0_8 = true
 )

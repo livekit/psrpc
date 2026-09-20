@@ -4,7 +4,7 @@ Create custom protobuf-based golang RPCs built on pub/sub.
 
 Supports:
 * Protobuf service definitions
-* Use Redis, Nats, or a local communication layer
+* Use Redis, NATS, a local communication layer, or [your own bus](#message-bus)
 * Custom server selection for RPC handling based on user-defined [affinity](#Affinity)
 * RPC topics - any RPC can be divided into topics, (e.g. by region)
 * Single RPCs - one request is handled by one server, used for normal RPCs
@@ -261,6 +261,100 @@ func NewMyServiceServer(serverID string, svc MyServiceServerImpl, bus psrpc.Mess
     ...
 }
 ```
+
+## Message bus
+
+### Choosing a bus
+
+Each bus lives in its own package, so importing psrpc does not pull in a broker
+client you don't use. Pick one and pass it to the generated constructors:
+
+```go
+import (
+    "github.com/livekit/psrpc"
+    "github.com/livekit/psrpc/pkg/bus/localbus"
+    "github.com/livekit/psrpc/pkg/bus/natsbus"
+    "github.com/livekit/psrpc/pkg/bus/redisbus"
+)
+
+bus := localbus.New()          // in-process, no broker
+bus := natsbus.New(nc)         // *nats.Conn
+bus := redisbus.New(rc)        // redis.UniversalClient
+```
+
+`psrpc.NewLocalMessageBus` remains as an alias for `localbus.New`. The NATS and
+Redis constructors previously on the root package moved to the packages above:
+
+```go
+- bus := psrpc.NewNatsMessageBus(nc)
++ bus := natsbus.New(nc)
+```
+
+Payloads above a size threshold can be gzipped on the wire:
+
+```go
+bus := natsbus.New(nc, psrpc.WithBusCompression(psrpc.CompressionOpts{
+    Quality:             6,
+    Threshold:           1024,
+    MaxDecompressedSize: 1 << 20, // reject decompression bombs
+}))
+```
+
+### Implementing a custom bus
+
+To run psrpc over another broker -- AMQP, Kafka, SQS, Cloud Pub/Sub -- implement
+`bus.Transport` and wrap it with `bus.New`. Payloads are opaque: psrpc owns the
+wire encoding, compression and the decompression cap, so a transport only moves
+bytes.
+
+```go
+type Transport interface {
+    Publish(ctx context.Context, channel bus.Channel, payload []byte) error
+    Subscribe(ctx context.Context, channel bus.Channel, channelSize int) (bus.Reader, error)
+    SubscribeQueue(ctx context.Context, channel bus.Channel, channelSize int) (bus.Reader, error)
+}
+
+type Reader interface {
+    Read() ([]byte, bool) // false once closed
+    Close() error
+}
+```
+
+`Subscribe` delivers each message to every subscriber; `SubscribeQueue` delivers
+it to exactly one member of the group. Expose a constructor that wraps the
+transport, matching the built-in buses:
+
+```go
+func New(conn *Conn, opts ...bus.BusOption) bus.MessageBus {
+    return bus.New(&transport{conn: conn}, opts...)
+}
+```
+
+A `bus.Channel` names the destination three ways; use whichever your broker can
+route on and ignore the rest. `Legacy` is a flat `'|'`-delimited key (what the
+Redis and local buses use), `Server` is a hierarchical subject (what NATS
+subscribes to), and `Local` demultiplexes several logical channels sharing one
+`Server` subject. If you subscribe per `Server` subject, recover `Local` from the
+payload with `bus.DecodeLocalChannel` and fan out on it -- see `pkg/bus/natsbus`.
+
+`pkg/bus/localbus` is the smallest complete implementation and a good template.
+
+### Conformance tests
+
+`pkg/bus/bustest` runs psrpc's own bus suite against any implementation. Register
+a server from an `init` function and every `bustest.TestAll` suite in the binary
+will exercise it:
+
+```go
+func init() {
+    bustest.RegisterServer("MyBroker", func(t testing.TB) bustest.Server {
+        return &myServer{ /* start a broker, t.Cleanup to tear it down */ }
+    })
+}
+```
+
+The harness itself has no Docker dependency; if your broker needs a container,
+`pkg/bus/bustest/dockerutil` has the shared pool helpers.
 
 ## Affinity
 

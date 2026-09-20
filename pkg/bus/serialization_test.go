@@ -37,10 +37,10 @@ func TestSerialization(t *testing.T) {
 	b, err := serialize(msg, "channel", nil)
 	require.NoError(t, err)
 
-	m, err := deserialize(b, 0)
+	m, err := Deserialize(b, 0)
 	require.NoError(t, err)
 
-	channel, err := deserializeChannel(b)
+	channel, err := DecodeLocalChannel(b)
 	require.NoError(t, err)
 
 	require.Equal(t, m.(*internal.Request).RequestId, msg.RequestId)
@@ -94,11 +94,11 @@ func TestSerializeCompressed(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(b, &envelope))
 	require.Equal(t, internal.Compression_COMPRESSION_GZIP, envelope.Compression)
 
-	channel, err := deserializeChannel(b)
+	channel, err := DecodeLocalChannel(b)
 	require.NoError(t, err)
 	require.Equal(t, "channel", channel)
 
-	m, err := deserialize(b, 0)
+	m, err := Deserialize(b, 0)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, m))
 }
@@ -113,7 +113,7 @@ func TestSerializeBelowThresholdStaysPlain(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(b, &envelope))
 	require.Equal(t, internal.Compression_COMPRESSION_NONE, envelope.Compression)
 
-	m, err := deserialize(b, 0)
+	m, err := Deserialize(b, 0)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, m))
 }
@@ -131,7 +131,7 @@ func TestSerializeIncompressibleStaysPlain(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(b, &envelope))
 	require.Equal(t, internal.Compression_COMPRESSION_NONE, envelope.Compression)
 
-	m, err := deserialize(b, 0)
+	m, err := Deserialize(b, 0)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, m))
 }
@@ -148,7 +148,7 @@ func TestDeserializeUncompressedPeer(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	m, err := deserialize(b, 0)
+	m, err := Deserialize(b, 0)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(msg, m))
 }
@@ -163,7 +163,7 @@ func TestDeserializeUnknownCompression(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = deserialize(b, 0)
+	_, err = Deserialize(b, 0)
 	require.ErrorContains(t, err, "unrecognized message compression")
 }
 
@@ -171,6 +171,6 @@ func TestDeserializeCompressedExceedsMaxSize(t *testing.T) {
 	b, err := serialize(compressibleRequest(), "channel", testCompressor(6, 1))
 	require.NoError(t, err)
 
-	_, err = deserialize(b, 64)
+	_, err = Deserialize(b, 64)
 	require.ErrorContains(t, err, "exceeds")
 }

@@ -12,31 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package bustest is the psrpc bus conformance harness.
 package bustest
 
 import (
-	"context"
-	"math/rand/v2"
-	"net"
 	"testing"
 
-	"github.com/ory/dockertest/v4"
-
-	"github.com/livekit/psrpc/internal/bus"
+	"github.com/livekit/psrpc/pkg/bus"
 )
 
-var (
-	baseID  = rand.Uint32N(1000)
-	servers []serverInfo
-)
+var servers []serverInfo
 
 type serverInfo struct {
 	Name string
 	Func ServerFunc
 }
 
-type ServerFunc func(t testing.TB, pool dockertest.Pool) Server
+// Brings up a broker for the duration of the test.
+type ServerFunc func(t testing.TB) Server
 
+// Registration is per binary, so call this from an init function in a package
+// the test binary imports.
 func RegisterServer(name string, fnc ServerFunc) {
 	servers = append(servers, serverInfo{
 		Name: name,
@@ -44,40 +40,17 @@ func RegisterServer(name string, fnc ServerFunc) {
 	})
 }
 
-func waitTCPPort(t testing.TB, pool dockertest.Pool, addr string) {
-	if err := pool.Retry(context.Background(), 0, func() error {
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			t.Log(err)
-			return err
-		}
-		_ = conn.Close()
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func Docker(t testing.TB) dockertest.Pool {
-	pool, err := dockertest.NewPool(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pool
-}
-
 type Server interface {
+	// Repeated calls must return separate peers that can reach each other.
 	Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus
 }
 
 type Connect func(t testing.TB, opts ...bus.BusOption) bus.MessageBus
 
 func TestAll(t *testing.T, test func(t *testing.T, bus Connect)) {
-	pool := Docker(t)
 	for _, c := range servers {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			s := c.Func(t, pool)
+			s := c.Func(t)
 			test(t, s.Connect)
 		})
 	}

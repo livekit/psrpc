@@ -45,14 +45,16 @@ func NewTestBus(bus MessageBus, opts ...TestBusOption) MessageBus {
 	}
 
 	return &testBus{
-		bus:                   bus,
+		MessageBus:            bus,
 		publishHandler:        publishHandler,
 		subscribeInterceptors: o.SubscribeInterceptors,
 	}
 }
 
+// Embeds rather than wraps so uninterrupted methods keep forwarding as
+// MessageBus grows.
 type testBus struct {
-	bus                   MessageBus
+	MessageBus
 	publishHandler        PublishHandler
 	subscribeInterceptors []SubscribeInterceptor
 }
@@ -61,24 +63,20 @@ func (l *testBus) Publish(ctx context.Context, channel Channel, msg proto.Messag
 	return l.publishHandler(ctx, channel, msg)
 }
 
-func (l *testBus) maxDecompressedSize() int {
-	return maxDecompressedSize(l.bus)
-}
-
 func (l *testBus) Subscribe(ctx context.Context, channel Channel, size int) (Reader, error) {
-	r, err := l.bus.Subscribe(ctx, channel, size)
+	r, err := l.MessageBus.Subscribe(ctx, channel, size)
 	if err != nil {
 		return nil, err
 	}
-	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.read)}, nil
+	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.Read)}, nil
 }
 
 func (l *testBus) SubscribeQueue(ctx context.Context, channel Channel, size int) (Reader, error) {
-	r, err := l.bus.SubscribeQueue(ctx, channel, size)
+	r, err := l.MessageBus.SubscribeQueue(ctx, channel, size)
 	if err != nil {
 		return nil, err
 	}
-	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.read)}, nil
+	return &testReader{r, l.chainSubscribeInterceptors(ctx, channel, r.Read)}, nil
 }
 
 func (l *testBus) chainSubscribeInterceptors(ctx context.Context, channel Channel, handler ReadHandler) ReadHandler {
@@ -93,6 +91,6 @@ type testReader struct {
 	readHandler ReadHandler
 }
 
-func (r *testReader) read() ([]byte, bool) {
+func (r *testReader) Read() ([]byte, bool) {
 	return r.readHandler()
 }

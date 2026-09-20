@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bus_test
+package redisbus_test
 
 import (
 	"context"
@@ -25,8 +25,8 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/livekit/psrpc/internal/bus"
-	"github.com/livekit/psrpc/internal/bus/bustest"
+	"github.com/livekit/psrpc/pkg/bus"
+	"github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 )
 
 func redisTestChannel(channel string) bus.Channel {
@@ -34,7 +34,7 @@ func redisTestChannel(channel string) bus.Channel {
 }
 
 func TestRedisMessageBus(t *testing.T) {
-	srv := bustest.NewRedis(t, bustest.Docker(t))
+	srv := redistest.New(t)
 
 	t.Run("published messages are received by subscribers", func(t *testing.T) {
 		b0 := srv.Connect(t)
@@ -50,10 +50,10 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b1.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		b, ok := bus.RawRead(r)
+		b, ok := r.Read()
 		require.True(t, ok)
 
-		dst, err := bus.Deserialize(b)
+		dst, err := bus.Deserialize(b, 0)
 		require.NoError(t, err)
 		require.Equal(t, src.Value, dst.(*wrapperspb.StringValue).Value)
 	})
@@ -78,12 +78,12 @@ func TestRedisMessageBus(t *testing.T) {
 		var n atomic.Int64
 
 		go func() {
-			if _, ok := bus.RawRead(r1); ok {
+			if _, ok := r1.Read(); ok {
 				n.Inc()
 			}
 		}()
 		go func() {
-			if _, ok := bus.RawRead(r2); ok {
+			if _, ok := r2.Read(); ok {
 				n.Inc()
 			}
 		}()
@@ -110,9 +110,9 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		_, ok := bus.RawRead(r1)
+		_, ok := r1.Read()
 		require.True(t, ok)
-		_, ok = bus.RawRead(r2)
+		_, ok = r2.Read()
 		require.True(t, ok)
 
 		err = r1.Close()
@@ -123,15 +123,15 @@ func TestRedisMessageBus(t *testing.T) {
 		err = b0.Publish(context.Background(), redisTestChannel("test"), src)
 		require.NoError(t, err)
 
-		_, ok = bus.RawRead(r1)
+		_, ok = r1.Read()
 		require.False(t, ok)
-		_, ok = bus.RawRead(r2)
+		_, ok = r2.Read()
 		require.True(t, ok)
 	})
 }
 
 func BenchmarkRedisMessageBus(b *testing.B) {
-	srv := bustest.NewRedis(b, bustest.Docker(b))
+	srv := redistest.New(b)
 
 	b0 := srv.Connect(b)
 	b1 := srv.Connect(b)
@@ -143,7 +143,7 @@ func BenchmarkRedisMessageBus(b *testing.B) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < b.N; i++ {
-			bus.RawRead(r)
+			r.Read()
 		}
 		close(done)
 	}()
