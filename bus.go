@@ -40,3 +40,21 @@ func WithBusCompression(c CompressionOpts) BusOption {
 func NewLocalMessageBus(opts ...BusOption) MessageBus {
 	return localbus.New(opts...)
 }
+
+// ClosableMessageBus is implemented by buses that own their broker
+// connections (AMQP, MQTT) and must be closed to release them.
+type ClosableMessageBus interface {
+	MessageBus
+	Close() error
+}
+
+// NewAmqpMessageBus connects to an AMQP 0-9-1 broker such as RabbitMQ, e.g.
+// amqp://user:pass@localhost:5672/ or amqps://host:5671/vhost. The returned
+// bus must be closed.
+func NewAmqpMessageBus(url string, opts ...BusOption) (ClosableMessageBus, error) {
+	b, err := bus.NewAmqpMessageBus(url, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
