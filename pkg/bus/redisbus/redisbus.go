@@ -19,7 +19,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 
@@ -40,12 +42,27 @@ const (
 	minReadRetryInterval    = time.Millisecond * 100
 	maxReadRetryInterval    = time.Second
 	publishBuckets          = 17
+
+	// A subscription only reads, so a socket that has stopped delivering (dropped
+	// without a FIN, or left unauthenticated once the credentials it connected with
+	// expire) looks exactly like a quiet one. A read that sees nothing for this long
+	// sends a PING, and a PING still unanswered after another interval replaces the
+	// subscription.
+	defaultRedisHealthCheckInterval = 30 * time.Second
 )
+
+var errRedisPingUnanswered = errors.New("redis subscription did not answer a ping")
 
 type transport struct {
 	rc  redis.UniversalClient
 	ctx context.Context
-	ps  *redis.PubSub
+
+	// psMu keeps a replacement of ps from interleaving with the reconciler, so the
+	// replacement subscribes exactly currentChannels. ps is written holding psMu and
+	// mu, and read holding either.
+	psMu                sync.Mutex
+	ps                  *redis.PubSub
+	healthCheckInterval time.Duration
 
 	mu     sync.Mutex
 	subs   map[string]*redisSubList
@@ -61,13 +78,18 @@ type transport struct {
 
 // rc is borrowed, not owned: closing it is the caller's job.
 func New(rc redis.UniversalClient, opts ...bus.BusOption) bus.MessageBus {
+	return newBus(rc, defaultRedisHealthCheckInterval, opts...)
+}
+
+func newBus(rc redis.UniversalClient, healthCheckInterval time.Duration, opts ...bus.BusOption) bus.MessageBus {
 	ctx := context.Background()
 	r := &transport{
-		rc:     rc,
-		ctx:    ctx,
-		ps:     rc.Subscribe(ctx),
-		subs:   map[string]*redisSubList{},
-		queues: map[string]*redisSubList{},
+		rc:                  rc,
+		ctx:                 ctx,
+		ps:                  rc.Subscribe(ctx),
+		healthCheckInterval: healthCheckInterval,
+		subs:                map[string]*redisSubList{},
+		queues:              map[string]*redisSubList{},
 
 		wakeup:          make(chan struct{}, 1),
 		ops:             &redisWriteOpQueue{},
@@ -151,20 +173,52 @@ func (r *transport) unsubscribe(channel string, queue bool, sub *redisSubscripti
 
 func (r *transport) readWorker() {
 	var delay time.Duration
-	for {
-		msg, err := r.ps.ReceiveMessage(r.ctx)
-		if err != nil {
-			logger.Error(err, "redis receive message failed")
+	backoff := func() {
+		time.Sleep(delay)
+		if delay *= 2; delay == 0 {
+			delay = minReadRetryInterval
+		} else if delay > maxReadRetryInterval {
+			delay = maxReadRetryInterval
+		}
+	}
 
-			time.Sleep(delay)
-			if delay *= 2; delay == 0 {
-				delay = minReadRetryInterval
-			} else if delay > maxReadRetryInterval {
-				delay = maxReadRetryInterval
+	var pinged bool
+	for {
+		r.mu.Lock()
+		ps := r.ps
+		r.mu.Unlock()
+
+		reply, err := ps.ReceiveTimeout(r.ctx, r.healthCheckInterval)
+		if err != nil {
+			switch {
+			case r.isReplaced(ps):
+				// The read ended because the subscription it was on was closed.
+				pinged = false
+			case isNetTimeout(err) && !pinged:
+				pinged = r.ping(ps)
+			case isNetTimeout(err):
+				r.replaceSubscription(ps, errRedisPingUnanswered)
+				pinged = false
+			case isRedisErrorReply(err):
+				// go-redis keeps a connection that answers with an error, but a
+				// subscription that errors (NOAUTH once its credentials lapse) is no
+				// longer one Redis delivers to.
+				r.replaceSubscription(ps, err)
+				pinged = false
+				backoff()
+			default:
+				logger.Error(err, "redis receive message failed")
+				backoff()
 			}
 			continue
 		}
 		delay = 0
+		pinged = false
+
+		msg, ok := reply.(*redis.Message)
+		if !ok {
+			continue
+		}
 
 		r.mu.Lock()
 		if subList, ok := r.subs[msg.Channel]; ok {
@@ -175,6 +229,55 @@ func (r *transport) readWorker() {
 		}
 		r.mu.Unlock()
 	}
+}
+
+func (r *transport) isReplaced(ps *redis.PubSub) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ps != ps
+}
+
+func (r *transport) ping(ps *redis.PubSub) bool {
+	if err := ps.Ping(r.ctx); err != nil {
+		logger.Error(err, "redis subscription ping failed")
+		return false
+	}
+	return true
+}
+
+// replaceSubscription swaps ps for a new PubSub, and so a new connection, subscribed
+// to every channel currently subscribed.
+func (r *transport) replaceSubscription(old *redis.PubSub, reason error) {
+	logger.Error(reason, "redis subscription unhealthy, resubscribing")
+
+	r.psMu.Lock()
+	r.mu.Lock()
+	if r.ps != old {
+		r.mu.Unlock()
+		r.psMu.Unlock()
+		return
+	}
+	channels := maps.Keys(r.currentChannels)
+	r.mu.Unlock()
+
+	ps := r.rc.Subscribe(r.ctx, channels...)
+
+	r.mu.Lock()
+	r.ps = ps
+	r.mu.Unlock()
+	r.psMu.Unlock()
+
+	_ = old.Close()
+}
+
+func isNetTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func isRedisErrorReply(err error) bool {
+	var redisErr redis.Error
+	return errors.As(err, &redisErr)
 }
 
 func (r *transport) reconcileSubscriptions(channel string) {
@@ -257,17 +360,15 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 		maps.Clear(r.dirtyChannels)
 		r.mu.Unlock()
 
+		// Held until currentChannels reflects this change, so a replacement of ps
+		// cannot subscribe a set that is missing it.
+		r.psMu.Lock()
 		var subscribeErr, unsubscribeErr error
 		if len(subscribe) != 0 {
 			subscribeErr = r.ps.Subscribe(r.ctx, maps.Keys(subscribe)...)
 		}
 		if len(unsubscribe) != 0 {
 			unsubscribeErr = r.ps.Unsubscribe(r.ctx, maps.Keys(unsubscribe)...)
-		}
-
-		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
-			logger.Error(err, "redis subscription reconciliation failed")
-			time.Sleep(reconcilerRetryInterval)
 		}
 
 		r.mu.Lock()
@@ -283,6 +384,15 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 				delete(r.currentChannels, c)
 			}
 		}
+		r.mu.Unlock()
+		r.psMu.Unlock()
+
+		if err := multierr.Combine(subscribeErr, unsubscribeErr); err != nil {
+			logger.Error(err, "redis subscription reconciliation failed")
+			time.Sleep(reconcilerRetryInterval)
+		}
+
+		r.mu.Lock()
 	}
 	r.mu.Unlock()
 	return nil
