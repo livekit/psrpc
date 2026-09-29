@@ -91,11 +91,16 @@ func (m *multiRPC[ResponseType]) Send(ctx context.Context, req proto.Message, op
 	}
 
 	now := time.Now()
+	// Clamp expiry to the caller's deadline so downstream hops don't outlive it.
+	expiry := now.Add(o.Timeout)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
+		expiry = deadline
+	}
 	ir := &internal.Request{
 		RequestId:  m.requestID,
 		ClientId:   m.c.ID,
 		SentAt:     now.UnixNano(),
-		Expiry:     now.Add(o.Timeout).UnixNano(),
+		Expiry:     expiry.UnixNano(),
 		Multi:      true,
 		RawRequest: b,
 		Metadata:   metadata.OutgoingContextMetadata(ctx),
