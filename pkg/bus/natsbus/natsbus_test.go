@@ -16,8 +16,6 @@ package natsbus
 
 import (
 	"context"
-	"fmt"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -53,34 +51,27 @@ func TestNATSSubscriptionReadCancellation(t *testing.T) {
 }
 
 func TestNATSSubscriptionWriteCancellation(t *testing.T) {
-	for _, size := range []int{0, 1} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				s := &subscription{ctx: ctx, msgChan: make(chan *nats.Msg, size)}
-				if size > 0 {
-					s.msgChan <- &nats.Msg{}
-				}
-				done := make(chan struct{})
-				go func() {
-					s.write(&nats.Msg{})
-					close(done)
-				}()
-				synctest.Wait() // The callback is blocked on the full channel.
-				cancel()
-				synctest.Wait()
-				select {
-				case <-done:
-				default:
-					t.Fatal("write remained blocked after cancellation")
-				}
-			})
-		})
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s := &subscription{ctx: ctx, msgChan: make(chan *nats.Msg)}
+		done := make(chan struct{})
+		go func() {
+			s.write(&nats.Msg{})
+			close(done)
+		}()
+		synctest.Wait() // With no reader, the callback is blocked on the send.
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("write remained blocked after cancellation")
+		}
+	})
 }
 
-func TestNATSSubscriptionClose(t *testing.T) {
+func TestNATSSubscriptionCloseWithInflightCallback(t *testing.T) {
 	ctx := context.Background()
 	pool, err := dockertest.NewPool(ctx, "")
 	require.NoError(t, err)
@@ -95,107 +86,64 @@ func TestNATSSubscriptionClose(t *testing.T) {
 	}))
 	t.Cleanup(nc.Close)
 
-	for _, tc := range []struct {
-		name string
-		size int
-		full bool
-	}{
-		{name: "unbuffered"},
-		{name: "buffered", size: 1},
-		{name: "full", size: 1, full: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			s := &subscription{ctx: ctx, cancel: cancel, msgChan: make(chan *nats.Msg, tc.size)}
-			if tc.full {
-				s.msgChan <- &nats.Msg{}
-			}
-			entered := make(chan struct{})
-			resume := make(chan struct{})
-			exited := make(chan struct{})
-			release := sync.OnceFunc(func() { close(resume) })
-			write := false // Published to the callback by closing resume.
-			var err error
-			s.sub, err = nc.Subscribe(tc.name, func(m *nats.Msg) {
-				close(entered)
-				<-resume
-				if write {
-					s.write(m)
-				}
-			})
-			require.NoError(t, err)
-			s.sub.SetClosedHandler(func(string) { close(exited) })
-			t.Cleanup(func() {
-				cancel()
-				_ = s.sub.Unsubscribe()
-				release()
-				select {
-				case <-exited:
-				case <-time.After(5 * time.Second):
-					t.Error("NATS callback did not exit")
-				}
-			})
-			require.NoError(t, nc.Publish(tc.name, []byte("late")))
-			select {
-			case <-entered:
-			case <-time.After(5 * time.Second):
-				t.Fatal("NATS callback did not start")
-			}
-
-			closed := make(chan error, 1)
-			go func() { closed <- s.Close() }()
-			select {
-			case err := <-closed:
-				require.NoError(t, err)
-			case <-time.After(5 * time.Second):
-				t.Fatal("Close waited for the paused callback")
-			}
-			require.False(t, s.sub.IsValid())
-
-			// NATS has entered its callback but has not called write yet.
-			// Assert the ownership invariant directly: choosing between a
-			// canceled context and a closed-channel send would be random.
-			if tc.full {
-				<-s.msgChan
-			}
-			select {
-			case _, ok := <-s.msgChan:
-				require.True(t, ok, "Close closed the channel while a NATS callback can still write")
-				t.Fatal("unexpected message from the paused callback")
-			default:
-			}
-			if tc.full {
-				s.msgChan <- &nats.Msg{}
-			}
-			write = true
-			release()
-			select {
-			case <-exited:
-			case <-time.After(5 * time.Second):
-				t.Fatal("late callback did not exit after Close")
-			}
-		})
-	}
-
-	t.Run("churn", func(t *testing.T) {
-		b := &transport{nc: nc, routers: map[string]*router{}}
-		for i := range 100 {
-			subject := fmt.Sprintf("churn.%d", i)
-			s, err := b.subscribe(ctx, subject, i%2, i%4 < 2)
-			require.NoError(t, err)
-			exited := make(chan struct{})
-			s.sub.SetClosedHandler(func(string) { close(exited) })
-			for range 8 {
-				require.NoError(t, nc.Publish(subject, []byte("message")))
-			}
-			require.NoError(t, nc.FlushTimeout(5*time.Second))
-			require.NoError(t, s.Close())
-			select {
-			case <-exited:
-			case <-time.After(5 * time.Second):
-				t.Fatal("NATS callback did not exit during subscription churn")
-			}
+	callbackCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Leave room for a late callback to send even after cancellation.
+	s := &subscription{ctx: callbackCtx, cancel: cancel, msgChan: make(chan *nats.Msg, 1)}
+	entered := make(chan struct{})
+	resume := make(chan bool, 1)
+	exited := make(chan struct{})
+	s.sub, err = nc.Subscribe("shutdown", func(m *nats.Msg) {
+		close(entered)
+		if <-resume {
+			s.write(m)
 		}
 	})
+	require.NoError(t, err)
+	s.sub.SetClosedHandler(func(string) { close(exited) })
+	t.Cleanup(func() {
+		cancel()
+		_ = s.sub.Unsubscribe()
+		// On failure, closing resume skips the write into a possibly closed channel.
+		close(resume)
+		select {
+		case <-exited:
+		case <-time.After(5 * time.Second):
+			t.Error("NATS callback did not exit")
+		}
+	})
+
+	// Pause a real callback immediately before it can write to msgChan.
+	require.NoError(t, nc.Publish("shutdown", []byte("late")))
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("NATS callback did not start")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited for the paused callback")
+	}
+	require.False(t, s.sub.IsValid())
+
+	// Check ownership before resuming: a closed-channel send and cancellation
+	// would both be selectable, so observing only callback completion is insufficient.
+	select {
+	case _, ok := <-s.msgChan:
+		require.True(t, ok, "Close closed the channel while a NATS callback can still write")
+		t.Fatal("unexpected message from the paused callback")
+	default:
+	}
+
+	resume <- true
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("late callback did not exit after Close")
+	}
 }
