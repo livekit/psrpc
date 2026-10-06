@@ -41,9 +41,8 @@ func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 			err = retry(opt, ctx.Done(), func(timeout time.Duration) error {
 				nextOpts := opts
 				if timeout > 0 {
-					nextOpts = make([]psrpc.RequestOption, len(opts)+1)
-					copy(nextOpts, opts)
-					nextOpts[len(opts)] = psrpc.WithRequestTimeout(timeout)
+					// options apply in order, so a timeout from the caller wins over the attempt timeout
+					nextOpts = append([]psrpc.RequestOption{psrpc.WithRequestTimeout(timeout)}, opts...)
 				}
 
 				res, err = next(ctx, req, nextOpts...)
@@ -141,9 +140,8 @@ func (s *streamRetryInterceptor) Send(msg proto.Message, opts ...psrpc.StreamOpt
 	return retry(s.opt, nil, func(timeout time.Duration) error {
 		nextOpts := opts
 		if timeout > 0 {
-			nextOpts = make([]psrpc.StreamOption, len(opts)+1)
-			copy(nextOpts, opts)
-			nextOpts[len(opts)] = psrpc.WithTimeout(timeout)
+			// options apply in order, so a timeout from the caller wins over the attempt timeout
+			nextOpts = append([]psrpc.StreamOption{psrpc.WithTimeout(timeout)}, opts...)
 		}
 
 		return s.StreamHandler.Send(msg, nextOpts...)

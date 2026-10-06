@@ -113,6 +113,20 @@ func TestRetryBackoff(t *testing.T) {
 		require.Equal(t, ro.Timeout, timeouts[0])
 	})
 
+	t.Run("TestCallerTimeoutKept", func(t *testing.T) {
+		ro.IsRecoverable = func(err error) bool { return true }
+		ri := NewRPCRetryInterceptor(ro)
+
+		errs := make([]error, 3)
+		for i := range errs {
+			errs[i] = errors.New("test error")
+		}
+		h := ri(psrpc.RPCInfo{}, getClientRpcHandler(errs))
+		h(context.Background(), nil, psrpc.WithRequestTimeout(time.Second))
+
+		require.Equal(t, []time.Duration{time.Second, time.Second, time.Second}, timeouts)
+	})
+
 	t.Run("TestCustomParameters", func(t *testing.T) {
 		lastTry := time.Now()
 
