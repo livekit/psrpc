@@ -153,18 +153,19 @@ func (n *subscription) write(msg *nats.Msg) {
 }
 
 func (n *subscription) Read() ([]byte, bool) {
-	msg, ok := <-n.msgChan
-	if !ok {
+	select {
+	case msg := <-n.msgChan:
+		return msg.Data, true
+	case <-n.ctx.Done():
 		return nil, false
 	}
-	return msg.Data, true
 }
 
+// Close does not close msgChan: Unsubscribe does not wait for a callback
+// that is already running, and its write would panic on a closed channel.
 func (n *subscription) Close() error {
 	n.cancel()
-	err := n.sub.Unsubscribe()
-	close(n.msgChan)
-	return err
+	return n.sub.Unsubscribe()
 }
 
 type router struct {
