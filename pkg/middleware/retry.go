@@ -16,6 +16,7 @@ package middleware
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -35,14 +36,28 @@ func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
 	return psrpc.WithClientRPCInterceptors(NewRPCRetryInterceptor(opt))
 }
 
+// callerTimeoutKey carries the request timeout the caller set, 0 for none, from the
+// outermost retry interceptor to the retry interceptors inside it
+type callerTimeoutKey struct{}
+
 func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 	return func(rpcInfo psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
+			// A timeout the caller set wins over every retry interceptor's. Only the
+			// outermost retry interceptor sees the caller's options alone: an inner one
+			// also gets the outer one's attempt timeout. So the outermost one passes the
+			// caller's timeout down in the context.
+			callerTimeout, nested := ctx.Value(callerTimeoutKey{}).(time.Duration)
+			if !nested {
+				callerTimeout = requestTimeout(opts)
+				ctx = context.WithValue(ctx, callerTimeoutKey{}, callerTimeout)
+			}
+
 			err = retry(opt, ctx.Done(), func(timeout time.Duration) error {
 				nextOpts := opts
-				if timeout > 0 {
-					// options apply in order, so a timeout from the caller wins over the attempt timeout
-					nextOpts = append([]psrpc.RequestOption{psrpc.WithRequestTimeout(timeout)}, opts...)
+				if timeout > 0 && callerTimeout == 0 {
+					// options apply in order, so the innermost interceptor's timeout wins
+					nextOpts = append(slices.Clip(opts), psrpc.WithRequestTimeout(timeout))
 				}
 
 				res, err = next(ctx, req, nextOpts...)
@@ -51,6 +66,14 @@ func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 			return
 		}
 	}
+}
+
+func requestTimeout(opts []psrpc.RequestOption) time.Duration {
+	o := &psrpc.RequestOpts{}
+	for _, f := range opts {
+		f(o)
+	}
+	return o.Timeout
 }
 
 func isTimeout(err error) bool {

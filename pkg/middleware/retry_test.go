@@ -127,6 +127,21 @@ func TestRetryBackoff(t *testing.T) {
 		require.Equal(t, []time.Duration{time.Second, time.Second, time.Second}, timeouts)
 	})
 
+	// a client with a generic retry and a more specific one inside it, like the
+	// protocol egress client
+	t.Run("TestNestedInnermostTimeoutWins", func(t *testing.T) {
+		outer := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 1, Timeout: 300 * time.Millisecond})
+		inner := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 1, Timeout: 10 * time.Second})
+
+		h := outer(psrpc.RPCInfo{}, inner(psrpc.RPCInfo{}, getClientRpcHandler([]error{nil})))
+		h(context.Background(), nil)
+		require.Equal(t, []time.Duration{10 * time.Second}, timeouts)
+
+		h = outer(psrpc.RPCInfo{}, inner(psrpc.RPCInfo{}, getClientRpcHandler([]error{nil})))
+		h(context.Background(), nil, psrpc.WithRequestTimeout(time.Second))
+		require.Equal(t, []time.Duration{time.Second}, timeouts, "the caller's timeout wins over both")
+	})
+
 	t.Run("TestCustomParameters", func(t *testing.T) {
 		lastTry := time.Now()
 
