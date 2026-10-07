@@ -1,4 +1,4 @@
-// Copyright 2023 LiveKit, Inc.
+// Copyright 2026 LiveKit, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,26 +16,28 @@ package middleware
 
 import (
 	"context"
-	"fmt"
-	"runtime/debug"
+	"testing"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
-	"github.com/livekit/psrpc/internal/logger"
 )
 
-// Recover from server panics. Should always be the last interceptor
-func WithServerRecovery() psrpc.ServerRPCInterceptor {
-	return func(ctx context.Context, req proto.Message, _ psrpc.RPCInfo, handler psrpc.ServerRPCHandler) (resp proto.Message, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error(fmt.Errorf("panic: %v\n%s", r, debug.Stack()), "server handler panic")
-				err = psrpc.NewErrorf(psrpc.Internal, "server handler panic")
-			}
-		}()
+func TestServerRecoveryDoesNotExposePanicDetails(t *testing.T) {
+	interceptor := WithServerRecovery()
+	_, err := interceptor(
+		context.Background(), nil, psrpc.RPCInfo{},
+		func(context.Context, proto.Message) (proto.Message, error) {
+			panic("sensitive panic value")
+		},
+	)
 
-		resp, err = handler(ctx, req)
-		return
-	}
+	require.Error(t, err)
+	code, ok := psrpc.GetErrorCode(err)
+	require.True(t, ok)
+	require.Equal(t, psrpc.Internal, code)
+	require.EqualError(t, err, "server handler panic")
+	require.NotContains(t, err.Error(), "sensitive panic value")
+	require.NotContains(t, err.Error(), "recovery_test.go")
 }
