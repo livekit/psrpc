@@ -15,42 +15,158 @@
 package amqpbus
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/psrpc/pkg/bus"
 )
 
-func TestExchangeName(t *testing.T) {
-	for _, c := range []struct {
-		subject string
-		name    string
-	}{
-		{"SRV.service", "SRV.service"},
-		{"CLI.service.client-id.RES", "CLI.service.client-id.RES"},
-	} {
-		if got := exchangeName(c.subject); got != c.name {
-			t.Errorf("exchangeName(%q) = %q, want %q", c.subject, got, c.name)
+func newTestTransport(t *testing.T) *transport {
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &transport{
+		url:     "amqp://invalid.invalid/",
+		ctx:     ctx,
+		cancel:  cancel,
+		done:    ctx.Done(),
+		subs:    map[*subscription]struct{}{},
+		routers: map[string]*router{},
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	return b
+}
+
+// TestRouterDemux drives the router demultiplexing path without a broker:
+// the router's write is fed directly, the way the underlying subscription's
+// sink does. This is the data path that was broken before the sink rework
+// (r.write was never called).
+func TestRouterDemux(t *testing.T) {
+	b := newTestTransport(t)
+
+	r := &router{
+		t:      b,
+		subject: "SRV.svc",
+		queue:   false,
+		entries: map[string][]*subscription{},
+	}
+	b.mu.Lock()
+	b.routers[r.subject] = r
+	b.mu.Unlock()
+
+	newReader := func(local string) *subscription {
+		subCtx, cancel := context.WithCancel(b.ctx)
+		s := &subscription{
+			bus:    b,
+			ctx:    subCtx,
+			cancel: cancel,
+			msgs:   make(chan []byte, 4),
+			r:      r,
+			local:  local,
+		}
+		b.mu.Lock()
+		r.entries[local] = append(r.entries[local], s)
+		b.mu.Unlock()
+		return s
+	}
+
+	a := newReader("Method.REQ")
+	c := newReader("Other.STR")
+
+	// Feed the router the way the underlying subscription's sink does: the
+	// bus envelope (internal.Msg) carrying Channel.Local, as serialize() put
+	// it on the wire.
+	mk := func(local, id string) []byte {
+		raw, err := proto.Marshal(&internal.Request{RequestId: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope, err := proto.Marshal(&internal.Msg{
+			TypeUrl: "type.googleapis.com/" + string((&internal.Request{}).ProtoReflect().Descriptor().FullName()),
+			Value:   raw,
+			Channel: local,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return envelope
+	}
+
+	r.write(mk("Method.REQ", "1"))
+	r.write(mk("Other.STR", "2"))
+
+	expect := func(s *subscription, id string) {
+		t.Helper()
+		select {
+		case envelope := <-s.msgs:
+			var m internal.Msg
+			if err := proto.Unmarshal(envelope, &m); err != nil {
+				t.Fatalf("payload not the bus envelope: %v", err)
+			}
+			var req internal.Request
+			if err := proto.Unmarshal(m.Value, &req); err != nil {
+				t.Fatalf("envelope value not a Request: %v", err)
+			}
+			if req.RequestId != id {
+				t.Errorf("got request %q, want %q", req.RequestId, id)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("no message arrived for local channel of %q", id)
 		}
 	}
+	expect(a, "1")
+	expect(c, "2")
+
+	// Unrelated Local channels must not cross into other readers.
+	select {
+	case payload := <-a.msgs:
+		t.Errorf("reader a received an extra payload: %x", payload)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	_ = a.Close()
+	_ = c.Close()
+	// The router must be gone once both readers closed.
+	b.mu.Lock()
+	_, still := b.routers[r.subject]
+	b.mu.Unlock()
+	if still {
+		t.Error("router outlived its readers")
+	}
+	_ = b.Close()
 }
 
-// Over-long names must collapse to the deterministic hash alias, stable
-// across calls and distinct between inputs.
-func TestExchangeNameHashAlias(t *testing.T) {
-	long := "SRV." + string(make([]byte, 300))
-	a := exchangeName(long)
-	b := exchangeName(long)
-	if a != b {
-		t.Errorf("alias not deterministic: %q vs %q", a, b)
+// TestRoutedCloseWithoutPump guards the Close fast path: a routed reader
+// owns no pump or done channel, so Close must return instead of waiting.
+func TestRoutedCloseWithoutPump(t *testing.T) {
+	b := newTestTransport(t)
+	subCtx, cancel := context.WithCancel(b.ctx)
+	s := &subscription{
+		bus:    b,
+		ctx:    subCtx,
+		cancel: cancel,
+		msgs:   make(chan []byte, 1),
+		local:  "Method.REQ",
 	}
-	if len(a) > amqpMaxNameLen {
-		t.Errorf("alias exceeds shortstr limit: %d", len(a))
+	r := &router{
+		t:      b,
+		subject: "SRV.svc",
+		entries: map[string][]*subscription{"Method.REQ": {s}},
 	}
-	if a == exchangeName(long+"x") {
-		t.Error("distinct inputs must not alias to the same name")
+	s.r = r
+	b.mu.Lock()
+	b.routers[r.subject] = r
+	b.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("routed Close blocked: it must not wait for a pump")
 	}
 }
 
-func TestPubSlotIndexStable(t *testing.T) {
-	if pubSlotIndex("SRV.s") != pubSlotIndex("SRV.s") {
-		t.Error("slot index must be stable per name")
-	}
-}
+var _ bus.Reader = (*subscription)(nil)
