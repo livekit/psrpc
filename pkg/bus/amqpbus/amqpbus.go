@@ -483,6 +483,11 @@ type subscription struct {
 	// Close unwinds the router entry instead of the plain subscriber set.
 	r     *router
 	local string
+
+	// sink, when set, receives every delivery in place of msgs. The router's
+	// underlying broker subscription uses it to demultiplex by Local channel
+	// instead of handing the payload to one reader.
+	sink func(payload []byte)
 }
 
 func newSubscription(ctx context.Context, b *transport, subject string, size int, queue bool) (*subscription, error) {
@@ -595,6 +600,10 @@ func (s *subscription) pump() {
 				return
 			}
 
+			if s.sink != nil {
+				s.sink(msg.Body)
+				continue
+			}
 			select {
 			case s.msgs <- msg.Body:
 			case <-s.ctx.Done():
@@ -641,14 +650,17 @@ func (s *subscription) Read() ([]byte, bool) {
 }
 
 func (s *subscription) Close() error {
+	// A routed reader owns no broker state: unwinding the router entry (and,
+	// with the last one, the underlying subscription) is the whole close.
+	if s.r != nil {
+		s.bus.removeRouterSub(s)
+		return nil
+	}
+
 	s.closed.Store(true)
 	s.cancel()
 	<-s.done
-	if s.r != nil {
-		s.bus.removeRouterSub(s)
-	} else {
-		s.bus.removeSub(s)
-	}
+	s.bus.removeSub(s)
 	// Cancel the consumer so an exclusive queue with autoDelete is reclaimed
 	// instead of lingering on the shared channel until the next reconnect.
 	// The channel itself is pooled and shared: never closed here.
@@ -672,28 +684,25 @@ type router struct {
 	subject string
 	queue   bool
 
-	// entries is guarded by the bus mutex: it is mutated from
+	// entries and sub are guarded by the bus mutex: both are mutated from
 	// subscribe/unsubscribe paths.
 	entries map[string][]*subscription // Local channel -> subs
+	sub     *subscription              // the one underlying broker subscription
 }
 
-// subscribeRouter subscribes the shared Server subject once and registers the
-// Local channel on the router.
+// subscribeRouter registers a Local channel on the router for its Server
+// subject. The router owns exactly one underlying broker subscription
+// (sub.sink feeds r.write); the readers returned here carry no broker state
+// of their own.
 func (b *transport) subscribeRouter(ctx context.Context, channel bus.Channel, size int, queue bool) (bus.Reader, error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	subject := channel.Server
 	local := channel.Local
-	name := exchangeName(subject)
-
-	s := &subscription{
-		bus:   b,
-		name:  name,
-		queue: queue,
-		ctx:   subCtx,
+	sub := &subscription{
+		bus:    b,
+		ctx:    subCtx,
 		cancel: cancel,
-		tag:   "psrpc-" + rand.NewString(),
-		msgs:  make(chan []byte, size),
-		done:  make(chan struct{}),
+		msgs:   make(chan []byte, size),
 	}
 
 	b.mu.Lock()
@@ -705,9 +714,9 @@ func (b *transport) subscribeRouter(ctx context.Context, channel bus.Channel, si
 	r, ok := b.routers[subject]
 	if !ok {
 		r = &router{
-			t:      b,
+			t:       b,
 			subject: subject,
-			queue:  queue,
+			queue:   queue,
 			entries: map[string][]*subscription{},
 		}
 		b.routers[subject] = r
@@ -716,28 +725,78 @@ func (b *transport) subscribeRouter(ctx context.Context, channel bus.Channel, si
 		cancel()
 		return nil, errors.New("psrpc: amqpbus subscription type mismatch for subject " + subject)
 	}
-	r.entries[local] = append(r.entries[local], s)
-	s.r = r
-	s.local = local
+	r.entries[local] = append(r.entries[local], sub)
+	sub.r = r
+	sub.local = local
+	b.mu.Unlock()
+
+	if err := b.ensureRouterSub(r); err != nil {
+		b.mu.Lock()
+		b.removeRouterEntry(r, local, sub)
+		b.mu.Unlock()
+		cancel()
+		return nil, err
+	}
+	return sub, nil
+}
+
+// ensureRouterSub starts the router's underlying broker subscription. While
+// the broker is down it is deferred: the subscription's pump re-establishes
+// itself with backoff once the bus redialed, mirroring plain subscribes.
+func (b *transport) ensureRouterSub(r *router) error {
+	b.mu.Lock()
+	started := r.sub != nil
+	closed := b.closed
+	b.mu.Unlock()
+	if started || closed {
+		if closed && !started {
+			return amqp.ErrClosed
+		}
+		return nil
+	}
+
+	subCtx, cancel := context.WithCancel(b.ctx)
+	s := &subscription{
+		bus:    b,
+		name:   exchangeName(r.subject),
+		queue:  r.queue,
+		ctx:    subCtx,
+		cancel: cancel,
+		// consumer tags are unique per channel and the channel is shared, so
+		// two subscriptions to the same topic must not share a tag
+		tag:   "psrpc-" + rand.NewString(),
+		msgs:  make(chan []byte),
+		done:  make(chan struct{}),
+		sink:  r.write,
+	}
+
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		cancel()
+		return amqp.ErrClosed
+	}
+	r.sub = s
 	b.mu.Unlock()
 
 	if err := s.reestablish(); err != nil {
-		// While the broker is down the subscription is still accepted; any
-		// other failure (ACL, precondition) is surfaced to the caller.
+		// While the broker is down the subscription is still accepted: the
+		// pump keeps retrying and deliveries start once the bus redialed.
+		// Any other failure (ACL, precondition) is surfaced to the caller.
 		if !errors.Is(err, amqp.ErrClosed) || !b.connectionDown() {
 			b.mu.Lock()
-			b.removeRouterEntry(r, local, s)
+			r.sub = nil
 			b.mu.Unlock()
 			cancel()
-			return nil, err
+			return err
 		}
 	}
 	go s.pump()
-	return s, nil
+	return nil
 }
 
 // write demultiplexes one inbound payload by its Local channel. The router's
-// own subscription feeds it from its pump.
+// underlying subscription feeds it through its sink.
 func (r *router) write(payload []byte) {
 	local, err := bus.DecodeLocalChannel(payload)
 	if err != nil {
@@ -760,12 +819,14 @@ func (s *subscription) write(payload []byte) {
 	}
 }
 
-// removeRouterEntry requires the bus mutex to be held.
-func (b *transport) removeRouterEntry(r *router, local string, sub *subscription) {
+// removeRouterEntry requires the bus mutex to be held. It returns the
+// router's underlying subscription when the router drained and was removed,
+// so the caller can stop it outside the lock.
+func (b *transport) removeRouterEntry(r *router, local string, sub *subscription) *subscription {
 	subs := r.entries[local]
 	i := indexOf(subs, sub)
 	if i == -1 {
-		return
+		return nil
 	}
 	subs = append(subs[:i:i], subs[i+1:]...)
 	if len(subs) == 0 {
@@ -776,22 +837,37 @@ func (b *transport) removeRouterEntry(r *router, local string, sub *subscription
 	if len(r.entries) == 0 {
 		if cur, ok := b.routers[r.subject]; ok && cur == r {
 			delete(b.routers, r.subject)
+			return r.sub
 		}
 	}
+	return nil
 }
 
+// removeRouterSub unwinds a routed reader: cancel its context, drop it from
+// the router, and stop the underlying broker subscription once the router
+// has drained.
 func (b *transport) removeRouterSub(sub *subscription) {
+	sub.cancel()
 	b.mu.Lock()
+	var under *subscription
 	if r := sub.r; r != nil {
-		b.removeRouterEntry(r, sub.local, sub)
+		under = b.removeRouterEntry(r, sub.local, sub)
 	}
 	b.mu.Unlock()
+	if under != nil {
+		_ = under.Close()
+	}
 }
 
+// all is used by transport.Close: the routed readers plus the underlying
+// subscription, so every pump exits.
 func (r *router) all() []*subscription {
-	var subs []*subscription
+	subs := make([]*subscription, 0, 8)
 	for _, s := range r.entries {
 		subs = append(subs, s...)
+	}
+	if r.sub != nil {
+		subs = append(subs, r.sub)
 	}
 	return subs
 }
