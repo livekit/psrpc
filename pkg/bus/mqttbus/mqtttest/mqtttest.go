@@ -38,14 +38,18 @@ var mqttLast = uint32(0)
 
 // New starts a Mosquitto broker (or connects to an external one pointed to
 // by MQTT_URL, e.g. tcp://localhost:1883) for the bus conformance suite.
-// The broker must support MQTT 5 shared subscriptions ($share).
+// When neither is available the server is skipped. The broker must support
+// MQTT 5 shared subscriptions ($share).
 func New(t testing.TB) bustest.Server {
 	if url := os.Getenv("MQTT_URL"); url != "" {
 		return &mqttServer{url: url}
 	}
 
 	ctx := context.Background()
-	pool := dockerutil.Pool(t)
+	pool := dockerutil.TryPool()
+	if pool == nil {
+		t.Skip("no docker available for Mosquitto (set MQTT_URL to test against an external broker)")
+	}
 	c, err := pool.Run(ctx, "eclipse-mosquitto",
 		dockertest.WithTag("2"),
 		dockertest.WithCmd([]string{"mosquitto", "-c", "/mosquitto-no-auth.conf"}),
