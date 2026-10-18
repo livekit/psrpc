@@ -103,7 +103,12 @@ func (h *streamHandler[RecvType, SendType]) run(s *RPCServer) {
 			case <-h.complete:
 				return
 
-			case is := <-requests:
+			case is, ok := <-requests:
+				if !ok {
+					// Closed while draining: stop selecting it, or the loop spins.
+					requests = nil
+					continue
+				}
 				if is == nil {
 					continue
 				}
@@ -113,7 +118,11 @@ func (h *streamHandler[RecvType, SendType]) run(s *RPCServer) {
 					}
 				}
 
-			case claim := <-claims:
+			case claim, ok := <-claims:
+				if !ok {
+					claims = nil
+					continue
+				}
 				if claim == nil {
 					continue
 				}

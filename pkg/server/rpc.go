@@ -133,7 +133,12 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 			case <-h.complete:
 				return
 
-			case ir := <-requests:
+			case ir, ok := <-requests:
+				if !ok {
+					// Closed while draining: stop selecting it, or the loop spins.
+					requests = nil
+					continue
+				}
 				if ir == nil {
 					continue
 				}
@@ -150,7 +155,11 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 					o.OnRequestExpired(h.i.RPCInfo, time.Since(time.Unix(0, ir.Expiry)))
 				}
 
-			case claim := <-claims:
+			case claim, ok := <-claims:
+				if !ok {
+					claims = nil
+					continue
+				}
 				if claim == nil {
 					continue
 				}
