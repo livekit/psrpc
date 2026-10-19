@@ -344,7 +344,13 @@ func (r *redisSubscription) Read() ([]byte, bool) {
 			sha := sha256.Sum256([]byte(msg.Payload))
 			hash := base64.StdEncoding.EncodeToString(sha[:])
 			acquired, err := r.bus.rc.SetNX(r.ctx, hash, rand.Int(), lockExpiration).Result()
-			if err != nil || !acquired {
+			if err != nil {
+				if r.ctx.Err() == nil {
+					logger.Error(err, "redis queue lock failed", "channel", r.channel)
+				}
+				continue
+			}
+			if !acquired {
 				continue
 			}
 		}
