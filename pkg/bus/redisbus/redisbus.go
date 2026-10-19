@@ -277,6 +277,11 @@ func (r *redisReconcileSubscriptionsOp) run() error {
 			maps.Copy(r.currentChannels, subscribe)
 		}
 		if unsubscribeErr != nil {
+			// go-redis drops the channel from its resubscribe set even when
+			// UNSUBSCRIBE fails, so it is no longer current either way.
+			for c := range unsubscribe {
+				delete(r.currentChannels, c)
+			}
 			maps.Copy(r.dirtyChannels, unsubscribe)
 		} else {
 			for c := range unsubscribe {
