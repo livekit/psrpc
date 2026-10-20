@@ -46,6 +46,7 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 	claims      map[string]chan *internal.ClaimResponse
 	handling    sync.WaitGroup
 	closeOnce   sync.Once
+	drained     chan struct{}
 	complete    chan struct{}
 	onCompleted func()
 }
@@ -102,6 +103,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		claimSub:     claimSub,
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
+		drained:      make(chan struct{}),
 		complete:     make(chan struct{}),
 	}
 
@@ -136,7 +138,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 			case ir, ok := <-requests:
 				if !ok {
 					// Closed while draining: stop selecting it, or the loop spins.
+					// Everything it had buffered has been dispatched by now.
 					requests = nil
+					close(h.drained)
 					continue
 				}
 				if ir == nil {
@@ -146,11 +150,13 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 					o.OnRequestReceived(h.i.RPCInfo)
 				}
 				if time.Now().UnixNano() < ir.Expiry {
-					go func() {
+					// Counted on the loop, not in the goroutine, so that close can
+					// wait for the loop to drain and then trust the count.
+					h.handling.Go(func() {
 						if err := h.handleRequest(s, ir); err != nil {
 							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
 						}
-					}()
+					})
 				} else if o := s.RequestObserver; o != nil {
 					o.OnRequestExpired(h.i.RPCInfo, time.Since(time.Unix(0, ir.Expiry)))
 				}
@@ -178,9 +184,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	s *RPCServer,
 	ir *internal.Request,
 ) error {
-	h.handling.Add(1)
-	defer h.handling.Done()
-
 	head := &metadata.Header{
 		RemoteID: ir.ClientId,
 		SentAt:   time.Unix(0, ir.SentAt),
@@ -339,6 +342,10 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
 	h.closeOnce.Do(func() {
 		_ = h.requestSub.Close()
 		if !force {
+			// The loop may still be dispatching requests the subscription had
+			// buffered. Let it finish first, or Add races Wait and a request
+			// can run after Close returns.
+			<-h.drained
 			h.handling.Wait()
 		}
 		_ = h.claimSub.Close()
