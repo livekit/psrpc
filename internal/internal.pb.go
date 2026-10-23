@@ -267,9 +267,12 @@ type Request struct {
 	Metadata   map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	RawRequest []byte                 `protobuf:"bytes,8,opt,name=raw_request,json=rawRequest,proto3" json:"raw_request,omitempty"`
 	// Advertises that an announcement may replace the claim; the server decides.
-	SkipClaim     bool `protobuf:"varint,10,opt,name=skip_claim,json=skipClaim,proto3" json:"skip_claim,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	SkipClaim bool `protobuf:"varint,10,opt,name=skip_claim,json=skipClaim,proto3" json:"skip_claim,omitempty"`
+	// When the caller stops accepting claims and announcements, in unix nanos.
+	// Zero means the caller did not say, so the server must claim.
+	SelectionDeadline int64 `protobuf:"varint,11,opt,name=selection_deadline,json=selectionDeadline,proto3" json:"selection_deadline,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Request) Reset() {
@@ -363,6 +366,13 @@ func (x *Request) GetSkipClaim() bool {
 		return x.SkipClaim
 	}
 	return false
+}
+
+func (x *Request) GetSelectionDeadline() int64 {
+	if x != nil {
+		return x.SelectionDeadline
+	}
+	return 0
 }
 
 type Response struct {
@@ -940,7 +950,7 @@ const file_internal_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x127\n" +
 	"\vcompression\x18\x04 \x01(\x0e2\x15.internal.CompressionR\vcompressionJ\x04\b\x03\x10\x04\"#\n" +
 	"\aChannel\x12\x18\n" +
-	"\achannel\x18\x03 \x01(\tR\achannel\"\xfc\x02\n" +
+	"\achannel\x18\x03 \x01(\tR\achannel\"\xab\x03\n" +
 	"\aRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -954,7 +964,8 @@ const file_internal_proto_rawDesc = "" +
 	"rawRequest\x12\x1d\n" +
 	"\n" +
 	"skip_claim\x18\n" +
-	" \x01(\bR\tskipClaim\x1a;\n" +
+	" \x01(\bR\tskipClaim\x12-\n" +
+	"\x12selection_deadline\x18\v \x01(\x03R\x11selectionDeadline\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\t\x10\n" +

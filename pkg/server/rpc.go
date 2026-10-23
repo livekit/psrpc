@@ -230,7 +230,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 
 	// The queue re-check keeps a broadcast rpc from running on every server.
 	serverSkip := s.SkipClaim != nil && s.SkipClaim()
-	handling := ir.SkipClaim && serverSkip && h.i.Queue
+	handling := ir.SkipClaim && serverSkip && h.i.Queue && withinSkipWindow(ir, time.Now())
 
 	var claimResponseChan chan *internal.ClaimResponse
 	if !handling {
@@ -292,6 +292,17 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		observeClaim(psrpc.ClaimTimedOut)
 		return false, nil
 	}
+}
+
+// An announcement must reach the caller before it stops selecting, or the caller
+// retries a request this server is already running. Only the first half of the
+// window is used, leaving the rest for the announcement's transit and clock skew.
+// Past it the claim is safe: a caller that has moved on never grants it.
+func withinSkipWindow(ir *internal.Request, now time.Time) bool {
+	if ir.SelectionDeadline == 0 {
+		return false
+	}
+	return now.UnixNano() < ir.SentAt+(ir.SelectionDeadline-ir.SentAt)/2
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(

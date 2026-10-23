@@ -37,7 +37,8 @@ type ServerOpts struct {
 }
 
 // WithServerSkipClaim answers advertised queue rpcs with an announcement rather
-// than a claim. Read per request, so revocable at runtime; off when unset.
+// than a claim, while the request arrives in the first half of the caller's
+// selection window. Read per request, so revocable at runtime; off when unset.
 func WithServerSkipClaim(enabled func() bool) ServerOption {
 	return func(o *ServerOpts) {
 		o.SkipClaim = enabled

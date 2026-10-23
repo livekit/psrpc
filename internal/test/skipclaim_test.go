@@ -31,6 +31,7 @@ import (
 	_ "github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/middleware"
 	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
 	"github.com/livekit/psrpc/testutils"
@@ -330,4 +331,145 @@ func TestSkipClaimFastFailingHandler(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, psrpc.NotFound, code, "the handler's error must reach the caller")
 	require.Less(t, time.Since(start), timeout/2, "the answer must not wait out the timeout")
+}
+
+// Delivers each request matched by delay that long after it was published,
+// without holding up the caller, as a backed-up subscriber would.
+func delayedRequestBus(delay func(*internal.Request) time.Duration) psrpc.MessageBus {
+	return testutils.NewTestBus(localbus.New(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					if d := delay(req); d > 0 {
+						go func() {
+							time.Sleep(d)
+							_ = next(ctx, channel, msg)
+						}()
+						return nil
+					}
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
+}
+
+// Past the first half of the selection window an announcement could reach a
+// caller that already stopped selecting, so the server bids. The caller is still
+// selecting here and grants it.
+func TestSkipClaimLateRequestClaims(t *testing.T) {
+	obs := &recordingObserver{}
+	b := delayedRequestBus(func(*internal.Request) time.Duration {
+		return psrpc.DefaultAffinityTimeout * 7 / 10
+	})
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	var calls atomic.Int32
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			calls.Add(1)
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
+		"a request read late in the window must be claimed")
+	require.EqualValues(t, 1, calls.Load())
+}
+
+// The double dispatch: a request delivered after the caller stopped selecting
+// used to be announced and run while the caller's retry ran it again. Its bid
+// now goes ungranted instead.
+func TestSkipClaimDelayedPastSelectionRunsOnce(t *testing.T) {
+	const (
+		selectTimeout  = 200 * time.Millisecond
+		requestTimeout = time.Second
+	)
+
+	obs := &recordingObserver{}
+	var published atomic.Int32
+	b := delayedRequestBus(func(*internal.Request) time.Duration {
+		if published.Add(1) == 1 {
+			return selectTimeout * 2
+		}
+		return 0
+	})
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientSelectTimeout(selectTimeout),
+		middleware.WithRPCRetries(middleware.RetryOptions{MaxAttempts: 2}))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	var calls atomic.Int32
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			calls.Add(1)
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+		&internal.Request{}, psrpc.WithRequestTimeout(requestTimeout))
+	require.NoError(t, err, "the retry must succeed")
+	require.EqualValues(t, 2, published.Load(), "the first attempt must have timed out")
+
+	// The delayed attempt bids, and its claim expires with the request.
+	require.Eventually(t, func() bool {
+		_, claims := obs.snapshot()
+		return len(claims) == 2
+	}, requestTimeout*2, 10*time.Millisecond)
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped, psrpc.ClaimTimedOut}, claims)
+	require.EqualValues(t, 1, calls.Load(), "the handler must run once across both attempts")
+}
+
+// A caller that advertises but sends no deadline predates the window, so
+// nothing bounds how long it selects for.
+func TestSkipClaimCallerSendsNoDeadline(t *testing.T) {
+	obs := &recordingObserver{}
+	b := testutils.NewTestBus(localbus.New(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					req.SelectionDeadline = 0
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
+	require.NoError(t, err)
+
+	_, claims := obs.snapshot()
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
+		"a caller without a deadline must be negotiated with")
 }

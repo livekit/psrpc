@@ -57,6 +57,9 @@ message Request {
   reserved 9;
   // Advertises that an announcement may replace the claim; the server decides.
   bool skip_claim = 10;
+  // When the caller stops accepting claims and announcements, in unix nanos.
+  // Zero means the caller did not say, so the server must claim.
+  int64 selection_deadline = 11;
 }
 
 message Response {

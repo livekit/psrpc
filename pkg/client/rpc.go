@@ -101,6 +101,11 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
 			expiry = deadline
 		}
+		// Without a selection timeout, selection runs until the request times out.
+		selectionDeadline := expiry
+		if t := o.SelectionOpts.AffinityTimeout; t > 0 && now.Add(t).Before(expiry) {
+			selectionDeadline = now.Add(t)
+		}
 		req := &internal.Request{
 			RequestId:  requestID,
 			ClientId:   c.ID,
@@ -111,6 +116,8 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
 			// Advertises that an announcement may replace the claim; making one is the server's call.
 			SkipClaim: i.Queue,
+			// Taken before the selection timer starts, so it errs early.
+			SelectionDeadline: selectionDeadline.UnixNano(),
 		}
 
 		var claimChan chan *internal.ClaimRequest
