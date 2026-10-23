@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/twitchtv/twirp"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
@@ -39,6 +40,25 @@ var (
 	ErrStreamClosed    = NewErrorf(Canceled, "stream closed")
 	ErrSlowConsumer    = NewErrorf(Unavailable, "stream message discarded by slow consumer")
 )
+
+// NoSubscriberError reports a request the broker found no server subscribed to,
+// which it can do before the caller would have given up waiting. It matches
+// ErrNoResponse, so callers retrying that error retry this too.
+type NoSubscriberError struct {
+	*psrpcError
+	// How long the caller would otherwise have waited for a server.
+	Wait time.Duration
+}
+
+func NewNoSubscriberError(wait time.Duration) *NoSubscriberError {
+	return &NoSubscriberError{
+		psrpcError: &psrpcError{
+			error: fmt.Errorf("%w: no server is subscribed", ErrNoResponse),
+			code:  Unavailable,
+		},
+		Wait: wait,
+	}
+}
 
 type Error interface {
 	error

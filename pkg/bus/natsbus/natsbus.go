@@ -26,6 +26,13 @@ import (
 	"github.com/livekit/psrpc/pkg/bus"
 )
 
+// What the server sends a reply subject when nothing received the message. It
+// does so only for a client that supports headers and subscribes to the subject.
+const (
+	statusHeader       = "Status"
+	noRespondersStatus = "503"
+)
+
 type transport struct {
 	nc *nats.Conn
 
@@ -59,6 +66,34 @@ func (n *transport) SubscribeQueue(ctx context.Context, channel bus.Channel, siz
 	} else {
 		return n.subscribeRouter(ctx, channel, size, true)
 	}
+}
+
+func (n *transport) PublishWithReply(_ context.Context, channel, reply bus.Channel, b []byte) error {
+	return n.nc.PublishMsg(&nats.Msg{Subject: channel.Server, Reply: reply.Server, Data: b})
+}
+
+func (n *transport) SubscribeInbox(ctx context.Context, channel bus.Channel, size int) (bus.InboxReader, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	sub := &subscription{
+		ctx:     ctx,
+		cancel:  cancel,
+		msgChan: make(chan *nats.Msg, size),
+	}
+
+	var err error
+	sub.sub, err = n.nc.Subscribe(channel.Server, func(m *nats.Msg) {
+		// An empty message is read only as the no-responders status.
+		if len(m.Data) == 0 && m.Header.Get(statusHeader) != noRespondersStatus {
+			return
+		}
+		sub.write(m)
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	return sub, nil
 }
 
 func (n *transport) subscribe(ctx context.Context, channel string, size int, queue bool) (*subscription, error) {
@@ -153,11 +188,16 @@ func (n *subscription) write(msg *nats.Msg) {
 }
 
 func (n *subscription) Read() ([]byte, bool) {
+	b, _, ok := n.ReadInbox()
+	return b, ok
+}
+
+func (n *subscription) ReadInbox() ([]byte, string, bool) {
 	select {
 	case msg := <-n.msgChan:
-		return msg.Data, true
+		return msg.Data, msg.Subject, true
 	case <-n.ctx.Done():
-		return nil, false
+		return nil, "", false
 	}
 }
 
