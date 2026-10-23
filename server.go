@@ -33,16 +33,16 @@ type ServerOpts struct {
 	StreamInterceptors []StreamInterceptor
 	ChainedInterceptor ServerRPCInterceptor
 	RequestObserver    RequestObserver
-	SkipClaim          func() bool
+	// Deprecated: unused. See WithServerSkipClaim.
+	SkipClaim func() bool
 }
 
-// WithServerSkipClaim answers advertised queue rpcs with an announcement rather
-// than a claim, while the request arrives in the first half of the caller's
-// selection window. Read per request, so revocable at runtime; off when unset.
+// WithServerSkipClaim has no effect.
+//
+// Deprecated: a queue rpc runs without a claim whenever its caller sends
+// no_claim, and older callers need one, so there is nothing left to enable.
 func WithServerSkipClaim(enabled func() bool) ServerOption {
-	return func(o *ServerOpts) {
-		o.SkipClaim = enabled
-	}
+	return func(*ServerOpts) {}
 }
 
 func WithServerID(id string) ServerOption {
@@ -105,8 +105,8 @@ const (
 	// ClaimTimedOut: this server bid and the claim expired ungranted. The
 	// handler does not run, so the request is safe to retry.
 	ClaimTimedOut
-	// ClaimSkipped: the caller opted out and the handler ran without a claim.
-	// Reported with a zero wait, since no negotiation took place.
+	// ClaimSkipped: a queue rpc's caller needed no claim and the handler ran
+	// without one. Reported with a zero wait, since no negotiation took place.
 	ClaimSkipped
 )
 
