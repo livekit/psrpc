@@ -108,6 +108,16 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
 			NoClaim:    i.Queue,
+			// Servers that support it answer on the response channel the client
+			// listens to for this request alone.
+			PerRequestReply: c.inbox != nil,
+		}
+
+		// How long the caller would wait on a request that nothing received. The
+		// broker can cut it short.
+		unansweredWait := expiry.Sub(now)
+		if t := o.SelectionOpts.AffinityTimeout; i.RequireClaim && !i.Queue && t > 0 && t < unansweredWait {
+			unansweredWait = t
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -130,7 +140,14 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			c.mu.Unlock()
 		}()
 
-		if err = c.bus.Publish(ctx, i.GetRPCChannel(), req); err != nil {
+		if c.inbox != nil {
+			// Replies there let the broker report a request that nothing received.
+			reply := info.GetResponseChannel(c.Name, info.PerRequestClientID(c.ID, requestID))
+			err = c.inbox.PublishWithReply(ctx, i.GetRPCChannel(), reply, req)
+		} else {
+			err = c.bus.Publish(ctx, i.GetRPCChannel(), req)
+		}
+		if err != nil {
 			err = psrpc.NewError(psrpc.Internal, err)
 			return
 		}
@@ -196,6 +213,9 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			}
 		}
 
+		if res.Code == unansweredCode {
+			return nil, psrpc.NewNoSubscriberError(unansweredWait)
+		}
 		if res.Error != "" {
 			err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 		} else {

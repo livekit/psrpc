@@ -26,20 +26,31 @@ type Subscription[MessageType proto.Message] interface {
 }
 
 type subscription[MessageType proto.Message] struct {
-	sub       Reader
-	c         chan MessageType
-	done      chan struct{}
-	complete  chan struct{}
-	closeOnce sync.Once
-	closeErr  error
+	sub        Reader
+	unanswered func(subject string) MessageType
+	c          chan MessageType
+	done       chan struct{}
+	complete   chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func newSubscription[MessageType proto.Message](sub Reader, size int, maxSize int) Subscription[MessageType] {
+	return startSubscription[MessageType](sub, size, maxSize, nil)
+}
+
+func startSubscription[MessageType proto.Message](
+	sub Reader,
+	size int,
+	maxSize int,
+	unanswered func(subject string) MessageType,
+) Subscription[MessageType] {
 	s := &subscription[MessageType]{
-		sub:      sub,
-		c:        make(chan MessageType, size),
-		done:     make(chan struct{}),
-		complete: make(chan struct{}),
+		sub:        sub,
+		unanswered: unanswered,
+		c:          make(chan MessageType, size),
+		done:       make(chan struct{}),
+		complete:   make(chan struct{}),
 	}
 	go s.forward(maxSize)
 	return s
@@ -49,19 +60,31 @@ func (s *subscription[MessageType]) forward(maxSize int) {
 	defer close(s.complete)
 	defer close(s.c)
 
-	for {
+	read := func() ([]byte, string, bool) {
 		b, ok := s.sub.Read()
+		return b, "", ok
+	}
+	if ir, ok := s.sub.(InboxReader); ok && s.unanswered != nil {
+		read = ir.ReadInbox
+	}
+
+	for {
+		b, subject, ok := read()
 		if !ok {
 			return
 		}
 
-		p, err := Deserialize(b, maxSize)
-		if err != nil {
-			continue
-		}
-		msg, ok := p.(MessageType)
-		if !ok {
-			continue
+		var msg MessageType
+		if len(b) == 0 && subject != "" {
+			msg = s.unanswered(subject)
+		} else {
+			p, err := Deserialize(b, maxSize)
+			if err != nil {
+				continue
+			}
+			if msg, ok = p.(MessageType); !ok {
+				continue
+			}
 		}
 
 		select {
