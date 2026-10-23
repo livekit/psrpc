@@ -46,10 +46,28 @@ type Transport interface {
 	SubscribeQueue(ctx context.Context, channel Channel, channelSize int) (Reader, error)
 }
 
+// InboxTransport is a Transport whose broker takes wildcard subscriptions and
+// reply subjects, and reports to a message's reply subject when nothing
+// received the message.
+type InboxTransport interface {
+	Transport
+	// Publishes with reply as the message's reply subject.
+	PublishWithReply(ctx context.Context, channel, reply Channel, payload []byte) error
+	// Subscribes to a wildcard channel. A message that nothing received, whose
+	// reply subject the channel matches, is read as an empty payload.
+	SubscribeInbox(ctx context.Context, channel Channel, channelSize int) (InboxReader, error)
+}
+
 type Reader interface {
 	// Reports false once the reader is closed.
 	Read() ([]byte, bool)
 	Close() error
+}
+
+// InboxReader also reports the subject each payload was delivered on.
+type InboxReader interface {
+	Reader
+	ReadInbox() ([]byte, string, bool)
 }
 
 type MessageBus interface {
@@ -60,13 +78,25 @@ type MessageBus interface {
 	MaxDecompressedSize() int
 }
 
+// InboxBus is a MessageBus over an InboxTransport. New returns one whenever its
+// transport is an InboxTransport, so a type assertion finds it.
+type InboxBus interface {
+	MessageBus
+	PublishWithReply(ctx context.Context, channel, reply Channel, msg proto.Message) error
+	SubscribeInbox(ctx context.Context, channel Channel, channelSize int) (InboxReader, error)
+}
+
 func New(t Transport, opts ...BusOption) MessageBus {
 	o := getBusOpts(opts...)
-	return &messageBus{
+	b := &messageBus{
 		Transport: t,
 		c:         newCompressor(o.Compression),
 		maxSize:   o.Compression.MaxDecompressedSize,
 	}
+	if it, ok := t.(InboxTransport); ok {
+		return &inboxBus{messageBus: b, it: it}
+	}
+	return b
 }
 
 type messageBus struct {
@@ -87,6 +117,23 @@ func (b *messageBus) MaxDecompressedSize() int {
 	return b.maxSize
 }
 
+type inboxBus struct {
+	*messageBus
+	it InboxTransport
+}
+
+func (b *inboxBus) PublishWithReply(ctx context.Context, channel, reply Channel, msg proto.Message) error {
+	p, err := serialize(msg, channel.Local, b.c)
+	if err != nil {
+		return err
+	}
+	return b.it.PublishWithReply(ctx, channel, reply, p)
+}
+
+func (b *inboxBus) SubscribeInbox(ctx context.Context, channel Channel, channelSize int) (InboxReader, error) {
+	return b.it.SubscribeInbox(ctx, channel, channelSize)
+}
+
 func Subscribe[MessageType proto.Message](
 	ctx context.Context,
 	bus MessageBus,
@@ -100,6 +147,25 @@ func Subscribe[MessageType proto.Message](
 	}
 
 	return newSubscription[MessageType](sub, channelSize, bus.MaxDecompressedSize()), nil
+}
+
+// SubscribeInbox is Subscribe for an InboxBus's wildcard channels. unanswered,
+// if set, stands in a message for each report that nothing received a message
+// replying to the subject it is given.
+func SubscribeInbox[MessageType proto.Message](
+	ctx context.Context,
+	bus InboxBus,
+	channel Channel,
+	channelSize int,
+	unanswered func(subject string) MessageType,
+) (Subscription[MessageType], error) {
+
+	sub, err := bus.SubscribeInbox(ctx, channel, channelSize)
+	if err != nil {
+		return nil, err
+	}
+
+	return startSubscription(sub, channelSize, bus.MaxDecompressedSize(), unanswered), nil
 }
 
 func SubscribeQueue[MessageType proto.Message](

@@ -16,6 +16,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -111,16 +112,26 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 	}
 
 	for {
+		start := time.Now()
 		err := fn(timeout)
 		if err == nil {
 			return nil
 		}
+		elapsed := time.Since(start)
 
 		var retry bool
 		var waitTime time.Duration
 		retry, timeout, waitTime = opt.GetRetryParameters(err, attempt)
 		if !retry {
 			return err
+		}
+
+		// The broker reports a request no server is subscribed to at once. Wait
+		// out the wait it cut short, so retries stay paced as they were and a
+		// restarting server still has that long to subscribe.
+		var nse *psrpc.NoSubscriberError
+		if errors.As(err, &nse) {
+			waitTime = max(waitTime, nse.Wait-elapsed)
 		}
 
 		attempt++

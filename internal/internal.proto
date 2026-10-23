@@ -61,6 +61,10 @@ message Request {
   // expiry, and grants a bid from a server that sends one anyway. Older callers
   // need the bid.
   bool no_claim = 11;
+  // The caller also listens on a response channel of this request's own, named
+  // for the client ID with the request ID appended. A server that supports it
+  // bids and responds there; older servers use the client's shared channels.
+  bool per_request_reply = 12;
 }
 
 message Response {
