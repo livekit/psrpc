@@ -55,8 +55,12 @@ message Request {
   bytes raw_request = 8;
   // 9 was the caller-elected skip, which older servers honor unconditionally.
   reserved 9;
-  // Advertises that an announcement may replace the claim; the server decides.
-  bool skip_claim = 10;
+  // 10 advertised that an announcement could replace the claim.
+  reserved 10;
+  // On a queue rpc, the caller needs no claim: it waits for the response until
+  // expiry, and grants a bid from a server that sends one anyway. Older callers
+  // need the bid.
+  bool no_claim = 11;
 }
 
 message Response {
@@ -74,9 +78,8 @@ message ClaimRequest {
   string request_id = 1;
   string server_id = 2;
   float affinity = 3;
-  // Handling has begun and no ClaimResponse is awaited. Announced so the caller
-  // can tell a slow handler from a request nobody received.
-  bool handling = 4;
+  // 4 announced that handling had begun and no ClaimResponse was awaited.
+  reserved 4;
 }
 
 message ClaimResponse {

@@ -266,8 +266,10 @@ type Request struct {
 	Request    *anypb.Any             `protobuf:"bytes,6,opt,name=request,proto3" json:"request,omitempty"`
 	Metadata   map[string]string      `protobuf:"bytes,7,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	RawRequest []byte                 `protobuf:"bytes,8,opt,name=raw_request,json=rawRequest,proto3" json:"raw_request,omitempty"`
-	// Advertises that an announcement may replace the claim; the server decides.
-	SkipClaim     bool `protobuf:"varint,10,opt,name=skip_claim,json=skipClaim,proto3" json:"skip_claim,omitempty"`
+	// On a queue rpc, the caller needs no claim: it waits for the response until
+	// expiry, and grants a bid from a server that sends one anyway. Older callers
+	// need the bid.
+	NoClaim       bool `protobuf:"varint,11,opt,name=no_claim,json=noClaim,proto3" json:"no_claim,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -358,9 +360,9 @@ func (x *Request) GetRawRequest() []byte {
 	return nil
 }
 
-func (x *Request) GetSkipClaim() bool {
+func (x *Request) GetNoClaim() bool {
 	if x != nil {
-		return x.SkipClaim
+		return x.NoClaim
 	}
 	return false
 }
@@ -466,13 +468,10 @@ func (x *Response) GetErrorDetails() []*anypb.Any {
 }
 
 type ClaimRequest struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ServerId  string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	Affinity  float32                `protobuf:"fixed32,3,opt,name=affinity,proto3" json:"affinity,omitempty"`
-	// Handling has begun and no ClaimResponse is awaited. Announced so the caller
-	// can tell a slow handler from a request nobody received.
-	Handling      bool `protobuf:"varint,4,opt,name=handling,proto3" json:"handling,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Affinity      float32                `protobuf:"fixed32,3,opt,name=affinity,proto3" json:"affinity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -526,13 +525,6 @@ func (x *ClaimRequest) GetAffinity() float32 {
 		return x.Affinity
 	}
 	return 0
-}
-
-func (x *ClaimRequest) GetHandling() bool {
-	if x != nil {
-		return x.Handling
-	}
-	return false
 }
 
 type ClaimResponse struct {
@@ -940,7 +932,7 @@ const file_internal_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x127\n" +
 	"\vcompression\x18\x04 \x01(\x0e2\x15.internal.CompressionR\vcompressionJ\x04\b\x03\x10\x04\"#\n" +
 	"\aChannel\x12\x18\n" +
-	"\achannel\x18\x03 \x01(\tR\achannel\"\xfc\x02\n" +
+	"\achannel\x18\x03 \x01(\tR\achannel\"\xfe\x02\n" +
 	"\aRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -951,14 +943,13 @@ const file_internal_proto_rawDesc = "" +
 	"\arequest\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\arequest\x12;\n" +
 	"\bmetadata\x18\a \x03(\v2\x1f.internal.Request.MetadataEntryR\bmetadata\x12\x1f\n" +
 	"\vraw_request\x18\b \x01(\fR\n" +
-	"rawRequest\x12\x1d\n" +
-	"\n" +
-	"skip_claim\x18\n" +
-	" \x01(\bR\tskipClaim\x1a;\n" +
+	"rawRequest\x12\x19\n" +
+	"\bno_claim\x18\v \x01(\bR\anoClaim\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\t\x10\n" +
-	"\"\x99\x02\n" +
+	"J\x04\b\n" +
+	"\x10\v\"\x99\x02\n" +
 	"\bResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -968,13 +959,12 @@ const file_internal_proto_rawDesc = "" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x12\n" +
 	"\x04code\x18\x06 \x01(\tR\x04code\x12!\n" +
 	"\fraw_response\x18\a \x01(\fR\vrawResponse\x129\n" +
-	"\rerror_details\x18\b \x03(\v2\x14.google.protobuf.AnyR\ferrorDetails\"\x82\x01\n" +
+	"\rerror_details\x18\b \x03(\v2\x14.google.protobuf.AnyR\ferrorDetails\"l\n" +
 	"\fClaimRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1a\n" +
-	"\baffinity\x18\x03 \x01(\x02R\baffinity\x12\x1a\n" +
-	"\bhandling\x18\x04 \x01(\bR\bhandling\"K\n" +
+	"\baffinity\x18\x03 \x01(\x02R\baffinityJ\x04\b\x04\x10\x05\"K\n" +
 	"\rClaimResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
