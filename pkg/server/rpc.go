@@ -249,7 +249,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) claimRequest(
 		h.mu.Unlock()
 	}()
 
-	err := s.bus.Publish(ctx, info.GetClaimRequestChannel(s.Name, ir.ClientId), &internal.ClaimRequest{
+	err := s.bus.Publish(ctx, answerChannel(s.Name, ir, info.GetClaimRequestChannel), &internal.ClaimRequest{
 		RequestId: ir.RequestId,
 		ServerId:  s.ID,
 		Affinity:  affinity,
@@ -325,7 +325,17 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 		}
 	}
 
-	return s.bus.Publish(ctx, info.GetResponseChannel(s.Name, ir.ClientId), res)
+	return s.bus.Publish(ctx, answerChannel(s.Name, ir, info.GetResponseChannel), res)
+}
+
+// A caller that listens per request is answered on that request's own response
+// channel, bids included, where the broker also reports a request nothing
+// received. Older callers are answered on their shared channel for the message.
+func answerChannel(service string, ir *internal.Request, shared func(service, clientID string) bus.Channel) bus.Channel {
+	if ir.PerRequestReply {
+		return info.GetResponseChannel(service, info.PerRequestClientID(ir.ClientId, ir.RequestId))
+	}
+	return shared(service, ir.ClientId)
 }
 
 func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
