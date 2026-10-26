@@ -77,9 +77,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 	return func(ctx context.Context, request proto.Message, opts ...psrpc.RequestOption) (response proto.Message, err error) {
 		o := getRequestOpts(ctx, i, c.ClientOpts, opts...)
 
-		// A queue rpc has one candidate bidding a hardcoded 1, so there is nothing
-		// for these to select on. Rejected regardless of whether the claim is
-		// skipped, since the incoherence is in the configuration.
+		// A queue rpc has one candidate, so there is nothing for these to select on.
 		if i.Queue && (o.SelectionOpts.SelectionFunc != nil ||
 			o.SelectionOpts.MinimumAffinity > 0 ||
 			o.SelectionOpts.MaximumAffinity > 0) {
@@ -109,8 +107,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			// Advertises that an announcement may replace the claim; making one is the server's call.
-			SkipClaim: i.Queue,
+			NoClaim:    i.Queue,
 		}
 
 		var claimChan chan *internal.ClaimRequest
@@ -141,35 +138,48 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 		defer cancel()
 
+		grant := func(serverID string) error {
+			err := c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
+				RequestId: requestID,
+				ServerId:  serverID,
+			})
+			if err != nil {
+				return psrpc.NewError(psrpc.Internal, err)
+			}
+			return nil
+		}
+
 		var res *internal.Response
 
-		if i.RequireClaim {
-			sel, err := selectServerUntil(ctx, claimChan, resChan, o.SelectionOpts, i.Queue, c.closed.Watch())
+		// The queue picked a queue rpc's one server, so the caller just waits for
+		// its response. A server predating no_claim bids anyway and is granted
+		// below; an announcement from one reads as a bid, and granting it is
+		// harmless.
+		var bids <-chan *internal.ClaimRequest
+		if i.RequireClaim && i.Queue {
+			bids = claimChan
+		} else if i.RequireClaim {
+			sel, err := selectServerUntil(ctx, claimChan, resChan, o.SelectionOpts, c.closed.Watch())
 			if err != nil {
 				return nil, err
 			}
-
-			// A server that announced is already running the request, so granting
-			// it would only be discarded. Waiting for the response resumes below
-			// under the request timeout rather than the selection timeout.
-			switch {
-			case sel.res != nil:
+			if sel.res != nil {
 				res = sel.res
-			case sel.handling:
-			default:
-				if err = c.bus.Publish(ctx, i.GetClaimResponseChannel(), &internal.ClaimResponse{
-					RequestId: requestID,
-					ServerId:  sel.serverID,
-				}); err != nil {
-					err = psrpc.NewError(psrpc.Internal, err)
-					return nil, err
-				}
+			} else if err = grant(sel.serverID); err != nil {
+				return nil, err
 			}
 		}
 
-		if res == nil {
+		for res == nil {
 			select {
 			case res = <-resChan:
+
+			case bid := <-bids:
+				// One server received the request, so there is one bid at most.
+				bids = nil
+				if err = grant(bid.ServerId); err != nil {
+					return nil, err
+				}
 
 			case <-ctx.Done():
 				err = ctx.Err()
@@ -199,11 +209,10 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 	}
 }
 
-// How claim selection ended: a server to grant, a server already handling the
-// request, or a response that arrived instead of a claim.
+// How claim selection ended: a server to grant, or a response that arrived
+// instead of a claim.
 type selection struct {
 	serverID string
-	handling bool
 	res      *internal.Response
 }
 
@@ -212,9 +221,8 @@ func selectServer(
 	claimChan chan *internal.ClaimRequest,
 	resChan chan *internal.Response,
 	opts psrpc.SelectionOpts,
-	queue bool,
 ) (selection, error) {
-	return selectServerUntil(ctx, claimChan, resChan, opts, queue, nil)
+	return selectServerUntil(ctx, claimChan, resChan, opts, nil)
 }
 
 func selectServerUntil(
@@ -222,7 +230,6 @@ func selectServerUntil(
 	claimChan chan *internal.ClaimRequest,
 	resChan chan *internal.Response,
 	opts psrpc.SelectionOpts,
-	queue bool,
 	closed <-chan struct{},
 ) (selection, error) {
 
@@ -263,10 +270,6 @@ func selectServerUntil(
 			}
 
 		case claim := <-claimChan:
-			if claim.Handling {
-				// Announced, not bid: there is nothing to select between.
-				return selection{serverID: claim.ServerId, handling: true}, nil
-			}
 			claimCount++
 			if (opts.MinimumAffinity > 0 && claim.Affinity >= opts.MinimumAffinity) || opts.MinimumAffinity <= 0 {
 				if opts.AcceptFirstAvailable || opts.MaximumAffinity > 0 && claim.Affinity >= opts.MaximumAffinity {
@@ -287,9 +290,8 @@ func selectServerUntil(
 			}
 
 		case res := <-resChan:
-			// On queue the sole responder's answer is final, error or not; on
-			// broadcast an early error may yet be outbid, so it is held back.
-			if res.Error == "" || queue {
+			// An early error may yet be outbid, so it is held back.
+			if res.Error == "" {
 				return selection{res: res}, nil
 			}
 			resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)

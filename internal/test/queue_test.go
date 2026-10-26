@@ -25,29 +25,29 @@ import (
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
+	"github.com/livekit/psrpc/pkg/bus"
 	"github.com/livekit/psrpc/pkg/bus/bustest"
 	"github.com/livekit/psrpc/pkg/bus/localbus"
 	_ "github.com/livekit/psrpc/pkg/bus/natsbus/natstest"
 	_ "github.com/livekit/psrpc/pkg/bus/redisbus/redistest"
 	"github.com/livekit/psrpc/pkg/client"
 	"github.com/livekit/psrpc/pkg/info"
+	"github.com/livekit/psrpc/pkg/middleware"
 	"github.com/livekit/psrpc/pkg/rand"
 	"github.com/livekit/psrpc/pkg/server"
 	"github.com/livekit/psrpc/testutils"
 )
 
-func enabled() bool { return true }
-
 // Run on every bus: the property comes from SubscribeQueue, not any one broker.
-func TestSkipClaim(t *testing.T) {
+func TestQueueRunsWithoutClaim(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus bustest.Connect) {
-		const queued, broadcast = "skip_claim_queued", "skip_claim_broadcast"
+		const queued, broadcast = "queued", "broadcast"
 
 		obs := &recordingObserver{}
 		b := newBus(t)
 
 		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-			psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+			psrpc.WithServerObserver(obs))
 		t.Cleanup(func() { s.Close(true) })
 		c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 		require.NoError(t, err)
@@ -139,7 +139,8 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 	// AcceptFirstAvailable and AffinityTimeout are defaulted in for every method.
 	c.RegisterMethod("plain", false, false, true, true)
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "plain", nil,
-		&internal.Request{}, psrpc.WithSelectionOpts(psrpc.SelectionOpts{
+		&internal.Request{}, psrpc.WithRequestTimeout(time.Millisecond*50),
+		psrpc.WithSelectionOpts(psrpc.SelectionOpts{
 			AcceptFirstAvailable: true, AffinityTimeout: time.Millisecond * 50,
 		}))
 	require.NotErrorIs(t, err, psrpc.ErrRequestCanceled)
@@ -148,23 +149,25 @@ func TestQueueRejectsAffinitySelection(t *testing.T) {
 	require.NotEqual(t, psrpc.InvalidArgument, code, "no handler registered, but not a config error")
 }
 
-// A handler slower than the selection timeout but inside the request timeout.
-// The announcement is what lets the caller tell that apart from a request
-// nobody received, and the grant it replaces must not be sent.
-func TestSkipClaimSlowHandler(t *testing.T) {
-	var grants atomic.Int32
-	b := testutils.NewTestBus(localbus.New(),
-		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
-			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
-				if _, ok := msg.(*internal.ClaimResponse); ok {
-					grants.Add(1)
-				}
-				return next(ctx, channel, msg)
+// Records the grants a caller publishes.
+func grantCounter(grants *atomic.Int32) testutils.TestBusOption {
+	return testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+		return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+			if _, ok := msg.(*internal.ClaimResponse); ok {
+				grants.Add(1)
 			}
-		}))
+			return next(ctx, channel, msg)
+		}
+	})
+}
 
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerSkipClaim(enabled))
+// A handler slower than the selection timeout but inside the request timeout:
+// the caller waits for it, and has nothing to grant.
+func TestQueueSlowHandler(t *testing.T) {
+	var grants atomic.Int32
+	b := testutils.NewTestBus(localbus.New(), grantCounter(&grants))
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
@@ -181,13 +184,59 @@ func TestSkipClaimSlowHandler(t *testing.T) {
 
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
 	require.NoError(t, err)
-	require.Zero(t, grants.Load(), "an announcement needs no grant")
+	require.Zero(t, grants.Load(), "a server that did not bid needs no grant")
 }
 
-// Unset means claim, so a deploy that has not opted in is unaffected.
-func TestSkipClaimDisabledByDefault(t *testing.T) {
+// The double dispatch: a caller used to give up on a slow-to-arrive queue request
+// after the selection timeout and retry it, while the server still ran the
+// original. Now the caller waits for the original, and the retry never happens.
+func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
+	const selectTimeout = 200 * time.Millisecond
+
+	var published atomic.Int32
+	b := delayedRequestBus(func(*internal.Request) time.Duration {
+		if published.Add(1) == 1 {
+			return selectTimeout * 3 / 2
+		}
+		return 0
+	})
+
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	t.Cleanup(func() { s.Close(true) })
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithClientSelectTimeout(selectTimeout),
+		middleware.WithRPCRetries(middleware.RetryOptions{MaxAttempts: 2}))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+
+	var calls atomic.Int32
+	s.RegisterMethod("queued", false, false, true, true)
+	c.RegisterMethod("queued", false, false, true, true)
+	require.NoError(t, server.RegisterHandler(s, "queued", nil,
+		func(context.Context, *internal.Request) (*internal.Response, error) {
+			calls.Add(1)
+			return &internal.Response{}, nil
+		}, nil))
+
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+		&internal.Request{}, psrpc.WithRequestTimeout(time.Second))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, published.Load(), "the caller must not have retried")
+	require.EqualValues(t, 1, calls.Load())
+}
+
+// A caller predating no_claim still needs a bid, and gets one.
+func TestQueueCallerWithoutNoClaim(t *testing.T) {
 	obs := &recordingObserver{}
-	b := localbus.New()
+	b := testutils.NewTestBus(localbus.New(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					req.NoClaim = false
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs))
@@ -207,65 +256,58 @@ func TestSkipClaimDisabledByDefault(t *testing.T) {
 	require.NoError(t, err)
 
 	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims)
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
+		"a caller that did not send no_claim must be bid for")
 }
 
-// The kill switch: revoking mid-flight takes effect on the next request, with no
-// reconstruction of the client or server.
-func TestSkipClaimRevokedAtRuntime(t *testing.T) {
-	obs := &recordingObserver{}
+// A server predating no_claim bids anyway, and runs only once granted.
+func TestQueueGrantsOlderServersBid(t *testing.T) {
 	b := localbus.New()
-	var on atomic.Bool
-	on.Store(true)
-
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(on.Load))
-	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
 	t.Cleanup(func() { c.Close() })
-
-	s.RegisterMethod("queued", false, false, true, true)
 	c.RegisterMethod("queued", false, false, true, true)
-	require.NoError(t, server.RegisterHandler(s, "queued", nil,
-		func(context.Context, *internal.Request) (*internal.Response, error) {
-			return &internal.Response{}, nil
-		}, nil))
+	i := c.GetInfo("queued", nil)
 
-	send := func() {
-		_, err := client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
-		require.NoError(t, err)
-	}
+	ctx := context.Background()
+	requests, err := bus.SubscribeQueue[*internal.Request](ctx, b, i.GetRPCChannel(), 1)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = requests.Close() })
+	grants, err := bus.Subscribe[*internal.ClaimResponse](ctx, b, i.GetClaimResponseChannel(), 1)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = grants.Close() })
 
-	send()
-	on.Store(false)
-	send()
-	on.Store(true)
-	send()
+	go func() {
+		req := <-requests.Channel()
+		if req == nil {
+			return
+		}
+		_ = b.Publish(ctx, info.GetClaimRequestChannel("test", req.ClientId), &internal.ClaimRequest{
+			RequestId: req.RequestId,
+			ServerId:  "older",
+			Affinity:  1,
+		})
+		if grant := <-grants.Channel(); grant == nil || grant.ServerId != "older" {
+			return
+		}
+		_ = b.Publish(ctx, info.GetResponseChannel("test", req.ClientId), &internal.Response{
+			RequestId: req.RequestId,
+			ServerId:  "older",
+		})
+	}()
 
-	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{
-		psrpc.ClaimSkipped, psrpc.ClaimGranted, psrpc.ClaimSkipped,
-	}, claims)
+	_, err = client.RequestSingle[*internal.Response](ctx, c, "queued", nil, &internal.Request{},
+		psrpc.WithRequestTimeout(time.Second))
+	require.NoError(t, err, "the bid must be granted")
 }
 
-// A caller that does not advertise must be negotiated with, even by a server
-// that elected to skip.
-func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
+// Deprecated and ignored: turning it off does not bring the claim back.
+func TestServerSkipClaimOptionIgnored(t *testing.T) {
 	obs := &recordingObserver{}
-	b := testutils.NewTestBus(localbus.New(),
-		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
-			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
-				if req, ok := msg.(*internal.Request); ok {
-					// As a client predating the field would leave it.
-					req.SkipClaim = false
-				}
-				return next(ctx, channel, msg)
-			}
-		}))
+	b := localbus.New()
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(enabled))
+		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(func() bool { return false }))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
@@ -282,29 +324,14 @@ func TestSkipClaimCallerDoesNotAdvertise(t *testing.T) {
 	require.NoError(t, err)
 
 	_, claims := obs.snapshot()
-	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted}, claims,
-		"a caller that did not advertise must be negotiated with")
+	require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped}, claims)
 }
 
-// CS-1992: an error response that beat the announcement was stashed while the
-// caller waited out the timeout. The bus delays announcements to force that order.
-func TestSkipClaimFastFailingHandler(t *testing.T) {
-	b := testutils.NewTestBus(localbus.New(),
-		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
-			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
-				if _, ok := msg.(*internal.ClaimRequest); ok {
-					go func() {
-						time.Sleep(50 * time.Millisecond)
-						_ = next(ctx, channel, msg)
-					}()
-					return nil
-				}
-				return next(ctx, channel, msg)
-			}
-		}))
+// A handler's error is the answer, returned without waiting out the timeout.
+func TestQueueFastFailingHandler(t *testing.T) {
+	b := localbus.New()
 
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
-		psrpc.WithServerSkipClaim(enabled))
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
 	require.NoError(t, err)
@@ -324,10 +351,28 @@ func TestSkipClaimFastFailingHandler(t *testing.T) {
 		&internal.Request{}, psrpc.WithRequestTimeout(timeout))
 
 	require.Error(t, err)
-	require.NotErrorIs(t, err, psrpc.ErrRequestTimedOut,
-		"the handler answered, so the caller must not time out")
 	code, ok := psrpc.GetErrorCode(err)
 	require.True(t, ok)
 	require.Equal(t, psrpc.NotFound, code, "the handler's error must reach the caller")
 	require.Less(t, time.Since(start), timeout/2, "the answer must not wait out the timeout")
+}
+
+// Delivers each request matched by delay that long after it was published,
+// without holding up the caller, as a backed-up subscriber would.
+func delayedRequestBus(delay func(*internal.Request) time.Duration) psrpc.MessageBus {
+	return testutils.NewTestBus(localbus.New(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					if d := delay(req); d > 0 {
+						go func() {
+							time.Sleep(d)
+							_ = next(ctx, channel, msg)
+						}()
+						return nil
+					}
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
 }
