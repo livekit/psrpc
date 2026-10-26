@@ -175,3 +175,39 @@ func TestRetryBackoff(t *testing.T) {
 		}
 	})
 }
+
+// A request no server is subscribed to fails as soon as the broker says so, but
+// its retry still waits out the wait it cut short, as it did before.
+func TestRetryWaitsOutUnansweredWait(t *testing.T) {
+	const wait = 150 * time.Millisecond
+
+	run := func(t *testing.T, first error) time.Duration {
+		var starts []time.Time
+		h := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 2})(psrpc.RPCInfo{},
+			func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (proto.Message, error) {
+				starts = append(starts, time.Now())
+				if len(starts) == 1 {
+					return nil, first
+				}
+				return nil, nil
+			})
+		_, err := h(context.Background(), nil)
+		require.NoError(t, err)
+		require.Len(t, starts, 2)
+		return starts[1].Sub(starts[0])
+	}
+
+	t.Run("no subscriber", func(t *testing.T) {
+		err := psrpc.NewNoSubscriberError(wait)
+		require.ErrorIs(t, err, psrpc.ErrNoResponse, "callers retrying ErrNoResponse must retry this")
+		code, ok := psrpc.GetErrorCode(err)
+		require.True(t, ok)
+		require.Equal(t, psrpc.Unavailable, code)
+
+		require.GreaterOrEqual(t, run(t, err), wait)
+	})
+
+	t.Run("other errors", func(t *testing.T) {
+		require.Less(t, run(t, psrpc.ErrNoResponse), wait, "only early failures are paced")
+	})
+}

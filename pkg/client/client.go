@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/frostbyte73/core"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/internal"
@@ -31,6 +32,8 @@ type RPCClient struct {
 	psrpc.ClientOpts
 
 	bus bus.MessageBus
+	// Set when the bus can address replies to a single request.
+	inbox bus.InboxBus
 
 	mu               sync.Mutex
 	claimRequests    map[string]chan *internal.ClaimRequest
@@ -94,6 +97,23 @@ func NewRPCClient(
 		streams = bus.EmptySubscription[*internal.Stream]{}
 	}
 
+	// Every request's own response channel, where servers that support it bid
+	// and respond, and where the broker reports a request nothing received.
+	var requests bus.Subscription[proto.Message] = bus.EmptySubscription[proto.Message]{}
+	if ib, ok := c.bus.(bus.InboxBus); ok {
+		requests, err = bus.SubscribeInbox(
+			ctx, ib, info.GetResponseChannel(c.Name, info.PerRequestClientID(c.ID, "*")),
+			c.ChannelSize, unansweredResponse,
+		)
+		if err != nil {
+			_ = responses.Close()
+			_ = claims.Close()
+			_ = streams.Close()
+			return nil, err
+		}
+		c.inbox = ib
+	}
+
 	go func() {
 		closed := c.closed.Watch()
 		for {
@@ -102,6 +122,7 @@ func NewRPCClient(
 				_ = claims.Close()
 				_ = responses.Close()
 				_ = streams.Close()
+				_ = requests.Close()
 				return
 
 			case claim := <-claims.Channel():
@@ -109,23 +130,23 @@ func NewRPCClient(
 					c.Close()
 					continue
 				}
-				c.mu.Lock()
-				claimChan, ok := c.claimRequests[claim.RequestId]
-				c.mu.Unlock()
-				if ok {
-					claimChan <- claim
-				}
+				c.routeClaim(claim)
 
 			case res := <-responses.Channel():
 				if res == nil {
 					c.Close()
 					continue
 				}
-				c.mu.Lock()
-				resChan, ok := c.responseChannels[res.RequestId]
-				c.mu.Unlock()
-				if ok {
-					resChan <- res
+				c.routeResponse(res)
+
+			case msg := <-requests.Channel():
+				switch m := msg.(type) {
+				case nil:
+					c.Close()
+				case *internal.ClaimRequest:
+					c.routeClaim(m)
+				case *internal.Response:
+					c.routeResponse(m)
 				}
 
 			case msg := <-streams.Channel():
@@ -147,6 +168,33 @@ func NewRPCClient(
 	}()
 
 	return c, nil
+}
+
+func (c *RPCClient) routeClaim(claim *internal.ClaimRequest) {
+	c.mu.Lock()
+	claimChan, ok := c.claimRequests[claim.RequestId]
+	c.mu.Unlock()
+	if ok {
+		claimChan <- claim
+	}
+}
+
+func (c *RPCClient) routeResponse(res *internal.Response) {
+	c.mu.Lock()
+	resChan, ok := c.responseChannels[res.RequestId]
+	c.mu.Unlock()
+	if ok {
+		resChan <- res
+	}
+}
+
+// The code on the response the client stands in when the broker reports that
+// nothing received a request. No server sends it. It carries no error, so
+// selection hands it straight back: with nothing received, no bid is coming.
+const unansweredCode = "psrpc.unanswered"
+
+func unansweredResponse(subject string) proto.Message {
+	return &internal.Response{RequestId: info.PerRequestID(subject), Code: unansweredCode}
 }
 
 func (c *RPCClient) Close() {

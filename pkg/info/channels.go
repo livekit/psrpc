@@ -15,6 +15,7 @@
 package info
 
 import (
+	"strings"
 	"sync"
 	"unicode"
 
@@ -31,6 +32,22 @@ var channelChar = &unicode.RangeTable{
 		{0x0061, 0x007a, 1}, // a-z
 	},
 	LatinOffset: 4,
+}
+
+// The client ID a request's own response channel is named for. With requestID
+// "*", the channel names every request's, for a broker with wildcard
+// subscriptions.
+func PerRequestClientID(clientID, requestID string) string {
+	return clientID + "." + requestID
+}
+
+// The request ID in the name of a channel for PerRequestClientID.
+func PerRequestID(channel string) string {
+	parts := strings.Split(channel, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[len(parts)-2]
 }
 
 func GetClaimRequestChannel(service, clientID string) bus.Channel {

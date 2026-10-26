@@ -269,9 +269,13 @@ type Request struct {
 	// On a queue rpc, the caller needs no claim: it waits for the response until
 	// expiry, and grants a bid from a server that sends one anyway. Older callers
 	// need the bid.
-	NoClaim       bool `protobuf:"varint,11,opt,name=no_claim,json=noClaim,proto3" json:"no_claim,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NoClaim bool `protobuf:"varint,11,opt,name=no_claim,json=noClaim,proto3" json:"no_claim,omitempty"`
+	// The caller also listens on a response channel of this request's own, named
+	// for the client ID with the request ID appended. A server that supports it
+	// bids and responds there; older servers use the client's shared channels.
+	PerRequestReply bool `protobuf:"varint,12,opt,name=per_request_reply,json=perRequestReply,proto3" json:"per_request_reply,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Request) Reset() {
@@ -363,6 +367,13 @@ func (x *Request) GetRawRequest() []byte {
 func (x *Request) GetNoClaim() bool {
 	if x != nil {
 		return x.NoClaim
+	}
+	return false
+}
+
+func (x *Request) GetPerRequestReply() bool {
+	if x != nil {
+		return x.PerRequestReply
 	}
 	return false
 }
@@ -932,7 +943,7 @@ const file_internal_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x127\n" +
 	"\vcompression\x18\x04 \x01(\x0e2\x15.internal.CompressionR\vcompressionJ\x04\b\x03\x10\x04\"#\n" +
 	"\aChannel\x12\x18\n" +
-	"\achannel\x18\x03 \x01(\tR\achannel\"\xfe\x02\n" +
+	"\achannel\x18\x03 \x01(\tR\achannel\"\xaa\x03\n" +
 	"\aRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
@@ -944,7 +955,8 @@ const file_internal_proto_rawDesc = "" +
 	"\bmetadata\x18\a \x03(\v2\x1f.internal.Request.MetadataEntryR\bmetadata\x12\x1f\n" +
 	"\vraw_request\x18\b \x01(\fR\n" +
 	"rawRequest\x12\x19\n" +
-	"\bno_claim\x18\v \x01(\bR\anoClaim\x1a;\n" +
+	"\bno_claim\x18\v \x01(\bR\anoClaim\x12*\n" +
+	"\x11per_request_reply\x18\f \x01(\bR\x0fperRequestReply\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\t\x10\n" +
