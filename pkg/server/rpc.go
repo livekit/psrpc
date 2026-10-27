@@ -48,6 +48,10 @@ type rpcHandlerImpl[RequestType proto.Message, ResponseType proto.Message] struc
 	closeOnce   sync.Once
 	complete    chan struct{}
 	onCompleted func()
+
+	// drained is closed once the run loop has taken every request it will
+	// handle, so a close waits for them only when no more can be counted
+	drained chan struct{}
 }
 
 func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
@@ -102,6 +106,7 @@ func newRPCHandler[RequestType proto.Message, ResponseType proto.Message](
 		claimSub:     claimSub,
 		claims:       make(map[string]chan *internal.ClaimResponse),
 		affinityFunc: affinityFunc,
+		drained:      make(chan struct{}),
 		complete:     make(chan struct{}),
 	}
 
@@ -137,6 +142,7 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 				if !ok {
 					// Closed while draining: stop selecting it, or the loop spins.
 					requests = nil
+					close(h.drained)
 					continue
 				}
 				if ir == nil {
@@ -146,7 +152,11 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) run(s *RPCServer) {
 					o.OnRequestReceived(h.i.RPCInfo)
 				}
 				if time.Now().UnixNano() < ir.Expiry {
+					// counted here, not in the goroutine, so the count is
+					// complete once the loop has drained
+					h.handling.Add(1)
 					go func() {
+						defer h.handling.Done()
 						if err := h.handleRequest(s, ir); err != nil {
 							logger.Error(err, "failed to handle request", "requestID", ir.RequestId)
 						}
@@ -178,9 +188,6 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) handleRequest(
 	s *RPCServer,
 	ir *internal.Request,
 ) error {
-	h.handling.Add(1)
-	defer h.handling.Done()
-
 	head := &metadata.Header{
 		RemoteID: ir.ClientId,
 		SentAt:   time.Unix(0, ir.SentAt),
@@ -342,6 +349,9 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) close(force bool) {
 	h.closeOnce.Do(func() {
 		_ = h.requestSub.Close()
 		if !force {
+			// the requests the loop takes after the close began are counted
+			// before it drains, and Wait must not run while one can be added
+			<-h.drained
 			h.handling.Wait()
 		}
 		_ = h.claimSub.Close()
