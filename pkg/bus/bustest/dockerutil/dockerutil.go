@@ -20,8 +20,8 @@ package dockerutil
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,15 +34,8 @@ var (
 		return dockertest.NewPool(context.Background(), "")
 	})
 
-	// Seeded randomly so concurrent test binaries don't collide on names.
-	nameSeq = newNameSeq()
+	nameSeq atomic.Uint32
 )
-
-func newNameSeq() *atomic.Uint32 {
-	var n atomic.Uint32
-	n.Store(rand.Uint32N(1000))
-	return &n
-}
 
 func Pool(t testing.TB) dockertest.Pool {
 	p, err := pool()
@@ -52,8 +45,9 @@ func Pool(t testing.TB) dockertest.Pool {
 	return p
 }
 
+// Name is unique across the test binaries go test runs at once, by their pid.
 func Name(prefix string) string {
-	return fmt.Sprintf("psrpc-%s-%d", prefix, nameSeq.Add(1))
+	return fmt.Sprintf("psrpc-%s-%d-%d", prefix, os.Getpid(), nameSeq.Add(1))
 }
 
 func WaitTCPPort(t testing.TB, pool dockertest.Pool, addr string) {
