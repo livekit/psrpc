@@ -8,7 +8,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/klauspost/compress v1.20.1
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
-	github.com/nats-io/nats.go v1.53.1
+	github.com/nats-io/nats.go v1.55.0
 	github.com/ory/dockertest/v4 v4.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.23.0
@@ -51,7 +51,7 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
