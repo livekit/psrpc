@@ -15,6 +15,8 @@
 package info
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"unicode"
@@ -23,6 +25,16 @@ import (
 )
 
 const lowerHex = "0123456789abcdef"
+
+// maxServerChannelLength bounds the topic part of a server channel name. NATS
+// rejects a control line longer than max_control_line (4KB by default), and
+// nats.go then closes the connection permanently. A topic part longer than
+// this is replaced by a hash of it
+const maxServerChannelLength = 2048
+
+// hashedTopicPrefix starts the token that replaces an oversized topic part.
+// Sanitized topics never contain '-', so the token cannot match a real topic.
+const hashedTopicPrefix = ".h-"
 
 var channelChar = &unicode.RangeTable{
 	R16: []unicode.Range16{
@@ -132,11 +144,17 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 	defer scratch.Put(p)
 	b := append(*p, "SRV."...)
 	b = append(b, service...)
+	n := len(b)
 	for _, t := range topic {
 		if len(t) != 0 {
 			b = append(b, '.')
 			b = appendSanitizedChannelPart(b, t)
 		}
+	}
+	if len(b)-n > maxServerChannelLength {
+		sum := sha256.Sum256(b[n:])
+		b = append(b[:n], hashedTopicPrefix...)
+		b = hex.AppendEncode(b, sum[:16])
 	}
 	if queue {
 		b = append(b, ".Q"...)

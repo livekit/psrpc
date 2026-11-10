@@ -15,6 +15,7 @@
 package info
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,4 +75,36 @@ func TestChannelFormatters(t *testing.T) {
 	require.Equal(t, "bar.STR", i.GetStreamServerChannel().Local)
 
 	require.Equal(t, "U+0001f680_u+00c9.U+0001f6f0_bar.u+8f6fu+4ef6.END", formatChannel('.', "🚀_É", "🛰_bar", []string{"软件"}, "END"))
+}
+
+func TestServerChannelLengthBound(t *testing.T) {
+	channel := func(queue bool, topic ...string) string {
+		i := &RequestInfo{RPCInfo: psrpc.RPCInfo{Service: "foo", Method: "bar", Topic: topic}, Queue: queue}
+		return i.GetRPCChannel().Server
+	}
+
+	t.Run("topic at the bound is unchanged", func(t *testing.T) {
+		topic := strings.Repeat("a", maxServerChannelLength-1) // plus the '.' separator
+		require.Equal(t, "SRV.foo."+topic, channel(false, topic))
+	})
+
+	t.Run("topic over the bound is hashed", func(t *testing.T) {
+		long := strings.Repeat("A", 8000)
+		c := channel(false, "p_project", long)
+		require.Regexp(t, `^SRV\.foo\.h-[0-9a-f]{32}$`, c)
+		require.Equal(t, c, channel(false, "p_project", long), "hash must be stable")
+		require.NotEqual(t, c, channel(false, "p_other", long))
+		require.Regexp(t, `^SRV\.foo\.h-[0-9a-f]{32}\.Q$`, channel(true, "p_project", long))
+	})
+
+	t.Run("sanitized expansion counts toward the bound", func(t *testing.T) {
+		// 300 runes outside the BMP expand to 10 bytes each
+		require.Regexp(t, `^SRV\.foo\.h-[0-9a-f]{32}$`, channel(false, strings.Repeat("🚀", 300)))
+	})
+
+	t.Run("all server channels agree", func(t *testing.T) {
+		i := &RequestInfo{RPCInfo: psrpc.RPCInfo{Service: "foo", Method: "bar", Topic: []string{strings.Repeat("A", 8000)}}}
+		require.Equal(t, i.GetRPCChannel().Server, i.GetClaimResponseChannel().Server)
+		require.Equal(t, i.GetRPCChannel().Server, i.GetStreamServerChannel().Server)
+	})
 }
