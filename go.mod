@@ -9,7 +9,7 @@ require (
 	github.com/klauspost/compress v1.20.1
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
 	github.com/nats-io/nats.go v1.53.1
-	github.com/ory/dockertest/v4 v4.0.0
+	github.com/ory/dockertest/v4 v4.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/stretchr/testify v1.12.1
