@@ -102,6 +102,13 @@ func TestServerChannelLengthBound(t *testing.T) {
 		require.Regexp(t, `^SRV\.foo\.h-[0-9a-f]{32}$`, channel(false, strings.Repeat("🚀", 300)))
 	})
 
+	t.Run("hashed topic does not add an empty token", func(t *testing.T) {
+		// with an empty service, the prefix "SRV." already ends with '.'
+		c := formatServerChannel("", []string{strings.Repeat("A", 8000)}, true)
+		require.Regexp(t, `^SRV\.h-[0-9a-f]{32}\.Q$`, c)
+		require.NotContains(t, c, "..")
+	})
+
 	t.Run("all server channels agree", func(t *testing.T) {
 		i := &RequestInfo{RPCInfo: psrpc.RPCInfo{Service: "foo", Method: "bar", Topic: []string{strings.Repeat("A", 8000)}}}
 		require.Equal(t, i.GetRPCChannel().Server, i.GetClaimResponseChannel().Server)

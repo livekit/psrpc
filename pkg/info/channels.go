@@ -34,7 +34,7 @@ const maxServerChannelLength = 2048
 
 // hashedTopicPrefix starts the token that replaces an oversized topic part.
 // Sanitized topics never contain '-', so the token cannot match a real topic.
-const hashedTopicPrefix = ".h-"
+const hashedTopicPrefix = "h-"
 
 var channelChar = &unicode.RangeTable{
 	R16: []unicode.Range16{
@@ -153,7 +153,12 @@ func formatServerChannel(service string, topic []string, queue bool) string {
 	}
 	if len(b)-n > maxServerChannelLength {
 		sum := sha256.Sum256(b[n:])
-		b = append(b[:n], hashedTopicPrefix...)
+		b = b[:n]
+		// NATS rejects empty tokens, so do not add a second '.'
+		if b[n-1] != '.' {
+			b = append(b, '.')
+		}
+		b = append(b, hashedTopicPrefix...)
 		b = hex.AppendEncode(b, sum[:16])
 	}
 	if queue {
