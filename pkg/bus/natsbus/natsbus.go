@@ -211,7 +211,7 @@ func (n *subscription) Close() error {
 type router struct {
 	sub     *nats.Subscription
 	mu      sync.Mutex
-	routes  map[string][]*routerSubscription
+	routes  map[string][]*routerSubscription // copy on write: write iterates them unlocked
 	t       *transport
 	channel string
 	queue   bool
@@ -220,7 +220,7 @@ type router struct {
 func (n *router) open(channel string, s *routerSubscription) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.routes[channel] = append(n.routes[channel], s)
+	n.routes[channel] = append(slices.Clone(n.routes[channel]), s)
 }
 
 func (n *router) close(channel string, s *routerSubscription) bool {
@@ -234,7 +234,7 @@ func (n *router) close(channel string, s *routerSubscription) bool {
 	}
 
 	if len(subs) > 1 {
-		n.routes[channel] = slices.Delete(subs, i, i+1)
+		n.routes[channel] = slices.Delete(slices.Clone(subs), i, i+1)
 		return false
 	}
 
@@ -253,8 +253,9 @@ func (n *router) write(m *nats.Msg) {
 	}
 
 	n.mu.Lock()
-	defer n.mu.Unlock()
-	for _, s := range n.routes[channel] {
+	subs := n.routes[channel]
+	n.mu.Unlock()
+	for _, s := range subs {
 		s.write(m)
 	}
 }
@@ -275,16 +276,28 @@ func (n *routerSubscription) write(m *nats.Msg) {
 }
 
 func (n *routerSubscription) Read() ([]byte, bool) {
-	msg, ok := <-n.msgChan
-	if !ok {
+	// Drain what is buffered before reporting the close. msgChan is buffered
+	// and never closed, so once ctx is done both cases of the second select
+	// can be ready, and select picks among ready cases at random, which would
+	// drop buffered messages.
+	select {
+	case msg := <-n.msgChan:
+		return msg.Data, true
+	default:
+	}
+	select {
+	case msg := <-n.msgChan:
+		return msg.Data, true
+	case <-n.ctx.Done():
 		return nil, false
 	}
-	return msg.Data, true
 }
 
+// Close does not close msgChan: write delivers outside the router lock, so a
+// delivery can race Close and would panic on a closed channel. Cancelling ctx
+// signals the close instead; Read drains what is buffered before reporting it.
 func (n *routerSubscription) Close() error {
 	n.cancel()
 	n.router.t.unsubscribeRouter(n.router, n.channel, n)
-	close(n.msgChan)
 	return nil
 }
