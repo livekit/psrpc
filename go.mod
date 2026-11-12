@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/frostbyte73/core v0.1.1
-	github.com/gammazero/deque v1.2.1
+	github.com/gammazero/deque v1.2.2
 	github.com/go-logr/logr v1.4.4
 	github.com/klauspost/compress v1.20.1
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731
