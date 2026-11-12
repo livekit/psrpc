@@ -73,6 +73,11 @@ func (s *redisServer) connect() (redis.UniversalClient, error) {
 	return rc, nil
 }
 
+// Addr returns the host:port the test Redis server listens on.
+func (s *redisServer) Addr() string {
+	return s.addr
+}
+
 func (s *redisServer) Connect(t testing.TB, opts ...bus.BusOption) bus.MessageBus {
 	rc, err := s.connect()
 	if err != nil {
