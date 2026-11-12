@@ -45,6 +45,16 @@ func Pool(t testing.TB) dockertest.Pool {
 	return p
 }
 
+// TryPool reports whether a docker daemon is reachable. It returns nil when
+// it is not, so a test can skip its broker instead of failing.
+func TryPool() dockertest.Pool {
+	p, err := pool()
+	if err != nil {
+		return nil
+	}
+	return p
+}
+
 // Name is unique across the test binaries go test runs at once, by their pid.
 func Name(prefix string) string {
 	return fmt.Sprintf("psrpc-%s-%d-%d", prefix, os.Getpid(), nameSeq.Add(1))
