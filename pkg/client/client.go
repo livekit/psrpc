@@ -193,6 +193,13 @@ func (c *RPCClient) routeResponse(res *internal.Response) {
 // selection hands it straight back: with nothing received, no bid is coming.
 const unansweredCode = "psrpc.unanswered"
 
+// failed is whether res carries an error: a code, or a message. An error
+// whose message is empty still has its code, and must not read as a success
+// with an empty response.
+func failed(res *internal.Response) bool {
+	return res.Error != "" || res.Code != "" && res.Code != unansweredCode
+}
+
 func unansweredResponse(subject string) proto.Message {
 	return &internal.Response{RequestId: info.PerRequestID(subject), Code: unansweredCode}
 }
