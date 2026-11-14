@@ -322,6 +322,14 @@ func (h *rpcHandlerImpl[RequestType, ResponseType]) sendResponse(
 			res.Error = err.Error()
 			res.Code = string(psrpc.Unknown)
 		}
+		// A client that predates reading the code tells an error from a
+		// success by its message alone.
+		if res.Code == string(psrpc.OK) {
+			res.Code = string(psrpc.Unknown)
+		}
+		if res.Error == "" {
+			res.Error = res.Code
+		}
 	} else if response != nil {
 		b, err := bus.SerializePayload(response)
 		if err != nil {
