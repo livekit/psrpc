@@ -41,6 +41,27 @@ func WithRPCRetries(opt RetryOptions) psrpc.ClientOption {
 // outermost retry interceptor to the retry interceptors inside it
 type callerTimeoutKey struct{}
 
+// noSubscriberRetryKey marks a context whose requests are not retried when no
+// server is subscribed
+type noSubscriberRetryKey struct{}
+
+// WithoutNoSubscriberRetry returns a context under which RPC retry interceptors
+// return a psrpc.NoSubscriberError at once instead of retrying it. Other errors
+// are retried as usual. Use it when the caller can tell for itself whether a
+// missing server is worth waiting for, for example by checking whether the
+// object the topic names still exists.
+//
+// Only a broker that reports unsubscribed requests produces this error (NATS).
+// On other buses an unanswered request still times out and is retried.
+func WithoutNoSubscriberRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noSubscriberRetryKey{}, true)
+}
+
+func noSubscriberRetry(ctx context.Context) bool {
+	skip, _ := ctx.Value(noSubscriberRetryKey{}).(bool)
+	return !skip
+}
+
 func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 	return func(rpcInfo psrpc.RPCInfo, next psrpc.ClientRPCHandler) psrpc.ClientRPCHandler {
 		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (res proto.Message, err error) {
@@ -54,7 +75,7 @@ func NewRPCRetryInterceptor(opt RetryOptions) psrpc.ClientRPCInterceptor {
 				ctx = context.WithValue(ctx, callerTimeoutKey{}, callerTimeout)
 			}
 
-			err = retry(opt, ctx.Done(), func(timeout time.Duration) error {
+			err = retry(opt, ctx.Done(), noSubscriberRetry(ctx), func(timeout time.Duration) error {
 				nextOpts := opts
 				if timeout > 0 && callerTimeout == 0 {
 					// options apply in order, so the innermost interceptor's timeout wins
@@ -100,7 +121,7 @@ func getRetryWithBackoffParameters(o RetryOptions) func(err error, attempt int) 
 	}
 }
 
-func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration) error) error {
+func retry(opt RetryOptions, done <-chan struct{}, retryNoSubscriber bool, fn func(timeout time.Duration) error) error {
 	timeout := opt.Timeout
 	attempt := 1
 	if opt.IsRecoverable == nil {
@@ -119,6 +140,12 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 		}
 		elapsed := time.Since(start)
 
+		var nse *psrpc.NoSubscriberError
+		isNoSubscriber := errors.As(err, &nse)
+		if isNoSubscriber && !retryNoSubscriber {
+			return err
+		}
+
 		var retry bool
 		var waitTime time.Duration
 		retry, timeout, waitTime = opt.GetRetryParameters(err, attempt)
@@ -129,8 +156,7 @@ func retry(opt RetryOptions, done <-chan struct{}, fn func(timeout time.Duration
 		// The broker reports a request no server is subscribed to at once. Wait
 		// out the wait it cut short, so retries stay paced as they were and a
 		// restarting server still has that long to subscribe.
-		var nse *psrpc.NoSubscriberError
-		if errors.As(err, &nse) {
+		if isNoSubscriber {
 			waitTime = max(waitTime, nse.Wait-elapsed)
 		}
 
@@ -171,7 +197,7 @@ type streamRetryInterceptor struct {
 }
 
 func (s *streamRetryInterceptor) Send(msg proto.Message, opts ...psrpc.StreamOption) (err error) {
-	return retry(s.opt, nil, func(timeout time.Duration) error {
+	return retry(s.opt, nil, true, func(timeout time.Duration) error {
 		nextOpts := opts
 		if timeout > 0 {
 			// options apply in order, so a timeout from the caller wins over the attempt timeout
