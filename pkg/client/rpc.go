@@ -99,6 +99,11 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if deadline, ok := ctx.Deadline(); ok && deadline.Before(expiry) {
 			expiry = deadline
 		}
+		// A queue rpc skips the claim only where the broker reports a request that
+		// nothing received. On other buses the claim is how the caller learns, after
+		// the selection timeout, that no server has the request.
+		noClaim := i.Queue && c.inbox != nil
+
 		req := &internal.Request{
 			RequestId:  requestID,
 			ClientId:   c.ID,
@@ -107,7 +112,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 			Multi:      false,
 			RawRequest: b,
 			Metadata:   metadata.OutgoingContextMetadata(ctx),
-			NoClaim:    i.Queue,
+			NoClaim:    noClaim,
 			// Servers that support it answer on the response channel the client
 			// listens to for this request alone.
 			PerRequestReply: c.inbox != nil,
@@ -116,7 +121,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		// How long the caller would wait on a request that nothing received. The
 		// broker can cut it short.
 		unansweredWait := expiry.Sub(now)
-		if t := o.SelectionOpts.AffinityTimeout; i.RequireClaim && !i.Queue && t > 0 && t < unansweredWait {
+		if t := o.SelectionOpts.AffinityTimeout; i.RequireClaim && !noClaim && t > 0 && t < unansweredWait {
 			unansweredWait = t
 		}
 
@@ -168,12 +173,12 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 
 		var res *internal.Response
 
-		// The queue picked a queue rpc's one server, so the caller just waits for
+		// The queue picked a no_claim rpc's one server, so the caller just waits for
 		// its response. A server predating no_claim bids anyway and is granted
 		// below; an announcement from one reads as a bid, and granting it is
 		// harmless.
 		var bids <-chan *internal.ClaimRequest
-		if i.RequireClaim && i.Queue {
+		if i.RequireClaim && noClaim {
 			bids = claimChan
 		} else if i.RequireClaim {
 			sel, err := selectServerUntil(ctx, claimChan, resChan, o.SelectionOpts, c.closed.Watch())
