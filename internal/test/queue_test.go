@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ import (
 
 // Run on every bus. A queue rpc skips the claim only on a bus that reports a
 // request nothing received (NATS); on the others it is claimed as before.
-func TestQueueRunsWithoutClaim(t *testing.T) {
+func TestQueueSkipsClaimOnlyWithNoSubscriberReports(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus bustest.Connect) {
 		const queued, broadcast = "queued", "broadcast"
 
@@ -214,9 +215,12 @@ func TestQueueSlowHandler(t *testing.T) {
 
 // A queue request that arrives after the selection timeout: the caller gives up
 // and retries, and the server bids on the late original too. Only the retry's
-// bid is granted, so the handler runs once.
+// bid is granted; the server drops the late original's bid at its expiry, so the
+// handler runs once.
 func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 	const selectTimeout = 200 * time.Millisecond
+
+	obs := &recordingObserver{}
 
 	var published atomic.Int32
 	b := delayedRequestBus(func(*internal.Request) time.Duration {
@@ -226,7 +230,8 @@ func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 		return 0
 	})
 
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithClientSelectTimeout(selectTimeout),
@@ -248,8 +253,13 @@ func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, published.Load(), "the caller retries after the selection timeout")
 
-	// let the late original arrive and bid
-	time.Sleep(selectTimeout)
+	// The late original's bid waits for a grant until the request expires.
+	require.Eventually(t, func() bool {
+		_, claims := obs.snapshot()
+		return slices.Contains(claims, psrpc.ClaimTimedOut)
+	}, 2*time.Second, 10*time.Millisecond, "the late original's bid must time out")
+	_, claims := obs.snapshot()
+	require.ElementsMatch(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted, psrpc.ClaimTimedOut}, claims)
 	require.EqualValues(t, 1, calls.Load(), "an ungranted bid must not run the handler")
 }
 
