@@ -211,3 +211,76 @@ func TestRetryWaitsOutUnansweredWait(t *testing.T) {
 		require.Less(t, run(t, psrpc.ErrNoResponse), wait, "only early failures are paced")
 	})
 }
+
+func TestRetryWithoutNoSubscriberRetry(t *testing.T) {
+	const wait = 200 * time.Millisecond
+
+	// handler fails with each of errs in turn, then succeeds
+	handler := func(attempts *int, errs ...error) psrpc.ClientRPCHandler {
+		return func(ctx context.Context, req proto.Message, opts ...psrpc.RequestOption) (proto.Message, error) {
+			*attempts++
+			if *attempts <= len(errs) {
+				return nil, errs[*attempts-1]
+			}
+			return nil, nil
+		}
+	}
+	ctx := WithoutNoSubscriberRetry(context.Background())
+
+	t.Run("no subscriber is returned at once", func(t *testing.T) {
+		var attempts int
+		h := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 3})(psrpc.RPCInfo{},
+			handler(&attempts, psrpc.NewNoSubscriberError(wait)))
+
+		start := time.Now()
+		_, err := h(ctx, nil)
+		var nse *psrpc.NoSubscriberError
+		require.True(t, errors.As(err, &nse))
+		require.Equal(t, 1, attempts)
+		require.Less(t, time.Since(start), wait, "the wait-out must not apply")
+	})
+
+	t.Run("other errors are still retried", func(t *testing.T) {
+		var attempts int
+		h := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 3})(psrpc.RPCInfo{},
+			handler(&attempts, psrpc.ErrRequestTimedOut, psrpc.ErrNoResponse))
+
+		_, err := h(ctx, nil)
+		require.NoError(t, err)
+		require.Equal(t, 3, attempts)
+	})
+
+	t.Run("custom retry parameters", func(t *testing.T) {
+		var attempts int
+		h := NewRPCRetryInterceptor(RetryOptions{
+			GetRetryParameters: func(err error, attempt int) (bool, time.Duration, time.Duration) {
+				return attempt < 3, 0, 0
+			},
+		})(psrpc.RPCInfo{}, handler(&attempts, psrpc.NewNoSubscriberError(wait)))
+
+		_, err := h(ctx, nil)
+		require.Error(t, err)
+		require.Equal(t, 1, attempts)
+	})
+
+	t.Run("nested retry interceptors", func(t *testing.T) {
+		var attempts int
+		inner := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 3})(psrpc.RPCInfo{},
+			handler(&attempts, psrpc.NewNoSubscriberError(wait)))
+		outer := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 3})(psrpc.RPCInfo{}, inner)
+
+		_, err := outer(ctx, nil)
+		require.Error(t, err)
+		require.Equal(t, 1, attempts)
+	})
+
+	t.Run("without the flag no subscriber is retried", func(t *testing.T) {
+		var attempts int
+		h := NewRPCRetryInterceptor(RetryOptions{MaxAttempts: 2})(psrpc.RPCInfo{},
+			handler(&attempts, psrpc.NewNoSubscriberError(wait)))
+
+		_, err := h(context.Background(), nil)
+		require.NoError(t, err)
+		require.Equal(t, 2, attempts)
+	})
+}

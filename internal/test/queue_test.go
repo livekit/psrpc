@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,13 +39,19 @@ import (
 	"github.com/livekit/psrpc/testutils"
 )
 
-// Run on every bus: the property comes from SubscribeQueue, not any one broker.
-func TestQueueRunsWithoutClaim(t *testing.T) {
+// Run on every bus. A queue rpc skips the claim only on a bus that reports a
+// request nothing received (NATS); on the others it is claimed as before.
+func TestQueueSkipsClaimOnlyWithNoSubscriberReports(t *testing.T) {
 	bustest.TestAll(t, func(t *testing.T, newBus bustest.Connect) {
 		const queued, broadcast = "queued", "broadcast"
 
 		obs := &recordingObserver{}
 		b := newBus(t)
+		_, skips := b.(bus.InboxBus)
+		queuedClaim := psrpc.ClaimGranted
+		if skips {
+			queuedClaim = psrpc.ClaimSkipped
+		}
 
 		s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 			psrpc.WithServerObserver(obs))
@@ -75,12 +82,12 @@ func TestQueueRunsWithoutClaim(t *testing.T) {
 		time.Sleep(time.Second)
 
 		_, err = client.RequestSingle[*internal.Response](context.Background(), c, queued, nil, &internal.Request{})
-		require.NoError(t, err, "queue RPC must complete without a claim")
+		require.NoError(t, err)
 
 		received, claims := obs.snapshot()
 		require.Equal(t, 1, received)
-		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped}, claims,
-			"a skipped claim must still be observable")
+		require.Equal(t, []psrpc.ClaimOutcome{queuedClaim}, claims,
+			"a queue rpc skips the claim only where the bus reports unsubscribed requests")
 		require.EqualValues(t, 1, queuedCalls.Load(), "handler must run exactly once")
 
 		_, err = client.RequestSingle[*internal.Response](context.Background(), c, broadcast, nil, &internal.Request{})
@@ -88,10 +95,28 @@ func TestQueueRunsWithoutClaim(t *testing.T) {
 
 		received, claims = obs.snapshot()
 		require.Equal(t, 2, received)
-		require.Equal(t, []psrpc.ClaimOutcome{psrpc.ClaimSkipped, psrpc.ClaimGranted}, claims,
+		require.Equal(t, []psrpc.ClaimOutcome{queuedClaim, psrpc.ClaimGranted}, claims,
 			"broadcast RPC must still claim")
 		require.EqualValues(t, 1, broadcastCalls.Load())
 	})
+}
+
+// With nothing subscribed, a queue rpc on a bus that does not report it fails
+// with ErrNoResponse once the selection timeout passes, not at the request timeout.
+func TestQueueNoSubscriberWithoutReports(t *testing.T) {
+	const selectTimeout = 200 * time.Millisecond
+
+	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, localbus.New(),
+		psrpc.WithClientSelectTimeout(selectTimeout))
+	require.NoError(t, err)
+	t.Cleanup(func() { c.Close() })
+	c.RegisterMethod("queued", false, false, true, true)
+
+	start := time.Now()
+	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
+		&internal.Request{}, psrpc.WithRequestTimeout(5*time.Second))
+	require.ErrorIs(t, err, psrpc.ErrNoResponse)
+	require.Less(t, time.Since(start), time.Second)
 }
 
 // Generated code cannot pair these, but RegisterHandler is exported.
@@ -162,7 +187,8 @@ func grantCounter(grants *atomic.Int32) testutils.TestBusOption {
 }
 
 // A handler slower than the selection timeout but inside the request timeout:
-// the caller waits for it, and has nothing to grant.
+// the server bids before it runs the handler, so the caller grants the bid within
+// the selection timeout and then waits for the response.
 func TestQueueSlowHandler(t *testing.T) {
 	var grants atomic.Int32
 	b := testutils.NewTestBus(localbus.New(), grantCounter(&grants))
@@ -184,14 +210,17 @@ func TestQueueSlowHandler(t *testing.T) {
 
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil, &internal.Request{})
 	require.NoError(t, err)
-	require.Zero(t, grants.Load(), "a server that did not bid needs no grant")
+	require.EqualValues(t, 1, grants.Load(), "on a bus without no-subscriber reports the bid is granted")
 }
 
-// The double dispatch: a caller used to give up on a slow-to-arrive queue request
-// after the selection timeout and retry it, while the server still ran the
-// original. Now the caller waits for the original, and the retry never happens.
+// A queue request that arrives after the selection timeout: the caller gives up
+// and retries, and the server bids on the late original too. Only the retry's
+// bid is granted; the server drops the late original's bid at its expiry, so the
+// handler runs once.
 func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 	const selectTimeout = 200 * time.Millisecond
+
+	obs := &recordingObserver{}
 
 	var published atomic.Int32
 	b := delayedRequestBus(func(*internal.Request) time.Duration {
@@ -201,7 +230,8 @@ func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 		return 0
 	})
 
-	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b)
+	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
+		psrpc.WithServerObserver(obs))
 	t.Cleanup(func() { s.Close(true) })
 	c, err := client.NewRPCClient(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithClientSelectTimeout(selectTimeout),
@@ -221,8 +251,16 @@ func TestQueueDelayedPastSelectionRunsOnce(t *testing.T) {
 	_, err = client.RequestSingle[*internal.Response](context.Background(), c, "queued", nil,
 		&internal.Request{}, psrpc.WithRequestTimeout(time.Second))
 	require.NoError(t, err)
-	require.EqualValues(t, 1, published.Load(), "the caller must not have retried")
-	require.EqualValues(t, 1, calls.Load())
+	require.EqualValues(t, 2, published.Load(), "the caller retries after the selection timeout")
+
+	// The late original's bid waits for a grant until the request expires.
+	require.Eventually(t, func() bool {
+		_, claims := obs.snapshot()
+		return slices.Contains(claims, psrpc.ClaimTimedOut)
+	}, 2*time.Second, 10*time.Millisecond, "the late original's bid must time out")
+	_, claims := obs.snapshot()
+	require.ElementsMatch(t, []psrpc.ClaimOutcome{psrpc.ClaimGranted, psrpc.ClaimTimedOut}, claims)
+	require.EqualValues(t, 1, calls.Load(), "an ungranted bid must not run the handler")
 }
 
 // A caller predating no_claim still needs a bid, and gets one.
@@ -301,10 +339,20 @@ func TestQueueGrantsOlderServersBid(t *testing.T) {
 	require.NoError(t, err, "the bid must be granted")
 }
 
-// Deprecated and ignored: turning it off does not bring the claim back.
+// Deprecated and ignored: turning it off does not bring the claim back for a
+// caller that sends no_claim. The local bus does not report unsubscribed
+// requests, so its caller claims; set no_claim as a NATS caller would.
 func TestServerSkipClaimOptionIgnored(t *testing.T) {
 	obs := &recordingObserver{}
-	b := localbus.New()
+	b := testutils.NewTestBus(localbus.New(),
+		testutils.WithPublishInterceptor(func(next testutils.PublishHandler) testutils.PublishHandler {
+			return func(ctx context.Context, channel testutils.Channel, msg proto.Message) error {
+				if req, ok := msg.(*internal.Request); ok {
+					req.NoClaim = true
+				}
+				return next(ctx, channel, msg)
+			}
+		}))
 
 	s := server.NewRPCServer(&info.ServiceDefinition{Name: "test", ID: rand.NewString()}, b,
 		psrpc.WithServerObserver(obs), psrpc.WithServerSkipClaim(func() bool { return false }))
