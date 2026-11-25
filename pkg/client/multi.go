@@ -129,7 +129,7 @@ func (m *multiRPC[ResponseType]) handleResponses(
 		case res := <-resChan:
 			var v ResponseType
 			var err error
-			if res.Error != "" {
+			if failed(res) {
 				err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 			} else {
 				v, err = bus.DeserializePayload[ResponseType](res.RawResponse)

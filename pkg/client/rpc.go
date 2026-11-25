@@ -221,7 +221,7 @@ func newRPC[ResponseType proto.Message](c *RPCClient, i *info.RequestInfo) psrpc
 		if res.Code == unansweredCode {
 			return nil, psrpc.NewNoSubscriberError(unansweredWait)
 		}
-		if res.Error != "" {
+		if failed(res) {
 			err = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)
 		} else {
 			response, err = bus.DeserializePayload[ResponseType](res.RawResponse)
@@ -316,7 +316,7 @@ func selectServerUntil(
 
 		case res := <-resChan:
 			// An early error may yet be outbid, so it is held back.
-			if res.Error == "" {
+			if !failed(res) {
 				return selection{res: res}, nil
 			}
 			resErr = psrpc.NewErrorFromResponse(res.Code, res.Error, res.ErrorDetails...)

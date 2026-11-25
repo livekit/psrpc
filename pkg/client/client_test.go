@@ -124,3 +124,17 @@ func TestSelectServerStashesBroadcastError(t *testing.T) {
 	require.Equal(t, "3", sel.serverID, "a healthy bid must win over a stashed rejection")
 	require.Nil(t, sel.res)
 }
+
+// A server that sends an error's code with an empty message answered an
+// error: selection must not hand it back as a success.
+func TestSelectServerReadsAnErrorWithoutMessage(t *testing.T) {
+	responses := make(chan *internal.Response, 1)
+	responses <- &internal.Response{RequestId: "1", ServerId: "2", Code: string(psrpc.Unavailable)}
+
+	sel, err := selectServer(context.Background(), make(chan *internal.ClaimRequest, 1), responses,
+		psrpc.SelectionOpts{AcceptFirstAvailable: true, AffinityTimeout: 50 * time.Millisecond})
+	require.Nil(t, sel.res, "an error read as a response")
+	var perr psrpc.Error
+	require.ErrorAs(t, err, &perr)
+	require.Equal(t, psrpc.Unavailable, perr.Code())
+}
