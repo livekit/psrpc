@@ -18,6 +18,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
@@ -84,6 +85,60 @@ func (a *testStreamAdapter) Send(ctx context.Context, msg *internal.Stream) erro
 func (a *testStreamAdapter) Close(streamID string) {
 	a.closeCalls.Inc()
 }
+
+func TestCloseAfterPendingSend(t *testing.T) {
+	a := &blockingStreamAdapter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		sent:    make(chan *internal.Stream, 2),
+	}
+	s := NewStream[*internal.Request, *internal.Response](
+		context.Background(),
+		&info.RequestInfo{},
+		rand.NewStreamID(),
+		psrpc.DefaultClientTimeout,
+		a,
+		nil,
+		make(chan *internal.Response),
+		make(map[string]chan struct{}),
+	)
+
+	sendErr := make(chan error, 1)
+	go func() { sendErr <- s.Send(&internal.Request{}) }()
+	<-a.started
+
+	closeErr := make(chan error, 1)
+	go func() { closeErr <- s.Close(nil) }()
+	require.Eventually(t, func() bool { return s.Err() != nil }, time.Second, time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	close(a.release)
+
+	msg := <-a.sent
+	require.NotNil(t, msg.GetMessage(), "close published before pending message")
+	require.NoError(t, s.HandleStream(&internal.Stream{
+		RequestId: msg.RequestId,
+		Body:      &internal.Stream_Ack{Ack: &internal.StreamAck{}},
+	}))
+	require.NoError(t, <-sendErr)
+	require.NoError(t, <-closeErr)
+	require.NotNil(t, (<-a.sent).GetClose())
+}
+
+type blockingStreamAdapter struct {
+	started, release chan struct{}
+	sent             chan *internal.Stream
+}
+
+func (a *blockingStreamAdapter) Send(ctx context.Context, msg *internal.Stream) error {
+	if msg.GetMessage() != nil {
+		close(a.started)
+		<-a.release
+	}
+	a.sent <- msg
+	return nil
+}
+
+func (a *blockingStreamAdapter) Close(string) {}
 
 func TestClosePanic(t *testing.T) {
 	for i := 0; i < 1000; i++ {
