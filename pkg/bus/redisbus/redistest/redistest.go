@@ -59,6 +59,10 @@ type redisServer struct {
 	addr string
 }
 
+func (s *redisServer) Addr() string {
+	return s.addr
+}
+
 func (s *redisServer) connect() (redis.UniversalClient, error) {
 	rc := redis.NewUniversalClient(&redis.UniversalOptions{Addrs: []string{s.addr}})
 
