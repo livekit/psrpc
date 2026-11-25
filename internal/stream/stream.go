@@ -285,6 +285,9 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 		msg.Code = string(psrpc.Unknown)
 	}
 
+	// The peer drops messages that arrive after the close, so in-flight sends must be acked first.
+	s.pending.Wait()
+
 	now := time.Now()
 	err := s.adapter.Send(context.Background(), &internal.Stream{
 		StreamId:  s.streamID,
@@ -296,7 +299,6 @@ func (s *streamBase[RequestType, ResponseType]) Close(cause error) error {
 		},
 	})
 
-	s.pending.Wait()
 	s.adapter.Close(s.streamID)
 	s.cancel()
 	close(s.recvChan)
