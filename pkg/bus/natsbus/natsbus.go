@@ -142,6 +142,7 @@ func (n *transport) subscribeRouter(ctx context.Context, channel bus.Channel, si
 			t:       n,
 			channel: channel.Server,
 			queue:   queue,
+			next:    map[string]int{},
 		}
 		n.routers[channel.Server] = r
 	} else if r.queue != queue {
@@ -215,6 +216,9 @@ type router struct {
 	t       *transport
 	channel string
 	queue   bool
+	// next is the per-route round-robin cursor for queue delivery,
+	// mirroring redisbus's redisSubList.next.
+	next map[string]int
 }
 
 func (n *router) open(channel string, s *routerSubscription) {
@@ -239,6 +243,7 @@ func (n *router) close(channel string, s *routerSubscription) bool {
 	}
 
 	delete(n.routes, channel)
+	delete(n.next, channel)
 	if len(n.routes) == 0 {
 		n.sub.Unsubscribe()
 		return true
@@ -254,7 +259,23 @@ func (n *router) write(m *nats.Msg) {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	for _, s := range n.routes[channel] {
+	subs := n.routes[channel]
+	if n.queue {
+		// A queue router is one NATS queue member: the broker already picked
+		// this connection among the group, so the message must run on exactly
+		// one local subscriber, not all of them (#175). Round-robin, the same
+		// distribution redisbus's dispatchQueue applies to shared-bus servers.
+		if len(subs) > 0 {
+			i := n.next[channel]
+			if i >= len(subs) {
+				i = 0
+			}
+			subs[i].write(m)
+			n.next[channel] = i + 1
+		}
+		return
+	}
+	for _, s := range subs {
 		s.write(m)
 	}
 }
